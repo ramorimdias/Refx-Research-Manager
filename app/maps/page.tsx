@@ -509,7 +509,7 @@ export default function MapsPage() {
                             </div>
                           </div>
                           <Button variant="outline" size="sm" asChild className="w-full">
-                            <Link href={`/documents/${doc.id}`}>
+                            <Link href={`/documents?id=${doc.id}`}>
                               Open Document
                               <ChevronRight className="ml-2 h-4 w-4" />
                             </Link>

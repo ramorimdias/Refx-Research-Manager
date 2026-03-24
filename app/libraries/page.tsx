@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Plus,
@@ -54,12 +54,19 @@ export default function LibrariesPage() {
     libraries,
     importDocuments,
     isDesktopApp,
+    loadLibraryDocuments,
   } = useAppStore()
   const documents = useFilteredDocuments()
   const [showFilters, setShowFilters] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
 
   const activeLibrary = libraries.find((lib) => lib.id === activeLibraryId)
+
+  useEffect(() => {
+    if (activeLibraryId) {
+      loadLibraryDocuments(activeLibraryId)
+    }
+  }, [activeLibraryId, loadLibraryDocuments])
 
   const handleImport = async () => {
     if (!isDesktopApp || isImporting) return

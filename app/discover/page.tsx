@@ -271,7 +271,7 @@ export default function DiscoverPage() {
               ) : (
                 <div className={viewMode === 'list' ? 'space-y-4' : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'}>
                   {filteredResults.map((doc) => (
-                    <Link key={doc.id} href={`/documents/${doc.id}`}>
+                    <Link key={doc.id} href={`/documents?id=${doc.id}`}>
                       <Card className="hover:border-primary/50 transition-colors h-full">
                         <CardContent className={viewMode === 'list' ? 'p-4' : 'p-4'}>
                           <div className={viewMode === 'list' ? 'flex items-start gap-4' : 'flex flex-col gap-3'}>

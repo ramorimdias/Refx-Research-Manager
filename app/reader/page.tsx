@@ -44,7 +44,7 @@ export default function ReaderIndexPage() {
           </h2>
           <div className="space-y-3">
             {continueReading.map((doc) => (
-              <Link key={doc.id} href={`/reader/${doc.id}`}>
+              <Link key={doc.id} href={`/reader/view?id=${doc.id}`}>
                 <Card className="hover:border-primary/50 transition-colors">
                   <CardContent className="flex items-center gap-4 p-4">
                     <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-primary/10">
@@ -82,7 +82,7 @@ export default function ReaderIndexPage() {
         </h2>
         <div className="grid gap-3 sm:grid-cols-2">
           {recentDocs.map((doc) => (
-            <Link key={doc.id} href={`/reader/${doc.id}`}>
+            <Link key={doc.id} href={`/reader/view?id=${doc.id}`}>
               <Card className="hover:border-primary/50 transition-colors h-full">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
