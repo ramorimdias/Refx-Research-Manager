@@ -36,7 +36,7 @@ export function DocumentCard({ document: doc, variant = 'grid' }: DocumentCardPr
 
   if (variant === 'list') {
     return (
-      <Link href={`/documents/${doc.id}`}>
+      <Link href={`/documents?id=${doc.id}`}>
         <Card className="group hover:border-primary/50 transition-colors">
           <CardContent className="flex items-center gap-4 p-4">
             <button
@@ -119,13 +119,13 @@ export function DocumentCard({ document: doc, variant = 'grid' }: DocumentCardPr
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem asChild>
-                  <Link href={`/reader/${doc.id}`}>
+                  <Link href={`/reader/view?id=${doc.id}`}>
                     <BookOpen className="mr-2 h-4 w-4" />
                     Open in Reader
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href={`/documents/${doc.id}`}>
+                  <Link href={`/documents?id=${doc.id}`}>
                     <Edit className="mr-2 h-4 w-4" />
                     Edit Details
                   </Link>
@@ -146,7 +146,7 @@ export function DocumentCard({ document: doc, variant = 'grid' }: DocumentCardPr
           </div>
         </div>
 
-        <Link href={`/documents/${doc.id}`} className="block">
+        <Link href={`/documents?id=${doc.id}`} className="block">
           <h3 className="font-medium line-clamp-2 mb-1 group-hover:text-primary transition-colors">
             {doc.title}
           </h3>

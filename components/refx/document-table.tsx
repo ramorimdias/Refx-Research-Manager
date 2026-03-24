@@ -113,7 +113,7 @@ export function DocumentTable({ documents }: DocumentTableProps) {
               </TableCell>
               <TableCell>
                 <Link
-                  href={`/documents/${doc.id}`}
+                  href={`/documents?id=${doc.id}`}
                   className="group/link flex items-start gap-2"
                 >
                   <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -184,13 +184,13 @@ export function DocumentTable({ documents }: DocumentTableProps) {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem asChild>
-                      <Link href={`/reader/${doc.id}`}>
+                      <Link href={`/reader/view?id=${doc.id}`}>
                         <FileText className="mr-2 h-4 w-4" />
                         Open in Reader
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                      <Link href={`/documents/${doc.id}`}>
+                      <Link href={`/documents?id=${doc.id}`}>
                         <Edit className="mr-2 h-4 w-4" />
                         Edit Details
                       </Link>

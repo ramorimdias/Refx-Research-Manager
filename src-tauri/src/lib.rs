@@ -1,5 +1,3 @@
-use tauri::Manager;
-
 mod commands;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -13,13 +11,28 @@ pub fn run() {
             commands::get_app_data_dir,
             commands::ensure_app_directories,
             commands::generate_document_id,
+            commands::initialize_database,
+            commands::list_libraries,
+            commands::create_library,
+            commands::list_documents_by_library,
+            commands::get_document_by_id,
+            commands::create_document,
+            commands::update_document_metadata,
+            commands::delete_document,
+            commands::add_tag_to_document,
+            commands::remove_tag_from_document,
+            commands::list_annotations_for_document,
+            commands::create_note,
+            commands::list_notes,
         ])
         .setup(|app| {
-            // Ensure app directories exist on startup
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = commands::setup_app_directories(&app_handle).await {
                     eprintln!("Failed to setup app directories: {}", e);
+                }
+                if let Err(e) = commands::initialize_database(app_handle) {
+                    eprintln!("Failed to initialize database: {}", e);
                 }
             });
             Ok(())

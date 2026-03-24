@@ -186,7 +186,7 @@ export function CommandBar() {
               onSelect={() =>
                 runCommand(() => {
                   setActiveDocument(doc.id)
-                  router.push(`/documents/${doc.id}`)
+                  router.push(`/documents?id=${doc.id}`)
                 })
               }
             >

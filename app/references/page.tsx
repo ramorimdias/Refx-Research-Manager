@@ -219,7 +219,7 @@ export default function ReferencesPage() {
                         <div className="flex items-center gap-2">
                           {doc && (
                             <Link
-                              href={`/documents/${doc.id}`}
+                              href={`/documents?id=${doc.id}`}
                               className="shrink-0"
                               onClick={(e) => e.stopPropagation()}
                             >
