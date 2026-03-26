@@ -17,10 +17,12 @@ export interface Library {
 export type ReadingStage = 'unread' | 'reading' | 'skimmed' | 'read' | 'archived'
 export type OcrStatus = 'pending' | 'processing' | 'complete' | 'failed' | 'not_needed'
 export type MetadataStatus = 'incomplete' | 'partial' | 'complete' | 'verified'
+export type DocumentType = 'pdf' | 'physical_book'
 
 export interface Document {
   id: string
   libraryId: string
+  documentType: DocumentType
   title: string
   subtitle?: string
   abstract?: string
@@ -28,6 +30,8 @@ export interface Document {
   year?: number
   venue?: string
   doi?: string
+  isbn?: string
+  publisher?: string
   url?: string
   citationKey: string
   filePath?: string
@@ -151,6 +155,24 @@ export interface DocumentSort {
 }
 
 export type ViewMode = 'table' | 'grid' | 'list'
+
+export interface KeywordGroup {
+  id: string
+  operator: 'AND' | 'OR'
+  keywords: string[]
+}
+
+export interface PersistentSearchState {
+  query: string
+  keywords: string[]
+  keywordGroups: KeywordGroup[]
+  groupJoinOperator: 'AND' | 'OR'
+  selectedLibraryId: string | 'all'
+  readingStage: ReadingStage | 'all'
+  metadataStatus: MetadataStatus | 'all'
+  favoriteOnly: boolean
+  flexibility: number
+}
 
 // Graph/Map Types
 export type GraphNodeType = 'document' | 'author' | 'tag' | 'topic'

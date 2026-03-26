@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/command'
 import { useAppStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
+import { loadAppSettings, saveAppSettings } from '@/lib/app-settings'
 
 export function CommandBar() {
   const router = useRouter()
@@ -39,7 +40,7 @@ export function CommandBar() {
     importDocuments,
     isDesktopApp,
   } = useAppStore()
-  const { setTheme, theme } = useTheme()
+  const { setTheme, resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   const [isImporting, setIsImporting] = useState(false)
 
@@ -72,6 +73,17 @@ export function CommandBar() {
     } finally {
       setIsImporting(false)
     }
+  }
+
+  const toggleTheme = async () => {
+    const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark'
+    setTheme(nextTheme)
+
+    const settings = await loadAppSettings(isDesktopApp)
+    await saveAppSettings(isDesktopApp, {
+      ...settings,
+      theme: nextTheme,
+    })
   }
 
   return (
@@ -119,8 +131,8 @@ export function CommandBar() {
             <span>{isImporting ? 'Importing documents...' : 'Import documents'}</span>
           </CommandItem>
           {mounted && (
-            <CommandItem onSelect={() => runCommand(() => setTheme(theme === 'dark' ? 'light' : 'dark'))}>
-              {theme === 'dark' ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
+            <CommandItem onSelect={() => runCommand(() => void toggleTheme())}>
+              {resolvedTheme === 'dark' ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
               <span>Toggle theme</span>
             </CommandItem>
           )}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { useAppStore } from '@/lib/store'
 import { Loader2 } from 'lucide-react'
 import { loadAppSettings } from '@/lib/app-settings'
@@ -48,9 +49,13 @@ export function AppProvider({ children }: AppProviderProps) {
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-lg">
-              R
-            </div>
+            <Image
+              src="/icon.svg"
+              alt="Refx"
+              width={40}
+              height={40}
+              className="h-10 w-10 rounded-xl"
+            />
             <span className="text-2xl font-semibold">Refx</span>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -61,17 +66,5 @@ export function AppProvider({ children }: AppProviderProps) {
       </div>
     )
   }
-
-  return (
-    <>
-      {isDesktopApp && (
-        <div className="fixed bottom-4 right-4 z-50">
-          <div className="rounded-full bg-primary/10 px-3 py-1 text-xs text-primary">
-            Desktop Mode
-          </div>
-        </div>
-      )}
-      {children}
-    </>
-  )
+  return children
 }

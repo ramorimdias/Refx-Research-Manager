@@ -6,26 +6,26 @@
 
 :root {
   /* Refx Research Theme - Light Mode */
-  /* Elegant neutral palette for serious research work */
-  --background: oklch(0.99 0 0);
-  --foreground: oklch(0.15 0.01 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0.01 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0.01 260);
-  --primary: oklch(0.35 0.08 260);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.96 0.005 260);
-  --secondary-foreground: oklch(0.25 0.01 260);
-  --muted: oklch(0.96 0.005 260);
-  --muted-foreground: oklch(0.50 0.01 260);
-  --accent: oklch(0.55 0.15 230);
-  --accent-foreground: oklch(0.99 0 0);
+  /* Warm beige palette for focused daytime reading */
+  --background: oklch(0.972 0.012 85);
+  --foreground: oklch(0.24 0.02 60);
+  --card: oklch(0.988 0.009 80);
+  --card-foreground: oklch(0.24 0.02 60);
+  --popover: oklch(0.992 0.008 78);
+  --popover-foreground: oklch(0.24 0.02 60);
+  --primary: oklch(0.43 0.08 240);
+  --primary-foreground: oklch(0.985 0.005 85);
+  --secondary: oklch(0.94 0.012 82);
+  --secondary-foreground: oklch(0.31 0.02 60);
+  --muted: oklch(0.945 0.01 82);
+  --muted-foreground: oklch(0.51 0.015 65);
+  --accent: oklch(0.66 0.11 210);
+  --accent-foreground: oklch(0.985 0.005 85);
   --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.91 0.005 260);
-  --input: oklch(0.91 0.005 260);
-  --ring: oklch(0.35 0.08 260);
+  --destructive-foreground: oklch(0.98 0.005 85);
+  --border: oklch(0.88 0.012 75);
+  --input: oklch(0.89 0.011 75);
+  --ring: oklch(0.43 0.08 240);
   
   /* Charts - research-appropriate colors */
   --chart-1: oklch(0.55 0.15 230);
@@ -36,23 +36,24 @@
   
   /* Custom tokens for Refx */
   --success: oklch(0.55 0.15 160);
-  --success-foreground: oklch(0.99 0 0);
+  --success-foreground: oklch(0.98 0.005 85);
   --warning: oklch(0.70 0.15 85);
   --warning-foreground: oklch(0.20 0.01 85);
   --info: oklch(0.55 0.15 230);
-  --info-foreground: oklch(0.99 0 0);
+  --info-foreground: oklch(0.98 0.005 85);
   
   --radius: 0.5rem;
   
   /* Sidebar */
-  --sidebar: oklch(0.98 0.003 260);
-  --sidebar-foreground: oklch(0.15 0.01 260);
-  --sidebar-primary: oklch(0.35 0.08 260);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.94 0.005 260);
-  --sidebar-accent-foreground: oklch(0.15 0.01 260);
-  --sidebar-border: oklch(0.91 0.005 260);
-  --sidebar-ring: oklch(0.35 0.08 260);
+  --sidebar: oklch(0.963 0.011 82);
+  --sidebar-foreground: oklch(0.24 0.02 60);
+  --sidebar-primary: oklch(0.43 0.08 240);
+  --sidebar-primary-foreground: oklch(0.985 0.005 85);
+  --sidebar-accent: oklch(0.93 0.013 78);
+  --sidebar-accent-foreground: oklch(0.24 0.02 60);
+  --sidebar-border: oklch(0.88 0.012 75);
+  --sidebar-ring: oklch(0.43 0.08 240);
+  color-scheme: light;
 }
 
 .dark {
@@ -101,6 +102,7 @@
   --sidebar-accent-foreground: oklch(0.93 0.005 260);
   --sidebar-border: oklch(0.25 0.01 260);
   --sidebar-ring: oklch(0.70 0.12 230);
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -151,6 +153,10 @@
 }
 
 @layer base {
+  html {
+    background: var(--background);
+  }
+
   * {
     @apply border-border outline-ring/50;
   }

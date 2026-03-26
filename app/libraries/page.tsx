@@ -1,7 +1,6 @@
 'use client'
 
-import { DragEvent, useEffect, useState } from 'react'
-import Link from 'next/link'
+import { DragEvent, useEffect, useRef, useState } from 'react'
 import {
   Search,
   Grid3X3,
@@ -10,10 +9,17 @@ import {
   SortAsc,
   Upload,
   FolderOpen,
+  Pencil,
+  Plus,
+  Trash2,
+  FileUp,
+  Filter,
+  PanelLeftClose,
+  PanelLeftOpen,
+  BookMarked,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -23,11 +29,77 @@ import {
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { useAppStore, useFilteredDocuments } from '@/lib/store'
 import { DocumentTable } from '@/components/refx/document-table'
 import { FilterPanel } from '@/components/refx/filter-panel'
 import { DocumentCard } from '@/components/refx/document-card'
 import type { SortField, ViewMode } from '@/lib/types'
+import { Spinner } from '@/components/ui/spinner'
+import { cn } from '@/lib/utils'
+import { getCurrentWindow, isTauri } from '@/lib/tauri/client'
+import * as repo from '@/lib/repositories/local-db'
+
+type LibraryFormState = {
+  name: string
+  description: string
+  color: string
+}
+
+type PhysicalBookFormState = {
+  title: string
+  authors: string
+  year: string
+  publisher: string
+  isbn: string
+  description: string
+}
+
+const LIBRARY_COLOR_OPTIONS = [
+  '#3b82f6',
+  '#2563eb',
+  '#0f766e',
+  '#10b981',
+  '#65a30d',
+  '#f59e0b',
+  '#f97316',
+  '#ef4444',
+  '#db2777',
+  '#7c3aed',
+] as const
+
+const DEFAULT_LIBRARY_FORM: LibraryFormState = {
+  name: '',
+  description: '',
+  color: LIBRARY_COLOR_OPTIONS[0],
+}
+
+const DEFAULT_PHYSICAL_BOOK_FORM: PhysicalBookFormState = {
+  title: '',
+  authors: '',
+  year: '',
+  publisher: '',
+  isbn: '',
+  description: '',
+}
 
 export default function LibrariesPage() {
   const {
@@ -43,25 +115,101 @@ export default function LibrariesPage() {
     importDocuments,
     isDesktopApp,
     loadLibraryDocuments,
+    createLibrary,
+    updateLibrary,
+    deleteLibrary,
+    refreshData,
   } = useAppStore()
   const documents = useFilteredDocuments()
-  const [showFilters, setShowFilters] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
+  const [filtersCollapsed, setFiltersCollapsed] = useState(true)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
+  const [isPhysicalBookDialogOpen, setIsPhysicalBookDialogOpen] = useState(false)
+  const [isSavingLibrary, setIsSavingLibrary] = useState(false)
+  const [libraryForm, setLibraryForm] = useState<LibraryFormState>(DEFAULT_LIBRARY_FORM)
+  const [physicalBookForm, setPhysicalBookForm] = useState<PhysicalBookFormState>(DEFAULT_PHYSICAL_BOOK_FORM)
+  const [deleteLibraryConfirmation, setDeleteLibraryConfirmation] = useState('')
+  const [pendingImportCount, setPendingImportCount] = useState<number | null>(null)
+  const dragDepthRef = useRef(0)
 
   const activeLibrary = libraries.find((lib) => lib.id === activeLibraryId)
+  const activeFilterCount = [
+    filters.tags?.length || 0,
+    filters.readingStage?.length || 0,
+    filters.metadataStatus?.length || 0,
+    filters.favorite ? 1 : 0,
+    filters.hasAnnotations ? 1 : 0,
+  ].reduce((sum, count) => sum + count, 0)
 
   useEffect(() => {
     void loadLibraryDocuments(activeLibraryId)
   }, [activeLibraryId, loadLibraryDocuments])
 
+  useEffect(() => {
+    const stored = window.sessionStorage.getItem('refx-libraries-filters-collapsed')
+    if (stored !== null) {
+      setFiltersCollapsed(stored === 'true')
+    }
+  }, [])
+
+  useEffect(() => {
+    window.sessionStorage.setItem('refx-libraries-filters-collapsed', String(filtersCollapsed))
+  }, [filtersCollapsed])
+
+  useEffect(() => {
+    if (!isTauri()) return
+
+    let disposed = false
+    let unlisten: (() => void) | undefined
+
+    void getCurrentWindow()
+      .onDragDropEvent((event) => {
+        if (disposed) return
+
+        if (event.payload.type === 'enter' || event.payload.type === 'over') {
+          setIsDragActive(true)
+          return
+        }
+
+        if (event.payload.type === 'leave') {
+          setIsDragActive(false)
+          return
+        }
+
+        if (event.payload.type === 'drop') {
+          setIsDragActive(false)
+          const droppedPaths = event.payload.paths.filter((value) => value.toLowerCase().endsWith('.pdf'))
+          if (droppedPaths.length > 0) {
+            void handleImport(droppedPaths)
+          }
+        }
+      })
+      .then((dispose) => {
+        if (disposed) {
+          dispose()
+          return
+        }
+        unlisten = dispose
+      })
+
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [isImporting, isDesktopApp, activeLibraryId])
+
   const handleImport = async (paths?: string[]) => {
     if (!isDesktopApp || isImporting) return
     setIsImporting(true)
+    setPendingImportCount(paths?.length ?? null)
     try {
       await importDocuments(paths)
     } finally {
       setIsImporting(false)
+      setPendingImportCount(null)
     }
   }
 
@@ -72,183 +220,611 @@ export default function LibrariesPage() {
       .filter((value): value is string => Boolean(value && value.toLowerCase().endsWith('.pdf')))
   }
 
+  const resetLibraryForm = () => {
+    setLibraryForm(DEFAULT_LIBRARY_FORM)
+  }
+
+  const resetPhysicalBookForm = () => {
+    setPhysicalBookForm(DEFAULT_PHYSICAL_BOOK_FORM)
+  }
+
+  const openCreateDialog = () => {
+    resetLibraryForm()
+    setIsCreateDialogOpen(true)
+  }
+
+  const openPhysicalBookDialog = () => {
+    resetPhysicalBookForm()
+    setIsPhysicalBookDialogOpen(true)
+  }
+
+  const openRenameDialog = () => {
+    if (!activeLibrary) return
+    setLibraryForm({
+      name: activeLibrary.name,
+      description: activeLibrary.description,
+      color: activeLibrary.color,
+    })
+    setIsRenameDialogOpen(true)
+  }
+
+  const handleCreateLibrary = async () => {
+    const name = libraryForm.name.trim()
+    if (!name) return
+
+    setIsSavingLibrary(true)
+    try {
+      await createLibrary({
+        name,
+        description: libraryForm.description.trim(),
+        color: libraryForm.color,
+      })
+      setIsCreateDialogOpen(false)
+      resetLibraryForm()
+    } finally {
+      setIsSavingLibrary(false)
+    }
+  }
+
+  const handleRenameLibrary = async () => {
+    if (!activeLibrary) return
+    const name = libraryForm.name.trim()
+    if (!name) return
+
+    setIsSavingLibrary(true)
+    try {
+      await updateLibrary(activeLibrary.id, {
+        name,
+        description: libraryForm.description.trim(),
+        color: libraryForm.color,
+      })
+      setIsRenameDialogOpen(false)
+      resetLibraryForm()
+    } finally {
+      setIsSavingLibrary(false)
+    }
+  }
+
+  const handleDeleteLibrary = async () => {
+    if (!activeLibrary) return
+
+    setIsSavingLibrary(true)
+    try {
+      await deleteLibrary(activeLibrary.id)
+      setDeleteLibraryConfirmation('')
+      setIsRenameDialogOpen(false)
+      setIsDeleteDialogOpen(false)
+    } finally {
+      setIsSavingLibrary(false)
+    }
+  }
+
+  const handleCreatePhysicalBook = async () => {
+    const title = physicalBookForm.title.trim()
+    const libraryId = activeLibraryId ?? libraries[0]?.id
+    if (!title || !libraryId) return
+
+    setIsSavingLibrary(true)
+    try {
+      await repo.createDocument({
+        libraryId,
+        documentType: 'physical_book',
+        title,
+        authors: JSON.stringify(
+          physicalBookForm.authors
+            .split(',')
+            .map((author) => author.trim())
+            .filter(Boolean),
+        ),
+        year: physicalBookForm.year ? Number(physicalBookForm.year) : undefined,
+        publisher: physicalBookForm.publisher.trim() || undefined,
+        isbn: physicalBookForm.isbn.trim() || undefined,
+        abstractText: physicalBookForm.description.trim() || undefined,
+      })
+      await refreshData()
+      setIsPhysicalBookDialogOpen(false)
+      resetPhysicalBookForm()
+    } finally {
+      setIsSavingLibrary(false)
+    }
+  }
+
   return (
-    <div
-      className="flex h-full"
-      onDragEnter={(event) => {
-        event.preventDefault()
-        if (isDesktopApp) setIsDragActive(true)
-      }}
-      onDragOver={(event) => {
-        event.preventDefault()
-        if (isDesktopApp) setIsDragActive(true)
-      }}
-      onDragLeave={(event) => {
-        event.preventDefault()
-        if (event.currentTarget === event.target) {
+    <>
+      <div
+        className="flex h-full"
+        onDragEnter={(event) => {
+          if (isTauri()) return
+          event.preventDefault()
+          if (!isDesktopApp) return
+          dragDepthRef.current += 1
+          setIsDragActive(true)
+        }}
+        onDragOver={(event) => {
+          if (isTauri()) return
+          event.preventDefault()
+          if (!isDesktopApp) return
+          event.dataTransfer.dropEffect = 'copy'
+          setIsDragActive(true)
+        }}
+        onDragLeave={(event) => {
+          if (isTauri()) return
+          event.preventDefault()
+          if (!isDesktopApp) return
+          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+          if (dragDepthRef.current === 0 || event.currentTarget === event.target) {
+            setIsDragActive(false)
+          }
+        }}
+        onDrop={(event) => {
+          if (isTauri()) return
+          event.preventDefault()
+          dragDepthRef.current = 0
           setIsDragActive(false)
-        }
-      }}
-      onDrop={(event) => {
-        event.preventDefault()
-        setIsDragActive(false)
-        const droppedPaths = getDroppedPaths(event)
-        if (droppedPaths.length > 0) {
-          void handleImport(droppedPaths)
-        }
-      }}
-    >
-      {/* Filter Panel */}
-      {showFilters && <FilterPanel />}
+          const droppedPaths = getDroppedPaths(event)
+          if (droppedPaths.length > 0) {
+            void handleImport(droppedPaths)
+          }
+        }}
+      >
+        {!filtersCollapsed && <FilterPanel />}
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between gap-4 border-b border-border p-4">
-          <div className="flex items-center gap-4 flex-1">
-            {/* Library Selector */}
-            <Select
-              value={activeLibraryId || 'all'}
-              onValueChange={(val) => setActiveLibrary(val === 'all' ? null : val)}
-            >
-              <SelectTrigger className="w-64">
-                <SelectValue placeholder="All Libraries" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Libraries</SelectItem>
-                {libraries.map((lib) => (
-                  <SelectItem key={lib.id} value={lib.id}>
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: lib.color }}
-                      />
-                      {lib.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex items-center justify-between gap-4 border-b border-border p-4">
+            <div className="flex items-center gap-4 flex-1">
+              <Button variant="outline" size="sm" onClick={() => setFiltersCollapsed((current) => !current)}>
+                {filtersCollapsed ? <PanelLeftOpen className="mr-2 h-4 w-4" /> : <PanelLeftClose className="mr-2 h-4 w-4" />}
+                Filters
+                {activeFilterCount > 0 && (
+                  <Badge variant="secondary" className="ml-2 h-5 px-1.5">
+                    {activeFilterCount}
+                  </Badge>
+                )}
+              </Button>
 
-            {/* Search */}
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search documents..."
-                className="pl-9"
-                value={filters.search || ''}
-                onChange={(e) => setFilters({ ...filters, search: e.target.value || undefined })}
-              />
-            </div>
-          </div>
+              <Select
+                value={activeLibraryId || 'all'}
+                onValueChange={(val) => setActiveLibrary(val === 'all' ? null : val)}
+              >
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="All Libraries" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Libraries</SelectItem>
+                  {libraries.map((lib) => (
+                    <SelectItem key={lib.id} value={lib.id}>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="h-2 w-2 rounded-full"
+                          style={{ backgroundColor: lib.color }}
+                        />
+                        {lib.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-          <div className="flex items-center gap-2">
-            {/* Sort */}
-            <Select
-              value={sort.field}
-              onValueChange={(val) => setSort({ ...sort, field: val as SortField })}
-            >
-              <SelectTrigger className="w-36">
-                <SortAsc className="mr-2 h-4 w-4" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="addedAt">Date Added</SelectItem>
-                <SelectItem value="lastOpenedAt">Last Opened</SelectItem>
-                <SelectItem value="title">Title</SelectItem>
-                <SelectItem value="authors">Authors</SelectItem>
-                <SelectItem value="year">Year</SelectItem>
-                <SelectItem value="rating">Rating</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* View Toggle */}
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
-              <TabsList>
-                <TabsTrigger value="table">
-                  <Table2 className="h-4 w-4" />
-                </TabsTrigger>
-                <TabsTrigger value="grid">
-                  <Grid3X3 className="h-4 w-4" />
-                </TabsTrigger>
-                <TabsTrigger value="list">
-                  <List className="h-4 w-4" />
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-
-            {/* Actions */}
-            <Button variant="outline" size="sm" onClick={handleImport} disabled={!isDesktopApp || isImporting}>
-              <Upload className="mr-2 h-4 w-4" />
-              {isImporting ? 'Importing...' : 'Import'}
-            </Button>
-          </div>
-        </div>
-
-        {/* Library Header (when library selected) */}
-        {activeLibrary && (
-          <div className="flex items-center justify-between border-b border-border px-4 py-3 bg-muted/30">
-            <div className="flex items-center gap-3">
-              <div
-                className="h-4 w-4 rounded"
-                style={{ backgroundColor: activeLibrary.color }}
-              />
-              <div>
-                <h2 className="font-semibold">{activeLibrary.name}</h2>
-                <p className="text-sm text-muted-foreground">{activeLibrary.description}</p>
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search documents..."
+                  className="pl-9"
+                  value={filters.search || ''}
+                  onChange={(e) => setFilters({ ...filters, search: e.target.value || undefined })}
+                />
               </div>
             </div>
+
             <div className="flex items-center gap-2">
-              <Badge variant="secondary">{documents.length} documents</Badge>
+              <Button variant="outline" size="sm" onClick={openCreateDialog}>
+                <Plus className="mr-2 h-4 w-4" />
+                New Library
+              </Button>
+              <Button variant="outline" size="sm" onClick={openPhysicalBookDialog}>
+                <BookMarked className="mr-2 h-4 w-4" />
+                Register Book
+              </Button>
+
+              <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
+                <TabsList>
+                  <TabsTrigger value="table">
+                    <Table2 className="h-4 w-4" />
+                  </TabsTrigger>
+                  <TabsTrigger value="grid">
+                    <Grid3X3 className="h-4 w-4" />
+                  </TabsTrigger>
+                  <TabsTrigger value="list">
+                    <List className="h-4 w-4" />
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <Button variant="outline" size="sm" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
+                <Upload className="mr-2 h-4 w-4" />
+                {isImporting ? 'Importing...' : 'Import'}
+              </Button>
             </div>
           </div>
-        )}
 
-        {/* Documents */}
-        <div className="relative flex-1 overflow-auto p-4">
-          {isDragActive && (
-            <div className="pointer-events-none absolute inset-4 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-primary/5">
-              <div className="text-center">
-                <p className="font-medium">Drop PDFs to import into this library</p>
-                <p className="text-sm text-muted-foreground">Files will be added locally and indexed for search.</p>
+          {filtersCollapsed && activeFilterCount > 0 && (
+            <div className="border-b border-border bg-muted/20 px-4 py-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Filter className="h-4 w-4" />
+                <span>{activeFilterCount} active filter{activeFilterCount > 1 ? 's' : ''}</span>
               </div>
             </div>
           )}
-          {documents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="mb-4 rounded-full bg-muted p-4">
-                <FolderOpen className="h-8 w-8 text-muted-foreground" />
+
+          {activeLibrary && (
+            <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className="h-4 w-4 rounded"
+                  style={{ backgroundColor: activeLibrary.color }}
+                />
+                <div>
+                  <h2 className="font-semibold">{activeLibrary.name}</h2>
+                  <p className="text-sm text-muted-foreground">{activeLibrary.description || 'Local library'}</p>
+                </div>
               </div>
-              <h3 className="mb-2 text-lg font-semibold">No documents found</h3>
-              <p className="mb-6 max-w-sm text-sm text-muted-foreground">
-                {filters.search || Object.keys(filters).length > 1
-                  ? 'Try adjusting your filters or search query.'
-                  : 'Get started by importing PDFs or adding documents manually.'}
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={handleImport} disabled={!isDesktopApp || isImporting}>
-                  <Upload className="mr-2 h-4 w-4" />
-                  {isImporting ? 'Importing PDFs...' : 'Import PDFs'}
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{documents.length} documents</Badge>
+                <Select
+                  value={sort.field}
+                  onValueChange={(val) => setSort({ ...sort, field: val as SortField })}
+                >
+                  <SelectTrigger className="h-9 w-36">
+                    <SortAsc className="mr-2 h-4 w-4" />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="addedAt">Date Added</SelectItem>
+                    <SelectItem value="lastOpenedAt">Last Opened</SelectItem>
+                    <SelectItem value="title">Title</SelectItem>
+                    <SelectItem value="authors">Authors</SelectItem>
+                    <SelectItem value="year">Year</SelectItem>
+                    <SelectItem value="rating">Rating</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={openRenameDialog}>
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit
                 </Button>
               </div>
             </div>
-          ) : viewMode === 'table' ? (
-            <DocumentTable documents={documents} />
-          ) : viewMode === 'grid' ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {documents.map((doc) => (
-                <DocumentCard key={doc.id} document={doc} />
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {documents.map((doc) => (
-                <DocumentCard key={doc.id} document={doc} variant="list" />
-              ))}
-            </div>
           )}
+
+          <div
+            className={cn(
+              'relative flex-1 overflow-auto p-4 transition-colors',
+              (isDragActive || isImporting) && 'bg-muted/20',
+            )}
+          >
+            {isDragActive && (
+              <div className="pointer-events-none absolute inset-4 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/10 shadow-[0_0_0_9999px_rgba(15,23,42,0.12)] backdrop-blur-[1px]">
+                <div className="rounded-2xl border border-primary/30 bg-background/95 px-8 py-10 text-center shadow-xl">
+                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/12 text-primary">
+                    <FileUp className="h-7 w-7" />
+                  </div>
+                  <p className="text-base font-semibold">Drop PDFs to import into this library</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Release to copy the files into the local Refx library storage.
+                  </p>
+                </div>
+              </div>
+            )}
+            {isImporting && (
+              <div className="absolute inset-4 z-10 flex items-start justify-center">
+                <div className="flex items-center gap-3 rounded-full border bg-background/95 px-4 py-2 shadow-lg">
+                  <Spinner className="size-4" />
+                  <div className="text-sm">
+                    <span className="font-medium">Importing documents</span>
+                    <span className="text-muted-foreground">
+                      {pendingImportCount ? ` (${pendingImportCount})` : ''} and copying them to local storage...
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {documents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="mb-4 rounded-full bg-muted p-4">
+                  <FolderOpen className="h-8 w-8 text-muted-foreground" />
+                </div>
+                <h3 className="mb-2 text-lg font-semibold">No documents found</h3>
+                <p className="mb-6 max-w-sm text-sm text-muted-foreground">
+                  {filters.search || Object.keys(filters).length > 1
+                    ? 'Try adjusting your filters or search query.'
+                    : 'Get started by importing PDFs or adding documents manually.'}
+                </p>
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    {isImporting ? 'Importing PDFs...' : 'Import PDFs'}
+                  </Button>
+                </div>
+              </div>
+            ) : viewMode === 'table' ? (
+              <div className={cn('transition-opacity', isImporting && 'opacity-60')}>
+                <DocumentTable documents={documents} />
+              </div>
+            ) : viewMode === 'grid' ? (
+              <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', isImporting && 'opacity-60')}>
+                {documents.map((doc) => (
+                  <DocumentCard key={doc.id} document={doc} />
+                ))}
+              </div>
+            ) : (
+              <div className={cn('space-y-2', isImporting && 'opacity-60')}>
+                {documents.map((doc) => (
+                  <DocumentCard key={doc.id} document={doc} variant="list" />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      <Dialog
+        open={isPhysicalBookDialogOpen}
+        onOpenChange={(open) => {
+          setIsPhysicalBookDialogOpen(open)
+          if (!open) resetPhysicalBookForm()
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Register Physical Book</DialogTitle>
+            <DialogDescription>Add a non-PDF book to this library so you can capture reading notes by page or chapter.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="physical-book-title">Title</Label>
+              <Input
+                id="physical-book-title"
+                value={physicalBookForm.title}
+                onChange={(event) => setPhysicalBookForm((state) => ({ ...state, title: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="physical-book-authors">Authors</Label>
+              <Input
+                id="physical-book-authors"
+                placeholder="Comma-separated author names"
+                value={physicalBookForm.authors}
+                onChange={(event) => setPhysicalBookForm((state) => ({ ...state, authors: event.target.value }))}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="physical-book-year">Year</Label>
+                <Input
+                  id="physical-book-year"
+                  value={physicalBookForm.year}
+                  onChange={(event) => setPhysicalBookForm((state) => ({ ...state, year: event.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="physical-book-isbn">ISBN</Label>
+                <Input
+                  id="physical-book-isbn"
+                  value={physicalBookForm.isbn}
+                  onChange={(event) => setPhysicalBookForm((state) => ({ ...state, isbn: event.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="physical-book-publisher">Publisher</Label>
+              <Input
+                id="physical-book-publisher"
+                value={physicalBookForm.publisher}
+                onChange={(event) => setPhysicalBookForm((state) => ({ ...state, publisher: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="physical-book-description">Description</Label>
+              <Input
+                id="physical-book-description"
+                value={physicalBookForm.description}
+                onChange={(event) => setPhysicalBookForm((state) => ({ ...state, description: event.target.value }))}
+                placeholder="Optional notes or summary"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPhysicalBookDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleCreatePhysicalBook()} disabled={!physicalBookForm.title.trim() || isSavingLibrary}>
+              {isSavingLibrary ? 'Registering...' : 'Register Book'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCreateDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateDialogOpen(open)
+          if (!open) resetLibraryForm()
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Library</DialogTitle>
+            <DialogDescription>Add a new local library for organizing your documents.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="library-name">Name</Label>
+              <Input
+                id="library-name"
+                value={libraryForm.name}
+                onChange={(event) => setLibraryForm((state) => ({ ...state, name: event.target.value }))}
+                placeholder="My Papers"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="library-description">Description</Label>
+              <Input
+                id="library-description"
+                value={libraryForm.description}
+                onChange={(event) => setLibraryForm((state) => ({ ...state, description: event.target.value }))}
+                placeholder="Optional description"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="library-color">Color</Label>
+              <div id="library-color" className="flex flex-wrap gap-2">
+                {LIBRARY_COLOR_OPTIONS.map((color) => {
+                  const selected = libraryForm.color === color
+                  return (
+                    <button
+                      key={color}
+                      type="button"
+                      aria-label={`Select color ${color}`}
+                      aria-pressed={selected}
+                      onClick={() => setLibraryForm((state) => ({ ...state, color }))}
+                      className={`h-8 w-8 rounded-full border-2 transition ${selected ? 'border-foreground scale-110' : 'border-transparent hover:scale-105'}`}
+                      style={{ backgroundColor: color }}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleCreateLibrary()} disabled={!libraryForm.name.trim() || isSavingLibrary}>
+              {isSavingLibrary ? 'Creating...' : 'Create Library'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isRenameDialogOpen}
+        onOpenChange={(open) => {
+          setIsRenameDialogOpen(open)
+          if (!open) {
+            resetLibraryForm()
+            setDeleteLibraryConfirmation('')
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit Library</DialogTitle>
+            <DialogDescription>Update the local library name, description, or color.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="rename-library-name">Name</Label>
+              <Input
+                id="rename-library-name"
+                value={libraryForm.name}
+                onChange={(event) => setLibraryForm((state) => ({ ...state, name: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rename-library-description">Description</Label>
+              <Input
+                id="rename-library-description"
+                value={libraryForm.description}
+                onChange={(event) => setLibraryForm((state) => ({ ...state, description: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rename-library-color">Color</Label>
+              <div id="rename-library-color" className="flex flex-wrap gap-2">
+                {LIBRARY_COLOR_OPTIONS.map((color) => {
+                  const selected = libraryForm.color === color
+                  return (
+                    <button
+                      key={color}
+                      type="button"
+                      aria-label={`Select color ${color}`}
+                      aria-pressed={selected}
+                      onClick={() => setLibraryForm((state) => ({ ...state, color }))}
+                      className={`h-8 w-8 rounded-full border-2 transition ${selected ? 'border-foreground scale-110' : 'border-transparent hover:scale-105'}`}
+                      style={{ backgroundColor: color }}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+
+            {activeLibrary && (
+              <div className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-destructive">Delete Library</p>
+                  {libraries.length > 1 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Type <span className="font-medium text-foreground">{activeLibrary.name}</span> to enable deletion.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      At least one library must remain, so this library cannot be deleted right now.
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="delete-library-confirmation">Library name</Label>
+                  <Input
+                    id="delete-library-confirmation"
+                    value={deleteLibraryConfirmation}
+                    onChange={(event) => setDeleteLibraryConfirmation(event.target.value)}
+                    placeholder={activeLibrary.name}
+                    disabled={libraries.length <= 1}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            {activeLibrary && (
+              <Button
+                type="button"
+                variant="destructive"
+                className="sm:mr-auto"
+                onClick={() => setIsDeleteDialogOpen(true)}
+                disabled={libraries.length <= 1 || deleteLibraryConfirmation.trim() !== activeLibrary.name}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete Library
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setIsRenameDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void handleRenameLibrary()} disabled={!libraryForm.name.trim() || isSavingLibrary}>
+              {isSavingLibrary ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete library?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activeLibrary
+                ? `This will remove "${activeLibrary.name}" and its local documents from the app. This action cannot be undone.`
+                : 'This action cannot be undone.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSavingLibrary}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleDeleteLibrary()} disabled={isSavingLibrary}>
+              {isSavingLibrary ? 'Deleting...' : 'Delete Library'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }

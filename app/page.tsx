@@ -24,18 +24,12 @@ export default function HomePage() {
         <p className="text-muted-foreground">Local-first research workspace</p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>Total Documents</CardTitle>
           </CardHeader>
           <CardContent className="text-3xl font-bold">{documents.length}</CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Mode</CardTitle>
-          </CardHeader>
-          <CardContent className="text-lg">{isDesktopApp ? 'Desktop' : 'Local Preview'}</CardContent>
         </Card>
         <Card>
           <CardHeader>

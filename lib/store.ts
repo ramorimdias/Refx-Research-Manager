@@ -11,6 +11,7 @@ import type {
   DocumentSort,
   Library,
   MetadataStatus,
+  PersistentSearchState,
   ReadingStage,
   ViewMode,
 } from './types'
@@ -30,6 +31,7 @@ interface AppState {
   sort: DocumentSort
   filters: DocumentFilters
   globalSearchQuery: string
+  persistentSearch: PersistentSearchState
   commandPaletteOpen: boolean
   sidebarCollapsed: boolean
   currentPage: number
@@ -44,6 +46,7 @@ interface AppState {
   setSort: (sort: DocumentSort) => void
   setFilters: (filters: DocumentFilters) => void
   setGlobalSearchQuery: (query: string) => void
+  setPersistentSearch: (search: Partial<PersistentSearchState>) => void
   setCurrentPage: (page: number) => void
   setZoom: (zoom: number) => void
   setAnnotationMode: (mode: AppState['annotationMode']) => void
@@ -52,6 +55,10 @@ interface AppState {
   toggleCommandPalette: (force?: boolean) => void
   loadLibraryDocuments: (_libraryId?: string | null) => Promise<void>
   importDocuments: (paths?: string[]) => Promise<number>
+  createLibrary: (input: { name: string; description?: string; color?: string }) => Promise<void>
+  updateLibrary: (id: string, updates: { name?: string; description?: string; color?: string }) => Promise<void>
+  deleteLibrary: (id: string) => Promise<boolean>
+  deleteDocument: (id: string) => Promise<boolean>
   loadNotes: () => Promise<void>
   toggleFavorite: (id: string) => Promise<void>
   updateDocument: (
@@ -64,6 +71,9 @@ interface AppState {
         | 'year'
         | 'abstract'
         | 'doi'
+        | 'isbn'
+        | 'publisher'
+        | 'documentType'
         | 'citationKey'
         | 'readingStage'
         | 'rating'
@@ -111,11 +121,14 @@ function toUiDocument(d: repo.DbDocument): Document {
   return {
     id: d.id,
     libraryId: d.libraryId,
+    documentType: d.documentType === 'physical_book' ? 'physical_book' : 'pdf',
     title: d.title,
     abstract: d.abstractText,
     authors: authorsParsed,
     year: d.year,
     doi: d.doi,
+    isbn: d.isbn,
+    publisher: d.publisher,
     citationKey: d.citationKey ?? '',
     filePath: d.importedFilePath ?? d.sourcePath,
     searchText: d.searchText,
@@ -212,6 +225,20 @@ function compareValues(a: Document, b: Document, field: DocumentSort['field']) {
   }
 }
 
+function defaultPersistentSearch(): PersistentSearchState {
+  return {
+    query: '',
+    keywords: [],
+    keywordGroups: [],
+    groupJoinOperator: 'AND',
+    selectedLibraryId: 'all',
+    readingStage: 'all',
+    metadataStatus: 'all',
+    favoriteOnly: false,
+    flexibility: 35,
+  }
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   initialized: false,
   isDesktopApp: false,
@@ -225,6 +252,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sort: { field: 'addedAt', direction: 'desc' },
   filters: {},
   globalSearchQuery: '',
+  persistentSearch: defaultPersistentSearch(),
   commandPaletteOpen: false,
   sidebarCollapsed: false,
   currentPage: 1,
@@ -285,6 +313,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSort: (sort) => set({ sort }),
   setFilters: (filters) => set({ filters }),
   setGlobalSearchQuery: (query) => set({ globalSearchQuery: query }),
+  setPersistentSearch: (search) =>
+    set((state) => ({
+      persistentSearch: {
+        ...state.persistentSearch,
+        ...search,
+      },
+    })),
   setCurrentPage: (page) => set({ currentPage: page }),
   setZoom: (zoom) => set({ zoom }),
   setAnnotationMode: (mode) => set({ annotationMode: mode }),
@@ -307,6 +342,93 @@ export const useAppStore = create<AppState>((set, get) => ({
     const imported = await importPdfs(targetLibraryId, paths)
     await get().refreshData()
     return imported.length
+  },
+
+  createLibrary: async (input) => {
+    if (!get().isDesktopApp) {
+      const now = new Date()
+      const library: Library = {
+        id: `lib-${crypto.randomUUID?.() ?? Date.now()}`,
+        name: input.name,
+        description: input.description ?? '',
+        color: input.color ?? '#3b82f6',
+        icon: 'folder',
+        type: 'local',
+        documentCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      set((state) => ({
+        libraries: [...state.libraries, library],
+        activeLibraryId: library.id,
+      }))
+      return
+    }
+
+    const created = await repo.createLibrary(input)
+    const { libraries, documents, notes } = await fetchDesktopData()
+    set({
+      libraries,
+      documents,
+      notes,
+      activeLibraryId: created.id,
+    })
+  },
+
+  updateLibrary: async (id, updates) => {
+    if (!get().isDesktopApp) {
+      set((state) => ({
+        libraries: state.libraries.map((library) =>
+          library.id === id
+            ? {
+                ...library,
+                ...updates,
+                updatedAt: new Date(),
+              }
+            : library,
+        ),
+      }))
+      return
+    }
+
+    await repo.updateLibrary(id, updates)
+    await get().refreshData()
+  },
+
+  deleteLibrary: async (id) => {
+    if (!get().isDesktopApp) {
+      const remainingLibraries = get().libraries.filter((library) => library.id !== id)
+      if (remainingLibraries.length === 0) return false
+
+      set((state) => ({
+        libraries: remainingLibraries,
+        documents: state.documents.filter((document) => document.libraryId !== id),
+        activeLibraryId:
+          state.activeLibraryId === id ? remainingLibraries[0]?.id ?? null : state.activeLibraryId,
+      }))
+      return true
+    }
+
+    const deleted = await repo.deleteLibrary(id)
+    if (!deleted) return false
+    await get().refreshData()
+    return true
+  },
+
+  deleteDocument: async (id) => {
+    if (!get().isDesktopApp) {
+      set((state) => ({
+        documents: state.documents.filter((document) => document.id !== id),
+        activeDocumentId: state.activeDocumentId === id ? null : state.activeDocumentId,
+      }))
+      return true
+    }
+
+    const deleted = await repo.deleteDocument(id)
+    if (!deleted) return false
+    await get().refreshData()
+    return true
   },
 
   loadNotes: async () => {

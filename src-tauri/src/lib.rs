@@ -1,5 +1,7 @@
 mod commands;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -14,22 +16,36 @@ pub fn run() {
             commands::initialize_database,
             commands::list_libraries,
             commands::create_library,
+            commands::update_library,
+            commands::delete_library,
             commands::list_all_documents,
             commands::list_documents_by_library,
             commands::get_document_by_id,
             commands::create_document,
             commands::update_document_metadata,
             commands::delete_document,
+            commands::open_document_file_location,
             commands::add_tag_to_document,
             commands::remove_tag_from_document,
             commands::list_annotations_for_document,
             commands::create_note,
+            commands::update_note,
             commands::list_notes,
+            commands::delete_note,
             commands::get_settings,
             commands::set_settings,
             commands::clear_local_data,
         ])
         .setup(|app| {
+            if let (Some(window), Some(icon)) = (
+                app.get_webview_window("main"),
+                app.default_window_icon().cloned(),
+            ) {
+                if let Err(error) = window.set_icon(icon) {
+                    eprintln!("Failed to apply window icon: {}", error);
+                }
+            }
+
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = commands::setup_app_directories(&app_handle).await {

@@ -14,12 +14,15 @@ export type DbLibrary = {
 export type DbDocument = {
   id: string
   libraryId: string
+  documentType?: string
   title: string
   authors: string
   tags: string[]
   year?: number
   abstractText?: string
   doi?: string
+  isbn?: string
+  publisher?: string
   citationKey?: string
   sourcePath?: string
   importedFilePath?: string
@@ -40,6 +43,8 @@ export type DbDocument = {
 export type DbNote = {
   id: string
   documentId?: string
+  pageNumber?: number
+  locationHint?: string
   title: string
   content: string
   createdAt: string
@@ -62,6 +67,14 @@ export async function createLibrary(input: { name: string; description?: string;
   return invoke<DbLibrary>('create_library', { input })
 }
 
+export async function updateLibrary(id: string, input: { name?: string; description?: string; color?: string }) {
+  return invoke<DbLibrary | null>('update_library', { id, input })
+}
+
+export async function deleteLibrary(id: string) {
+  return invoke<boolean>('delete_library', { id })
+}
+
 export async function listDocumentsByLibrary(libraryId: string) {
   return invoke<DbDocument[]>('list_documents_by_library', { libraryId })
 }
@@ -73,11 +86,14 @@ export async function getDocumentById(id: string) {
 export async function createDocument(input: {
   id?: string
   libraryId: string
+  documentType?: string
   title: string
   authors?: string
   year?: number
   abstractText?: string
   doi?: string
+  isbn?: string
+  publisher?: string
   citationKey?: string
   sourcePath?: string
   importedFilePath?: string
@@ -93,6 +109,10 @@ export async function deleteDocument(id: string) {
   return invoke<boolean>('delete_document', { id })
 }
 
+export async function openDocumentFileLocation(path: string) {
+  return invoke<void>('open_document_file_location', { path })
+}
+
 export async function addTagToDocument(documentId: string, tagName: string) {
   return invoke<void>('add_tag_to_document', { documentId, tagName })
 }
@@ -105,12 +125,20 @@ export async function listAnnotationsForDocument(documentId: string) {
   return invoke<Array<{ id: string; pageNumber: number; kind: string; content?: string; createdAt: string }>>('list_annotations_for_document', { documentId })
 }
 
-export async function createNote(input: { documentId?: string; title: string; content: string }) {
+export async function createNote(input: { documentId?: string; pageNumber?: number; locationHint?: string; title: string; content: string }) {
   return invoke<DbNote>('create_note', { input })
+}
+
+export async function updateNote(id: string, input: { pageNumber?: number; locationHint?: string; title?: string; content?: string }) {
+  return invoke<DbNote | null>('update_note', { id, input })
 }
 
 export async function listNotes() {
   return invoke<DbNote[]>('list_notes')
+}
+
+export async function deleteNote(id: string) {
+  return invoke<boolean>('delete_note', { id })
 }
 
 export async function getSettings() {

@@ -36,20 +36,22 @@ export async function importPdfs(libraryId: string, sourcePaths?: string[]) {
   for (const src of files) {
     const sniffed = await sniffPdfMetadata(src)
     const fileNameTitle = titleFromPath(src)
+    const generatedId = `doc-${crypto.randomUUID()}`
+    const dst = await join(targetDir, `${generatedId}.pdf`)
+    await copyFile(src, dst)
 
     const doc = await repo.createDocument({
+      id: generatedId,
       libraryId,
       title: fileNameTitle,
-      sourcePath: src,
       authors: JSON.stringify(sniffed.authors ?? []),
       year: sniffed.year,
       doi: sniffed.doi,
       citationKey: sniffed.citationKey,
+      importedFilePath: dst,
       metadataStatus: sniffed.authors?.length || sniffed.doi || sniffed.year ? 'complete' : 'incomplete',
     } as unknown as never)
 
-    const dst = await join(targetDir, `${doc.id}.pdf`)
-    await copyFile(src, dst)
     const searchText = await extractPdfSearchText(dst).catch(() => '')
     const ocrState = deriveOcrState(searchText)
 

@@ -1,61 +1,315 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
+import Link from 'next/link'
+import { ArrowRight, Clock3, FileText, Plus, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/lib/store'
 import * as repo from '@/lib/repositories/local-db'
 
+type SortMode = 'timestamp' | 'page'
+
+type AppNote = ReturnType<typeof useAppStore.getState>['notes'][number]
+
 export default function NotesPage() {
-  const { notes, loadNotes, isDesktopApp } = useAppStore()
+  const { notes, documents, libraries, loadNotes, isDesktopApp, activeLibraryId } = useAppStore()
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<any>(null)
+  const [selectedLibraryId, setSelectedLibraryId] = useState<string>('all')
+  const [sortMode, setSortMode] = useState<SortMode>('timestamp')
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
+  const [draftTitle, setDraftTitle] = useState('')
+  const [draftContent, setDraftContent] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
-    loadNotes()
+    void loadNotes()
   }, [loadNotes])
 
   useEffect(() => {
-    if (!selected && notes.length > 0) setSelected(notes[0])
-  }, [notes, selected])
+    if (activeLibraryId) {
+      setSelectedLibraryId(activeLibraryId)
+    }
+  }, [activeLibraryId])
 
-  const filtered = useMemo(() => notes.filter((n: any) => `${n.title} ${n.content}`.toLowerCase().includes(query.toLowerCase())), [notes, query])
+  const documentsById = useMemo(
+    () => new Map(documents.map((document) => [document.id, document])),
+    [documents],
+  )
+
+  const filteredNotes = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+
+    return notes.filter((note) => {
+      const document = note.documentId ? documentsById.get(note.documentId) : undefined
+      if (selectedLibraryId !== 'all' && (!document || document.libraryId !== selectedLibraryId)) {
+        return false
+      }
+
+      if (!normalizedQuery) return true
+
+      return `${note.title} ${note.content} ${document?.title ?? ''}`.toLowerCase().includes(normalizedQuery)
+    })
+  }, [documentsById, notes, query, selectedLibraryId])
+
+  const groupedNotes = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        key: string
+        label: string
+        notes: AppNote[]
+      }
+    >()
+
+    for (const note of filteredNotes) {
+      const document = note.documentId ? documentsById.get(note.documentId) : undefined
+      const key = note.documentId ?? 'unlinked'
+      const label = document?.title ?? 'Unlinked Notes'
+      const existing = groups.get(key)
+
+      if (existing) {
+        existing.notes.push(note)
+      } else {
+        groups.set(key, { key, label, notes: [note] })
+      }
+    }
+
+    const ordered = Array.from(groups.values()).map((group) => ({
+      ...group,
+      notes: [...group.notes].sort((left, right) => {
+        if (sortMode === 'page') {
+          const pageDifference = (left.pageNumber ?? Number.MAX_SAFE_INTEGER) - (right.pageNumber ?? Number.MAX_SAFE_INTEGER)
+          if (pageDifference !== 0) return pageDifference
+        }
+
+        return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
+      }),
+    }))
+
+    return ordered.sort((left, right) => {
+      const leftLead = left.notes[0]
+      const rightLead = right.notes[0]
+      if (!leftLead || !rightLead) return left.label.localeCompare(right.label)
+
+      if (sortMode === 'page') {
+        const pageDifference = (leftLead.pageNumber ?? Number.MAX_SAFE_INTEGER) - (rightLead.pageNumber ?? Number.MAX_SAFE_INTEGER)
+        if (pageDifference !== 0) return pageDifference
+      }
+
+      return new Date(rightLead.updatedAt).getTime() - new Date(leftLead.updatedAt).getTime()
+    })
+  }, [documentsById, filteredNotes, sortMode])
+
+  const flatVisibleNotes = useMemo(
+    () => groupedNotes.flatMap((group) => group.notes),
+    [groupedNotes],
+  )
+
+  useEffect(() => {
+    if (!selectedNoteId && flatVisibleNotes.length > 0) {
+      setSelectedNoteId(flatVisibleNotes[0].id)
+      return
+    }
+
+    if (selectedNoteId && !flatVisibleNotes.some((note) => note.id === selectedNoteId)) {
+      setSelectedNoteId(flatVisibleNotes[0]?.id ?? null)
+    }
+  }, [flatVisibleNotes, selectedNoteId])
+
+  const selectedNote = useMemo(
+    () => notes.find((note) => note.id === selectedNoteId) ?? null,
+    [notes, selectedNoteId],
+  )
+
+  const selectedDocument = useMemo(
+    () => (selectedNote?.documentId ? documentsById.get(selectedNote.documentId) ?? null : null),
+    [documentsById, selectedNote?.documentId],
+  )
+
+  useEffect(() => {
+    setDraftTitle(selectedNote?.title ?? '')
+    setDraftContent(selectedNote?.content ?? '')
+  }, [selectedNote?.id, selectedNote?.title, selectedNote?.content])
+
+  const hasPendingChanges =
+    selectedNote !== null &&
+    (draftTitle !== selectedNote.title || draftContent !== selectedNote.content)
+
+  const handleCreateNote = async () => {
+    if (!isDesktopApp) return
+    const note = await repo.createNote({ title: 'New note', content: '', documentId: undefined, pageNumber: undefined })
+    await loadNotes()
+    setSelectedNoteId(note.id)
+  }
+
+  const handleSave = async () => {
+    if (!selectedNote || !isDesktopApp) return
+
+    setIsSaving(true)
+    try {
+      await repo.updateNote(selectedNote.id, {
+        title: draftTitle.trim() || 'Untitled note',
+        content: draftContent,
+        pageNumber: selectedNote.pageNumber,
+      })
+      await loadNotes()
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   return (
     <div className="flex h-full">
-      <div className="w-80 border-r p-4 space-y-3">
-        <div className="relative">
-          <Search className="h-4 w-4 absolute left-2 top-2.5 text-muted-foreground" />
-          <Input className="pl-8" placeholder="Search notes" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div className="flex w-96 flex-col border-r">
+        <div className="space-y-3 border-b p-4">
+          <div className="relative">
+            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input className="pl-8" placeholder="Search notes" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Select value={selectedLibraryId} onValueChange={setSelectedLibraryId}>
+              <SelectTrigger>
+                <SelectValue placeholder="All libraries" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All libraries</SelectItem>
+                {libraries.map((library) => (
+                  <SelectItem key={library.id} value={library.id}>
+                    {library.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="timestamp">Sort by timestamp</SelectItem>
+                <SelectItem value="page">Sort by page</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button className="w-full" onClick={() => void handleCreateNote()}>
+            <Plus className="mr-2 h-4 w-4" />
+            New Note
+          </Button>
         </div>
-        <Button className="w-full" onClick={async () => {
-          if (!isDesktopApp) return
-          const note = await repo.createNote({ title: 'New note', content: '', documentId: undefined })
-          await loadNotes()
-          setSelected(note)
-        }}><Plus className="h-4 w-4 mr-2" />New Note</Button>
-        <div className="space-y-2">
-          {filtered.map((n: any) => (
-            <button key={n.id} className="w-full text-left border rounded p-2" onClick={() => setSelected(n)}>
-              <div className="font-medium text-sm">{n.title}</div>
-              <div className="text-xs text-muted-foreground line-clamp-2">{n.content}</div>
-            </button>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+          {groupedNotes.map((group) => (
+            <div key={group.key} className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="truncate text-sm font-semibold">{group.label}</h3>
+                <Badge variant="secondary">{group.notes.length}</Badge>
+              </div>
+              <div className="space-y-2">
+                {group.notes.map((note) => (
+                  <button
+                    key={note.id}
+                    className={`w-full rounded-lg border p-3 text-left transition ${
+                      selectedNoteId === note.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/40'
+                    }`}
+                    onClick={() => setSelectedNoteId(note.id)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{note.title || 'Untitled note'}</div>
+                        <div className="line-clamp-2 text-xs text-muted-foreground">{note.content || 'No content yet.'}</div>
+                      </div>
+                      {note.pageNumber ? (
+                        <Badge variant="outline">p. {note.pageNumber}</Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Clock3 className="h-3.5 w-3.5" />
+                      {new Date(note.updatedAt).toLocaleString()}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
+
+          {groupedNotes.length === 0 && (
+            <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+              No notes found for the current filters.
+            </div>
+          )}
         </div>
       </div>
-      <div className="flex-1 p-4">
-        {selected ? (
-          <div className="space-y-3">
-            <Input value={selected.title} onChange={(e) => setSelected({ ...selected, title: e.target.value })} />
-            <Textarea className="min-h-80" value={selected.content} onChange={(e) => setSelected({ ...selected, content: e.target.value })} />
-            <div>
-              <Button disabled>Save updates (scaffold)</Button>
+
+      <div className="flex min-w-0 flex-1 flex-col p-4">
+        {selectedNote ? (
+          <div className="flex h-full flex-col space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <Input value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} />
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  {selectedDocument ? (
+                    <>
+                      <Badge variant="secondary" className="max-w-full truncate">
+                        <FileText className="mr-1 h-3.5 w-3.5" />
+                        {selectedDocument.title}
+                      </Badge>
+                      {selectedNote.pageNumber ? <Badge variant="outline">Page {selectedNote.pageNumber}</Badge> : null}
+                    </>
+                  ) : (
+                    <Badge variant="outline">Standalone note</Badge>
+                  )}
+                  <span>Updated {new Date(selectedNote.updatedAt).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {selectedDocument && (selectedNote.pageNumber || selectedDocument.documentType === 'physical_book') ? (
+                <Button asChild variant="outline">
+                  <Link
+                    href={
+                      selectedDocument.documentType === 'physical_book'
+                        ? `/books/notes?id=${selectedDocument.id}`
+                        : `/reader/view?id=${selectedDocument.id}&page=${selectedNote.pageNumber}`
+                    }
+                  >
+                    {selectedDocument.documentType === 'physical_book' ? 'Open Book Notes' : 'Open In Reader'}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Link>
+                </Button>
+              ) : null}
+            </div>
+
+            <Textarea
+              className="min-h-0 flex-1"
+              value={draftContent}
+              onChange={(event) => setDraftContent(event.target.value)}
+            />
+
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => {
+                setDraftTitle(selectedNote.title)
+                setDraftContent(selectedNote.content)
+              }} disabled={!hasPendingChanges || isSaving}>
+                Reset
+              </Button>
+              <Button onClick={() => void handleSave()} disabled={!hasPendingChanges || isSaving || !isDesktopApp}>
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
             </div>
           </div>
         ) : (
-          <div>Select a note</div>
+          <div className="flex h-full items-center justify-center text-muted-foreground">Select a note</div>
         )}
       </div>
     </div>

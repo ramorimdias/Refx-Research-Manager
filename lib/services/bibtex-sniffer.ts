@@ -96,7 +96,7 @@ function parseCrossrefAuthors(work: CrossrefWork) {
 
 async function fetchJsonWithTimeout(url: string, timeoutMs = 6000) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const timeout = setTimeout(() => controller.abort('timeout'), timeoutMs)
 
   try {
     const response = await fetch(url, {
@@ -111,6 +111,10 @@ async function fetchJsonWithTimeout(url: string, timeoutMs = 6000) {
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function isAbortLikeError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 async function fetchCrossrefByDoi(doi: string): Promise<CrossrefWork | null> {
@@ -212,7 +216,11 @@ export async function sniffPdfMetadata(filePath: string): Promise<SniffedPdfMeta
   try {
     return await enrichWithCrossref(offline)
   } catch (error) {
-    console.warn('Crossref enrichment failed, using offline metadata only:', error)
+    if (isAbortLikeError(error)) {
+      console.info('Crossref enrichment timed out, using offline metadata only.')
+    } else {
+      console.warn('Crossref enrichment failed, using offline metadata only:', error)
+    }
     return offline
   }
 }

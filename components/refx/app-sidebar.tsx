@@ -1,15 +1,17 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useRouter } from 'next/navigation'
 import {
   Home,
+  Search,
   Library,
   BookOpen,
   FileText,
   StickyNote,
-  Search,
+  Compass,
   GitBranch,
   BarChart3,
   Settings,
@@ -36,11 +38,12 @@ import { Separator } from '@/components/ui/separator'
 
 const mainNavItems = [
   { href: '/', label: 'Home', icon: Home },
+  { href: '/search', label: 'Search', icon: Search },
   { href: '/libraries', label: 'Libraries', icon: Library },
   { href: '/reader', label: 'Reader', icon: BookOpen },
   { href: '/references', label: 'References', icon: FileText },
   { href: '/notes', label: 'Notes', icon: StickyNote },
-  { href: '/discover', label: 'Discover', icon: Search },
+  { href: '/discover', label: 'Discover', icon: Compass },
   { href: '/maps', label: 'Maps', icon: GitBranch },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
 ]
@@ -66,17 +69,25 @@ export function AppSidebar() {
         <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-3">
           {!sidebarCollapsed && (
             <Link href="/" className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-                <span className="text-sm font-bold text-primary-foreground">Rx</span>
-              </div>
+              <Image
+                src="/icon.svg"
+                alt="Refx"
+                width={32}
+                height={32}
+                className="h-8 w-8 rounded-lg"
+              />
               <span className="text-lg font-semibold text-sidebar-foreground">Refx</span>
             </Link>
           )}
           {sidebarCollapsed && (
             <Link href="/" className="mx-auto">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-                <span className="text-sm font-bold text-primary-foreground">Rx</span>
-              </div>
+              <Image
+                src="/icon.svg"
+                alt="Refx"
+                width={32}
+                height={32}
+                className="h-8 w-8 rounded-lg"
+              />
             </Link>
           )}
           {!sidebarCollapsed && (

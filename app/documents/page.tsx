@@ -38,6 +38,8 @@ export default function DocumentDetailPage() {
   const [authors, setAuthors] = useState('')
   const [year, setYear] = useState('')
   const [doi, setDoi] = useState('')
+  const [isbn, setIsbn] = useState('')
+  const [publisher, setPublisher] = useState('')
   const [citationKey, setCitationKey] = useState('')
   const [abstract, setAbstract] = useState('')
   const [readingStage, setReadingStage] = useState<ReadingStage>('unread')
@@ -52,6 +54,8 @@ export default function DocumentDetailPage() {
     setAuthors(document.authors.join(', '))
     setYear(document.year ? String(document.year) : '')
     setDoi(document.doi ?? '')
+    setIsbn(document.isbn ?? '')
+    setPublisher(document.publisher ?? '')
     setCitationKey(document.citationKey ?? '')
     setAbstract(document.abstract ?? '')
     setReadingStage(document.readingStage)
@@ -92,6 +96,8 @@ export default function DocumentDetailPage() {
           .filter(Boolean),
         year: year ? Number(year) : undefined,
         doi: doi.trim() || undefined,
+        isbn: isbn.trim() || undefined,
+        publisher: publisher.trim() || undefined,
         citationKey: citationKey.trim() || '',
         abstract: abstract.trim() || undefined,
         readingStage,
@@ -116,9 +122,9 @@ export default function DocumentDetailPage() {
 
           <div className="flex items-center gap-2">
             <Button asChild variant="outline">
-              <Link href={`/reader/view?id=${document.id}`}>
+              <Link href={document.documentType === 'physical_book' ? `/books/notes?id=${document.id}` : `/reader/view?id=${document.id}`}>
                 <BookOpen className="mr-2 h-4 w-4" />
-                Open Reader
+                {document.documentType === 'physical_book' ? 'Open Notes' : 'Open Reader'}
               </Link>
             </Button>
             <Button onClick={() => void handleSave()} disabled={isSaving}>
@@ -174,6 +180,16 @@ export default function DocumentDetailPage() {
               <div>
                 <Label htmlFor="doi">DOI</Label>
                 <Input id="doi" className="mt-1.5" value={doi} onChange={(event) => setDoi(event.target.value)} />
+              </div>
+
+              <div>
+                <Label htmlFor="isbn">ISBN</Label>
+                <Input id="isbn" className="mt-1.5" value={isbn} onChange={(event) => setIsbn(event.target.value)} />
+              </div>
+
+              <div>
+                <Label htmlFor="publisher">Publisher</Label>
+                <Input id="publisher" className="mt-1.5" value={publisher} onChange={(event) => setPublisher(event.target.value)} />
               </div>
 
               <div>

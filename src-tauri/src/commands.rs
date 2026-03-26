@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::process::Command;
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, thiserror::Error)]
@@ -11,6 +12,8 @@ pub enum AppError {
     Db(#[from] rusqlite::Error),
     #[error("Path error: could not resolve app data directory")]
     PathError,
+    #[error("{0}")]
+    Validation(String),
 }
 
 impl serde::Serialize for AppError {
@@ -38,12 +41,15 @@ pub struct Library {
 pub struct Document {
     pub id: String,
     pub library_id: String,
+    pub document_type: String,
     pub title: String,
     pub authors: String,
     pub tags: Vec<String>,
     pub year: Option<i64>,
     pub abstract_text: Option<String>,
     pub doi: Option<String>,
+    pub isbn: Option<String>,
+    pub publisher: Option<String>,
     pub citation_key: Option<String>,
     pub source_path: Option<String>,
     pub imported_file_path: Option<String>,
@@ -66,6 +72,8 @@ pub struct Document {
 pub struct Note {
     pub id: String,
     pub document_id: Option<String>,
+    pub page_number: Option<i64>,
+    pub location_hint: Option<String>,
     pub title: String,
     pub content: String,
     pub created_at: String,
@@ -93,14 +101,25 @@ pub struct CreateLibraryInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateLibraryInput {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub color: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateDocumentInput {
     pub id: Option<String>,
     pub library_id: String,
+    pub document_type: Option<String>,
     pub title: String,
     pub authors: Option<String>,
     pub year: Option<i64>,
     pub abstract_text: Option<String>,
     pub doi: Option<String>,
+    pub isbn: Option<String>,
+    pub publisher: Option<String>,
     pub citation_key: Option<String>,
     pub source_path: Option<String>,
     pub imported_file_path: Option<String>,
@@ -109,12 +128,15 @@ pub struct CreateDocumentInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateDocumentInput {
+    pub document_type: Option<String>,
     pub title: Option<String>,
     pub authors: Option<String>,
     pub search_text: Option<String>,
     pub year: Option<i64>,
     pub abstract_text: Option<String>,
     pub doi: Option<String>,
+    pub isbn: Option<String>,
+    pub publisher: Option<String>,
     pub citation_key: Option<String>,
     pub metadata_status: Option<String>,
     pub reading_stage: Option<String>,
@@ -131,8 +153,19 @@ pub struct UpdateDocumentInput {
 #[serde(rename_all = "camelCase")]
 pub struct CreateNoteInput {
     pub document_id: Option<String>,
+    pub page_number: Option<i64>,
+    pub location_hint: Option<String>,
     pub title: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNoteInput {
+    pub page_number: Option<i64>,
+    pub location_hint: Option<String>,
+    pub title: Option<String>,
+    pub content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +210,26 @@ fn document_tags(conn: &Connection, document_id: &str) -> Result<Vec<String>, Ap
     )?;
     let rows = stmt.query_map(params![document_id], |row| row.get::<_, String>(0))?;
     Ok(rows.filter_map(Result::ok).collect())
+}
+
+fn get_library_by_id(conn: &Connection, id: &str) -> Result<Option<Library>, AppError> {
+    let library = conn
+        .query_row(
+            "SELECT id, name, description, color, created_at, updated_at FROM libraries WHERE id = ?1",
+            params![id],
+            |r| {
+                Ok(Library {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    description: r.get(2)?,
+                    color: r.get(3)?,
+                    created_at: r.get(4)?,
+                    updated_at: r.get(5)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(library)
 }
 
 /// Get the application data directory path
@@ -278,6 +331,7 @@ CREATE TABLE IF NOT EXISTS annotations (
 CREATE TABLE IF NOT EXISTS notes (
   id TEXT PRIMARY KEY,
   document_id TEXT,
+  page_number INTEGER,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   created_at TEXT NOT NULL,
@@ -296,6 +350,11 @@ CREATE INDEX IF NOT EXISTS idx_annotations_document_id ON annotations(document_i
     )?;
 
     ensure_column(&conn, "documents", "search_text", "TEXT")?;
+    ensure_column(&conn, "documents", "document_type", "TEXT NOT NULL DEFAULT 'pdf'")?;
+    ensure_column(&conn, "documents", "isbn", "TEXT")?;
+    ensure_column(&conn, "documents", "publisher", "TEXT")?;
+    ensure_column(&conn, "notes", "page_number", "INTEGER")?;
+    ensure_column(&conn, "notes", "location_hint", "TEXT")?;
 
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM libraries", [], |r| r.get(0))?;
     if count == 0 {
@@ -349,12 +408,90 @@ pub fn create_library(app: AppHandle, input: CreateLibraryInput) -> Result<Libra
 }
 
 #[tauri::command]
+pub fn update_library(
+    app: AppHandle,
+    id: String,
+    input: UpdateLibraryInput,
+) -> Result<Option<Library>, AppError> {
+    let conn = open_db(&app)?;
+    let now = now_iso();
+    conn.execute(
+        r#"UPDATE libraries SET
+          name = COALESCE(?1, name),
+          description = COALESCE(?2, description),
+          color = COALESCE(?3, color),
+          updated_at = ?4
+          WHERE id = ?5"#,
+        params![input.name, input.description, input.color, now, id],
+    )?;
+
+    get_library_by_id(&conn, &id)
+}
+
+#[tauri::command]
+pub fn delete_library(app: AppHandle, id: String) -> Result<bool, AppError> {
+    let conn = open_db(&app)?;
+    let library_count: i64 = conn.query_row("SELECT COUNT(*) FROM libraries", [], |r| r.get(0))?;
+    if library_count <= 1 {
+        return Err(AppError::Validation(
+            "At least one library must remain.".to_string(),
+        ));
+    }
+
+    let rows = conn.execute("DELETE FROM libraries WHERE id = ?1", params![id.clone()])?;
+    if rows == 0 {
+        return Ok(false);
+    }
+
+    let base_path = app.path().app_data_dir().map_err(|_| AppError::PathError)?;
+    let library_dir = base_path.join("pdfs").join(id);
+    if library_dir.exists() {
+        std::fs::remove_dir_all(library_dir)?;
+    }
+
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn open_document_file_location(path: String) -> Result<(), AppError> {
+    let target = std::path::PathBuf::from(&path);
+    if !target.exists() {
+        return Err(AppError::Validation(format!(
+            "File not found: {}",
+            target.to_string_lossy()
+        )));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(format!("/select,{}", target.to_string_lossy()))
+            .spawn()?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open").arg("-R").arg(&target).spawn()?;
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let directory = target.parent().ok_or_else(|| {
+            AppError::Validation("Could not resolve the parent directory.".to_string())
+        })?;
+        Command::new("xdg-open").arg(directory).spawn()?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn list_documents_by_library(
     app: AppHandle,
     library_id: String,
 ) -> Result<Vec<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, title, authors, year, abstract, doi, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, last_opened_at, last_read_page, created_at, updated_at FROM documents WHERE library_id = ?1 ORDER BY updated_at DESC"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, last_opened_at, last_read_page, created_at, updated_at FROM documents WHERE library_id = ?1 ORDER BY updated_at DESC"#)?;
     let rows = stmt.query_map(params![library_id], map_document_row)?;
     let mut documents = Vec::new();
     for row in rows {
@@ -368,7 +505,7 @@ pub fn list_documents_by_library(
 #[tauri::command]
 pub fn list_all_documents(app: AppHandle) -> Result<Vec<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, title, authors, year, abstract, doi, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, last_opened_at, last_read_page, created_at, updated_at FROM documents ORDER BY updated_at DESC"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, last_opened_at, last_read_page, created_at, updated_at FROM documents ORDER BY updated_at DESC"#)?;
     let rows = stmt.query_map([], map_document_row)?;
     let mut documents = Vec::new();
     for row in rows {
@@ -382,7 +519,7 @@ pub fn list_all_documents(app: AppHandle) -> Result<Vec<Document>, AppError> {
 #[tauri::command]
 pub fn get_document_by_id(app: AppHandle, id: String) -> Result<Option<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, title, authors, year, abstract, doi, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, last_opened_at, last_read_page, created_at, updated_at FROM documents WHERE id = ?1"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, last_opened_at, last_read_page, created_at, updated_at FROM documents WHERE id = ?1"#)?;
     let doc = stmt.query_row(params![id], map_document_row).optional()?;
     match doc {
         Some(mut document) => {
@@ -397,27 +534,30 @@ fn map_document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
     Ok(Document {
         id: row.get(0)?,
         library_id: row.get(1)?,
-        title: row.get(2)?,
-        authors: row.get(3)?,
+        document_type: row.get(2)?,
+        title: row.get(3)?,
+        authors: row.get(4)?,
         tags: Vec::new(),
-        year: row.get(4)?,
-        abstract_text: row.get(5)?,
-        doi: row.get(6)?,
-        citation_key: row.get(7)?,
-        source_path: row.get(8)?,
-        imported_file_path: row.get(9)?,
-        search_text: row.get(10)?,
-        page_count: row.get(11)?,
-        has_ocr: row.get::<_, i64>(12)? == 1,
-        ocr_status: row.get(13)?,
-        metadata_status: row.get(14)?,
-        reading_stage: row.get(15)?,
-        rating: row.get(16)?,
-        favorite: row.get::<_, i64>(17)? == 1,
-        last_opened_at: row.get(18)?,
-        last_read_page: row.get(19)?,
-        created_at: row.get(20)?,
-        updated_at: row.get(21)?,
+        year: row.get(5)?,
+        abstract_text: row.get(6)?,
+        doi: row.get(7)?,
+        isbn: row.get(8)?,
+        publisher: row.get(9)?,
+        citation_key: row.get(10)?,
+        source_path: row.get(11)?,
+        imported_file_path: row.get(12)?,
+        search_text: row.get(13)?,
+        page_count: row.get(14)?,
+        has_ocr: row.get::<_, i64>(15)? == 1,
+        ocr_status: row.get(16)?,
+        metadata_status: row.get(17)?,
+        reading_stage: row.get(18)?,
+        rating: row.get(19)?,
+        favorite: row.get::<_, i64>(20)? == 1,
+        last_opened_at: row.get(21)?,
+        last_read_page: row.get(22)?,
+        created_at: row.get(23)?,
+        updated_at: row.get(24)?,
     })
 }
 
@@ -429,9 +569,9 @@ pub fn create_document(app: AppHandle, input: CreateDocumentInput) -> Result<Doc
         .unwrap_or_else(|| format!("doc-{}", uuid::Uuid::new_v4()));
     let now = now_iso();
     conn.execute(
-        r#"INSERT INTO documents (id, library_id, title, authors, year, abstract, doi, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL, 0, 'pending', 'incomplete', 'unread', 0, 0, ?11, ?11)"#,
-        params![id, input.library_id, input.title, input.authors.unwrap_or("[]".into()), input.year, input.abstract_text, input.doi, input.citation_key, input.source_path, input.imported_file_path, now],
+        r#"INSERT INTO documents (id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, search_text, page_count, has_ocr, ocr_status, metadata_status, reading_stage, rating, favorite, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL, NULL, 0, 'pending', 'incomplete', 'unread', 0, 0, ?14, ?14)"#,
+        params![id, input.library_id, input.document_type.unwrap_or("pdf".into()), input.title, input.authors.unwrap_or("[]".into()), input.year, input.abstract_text, input.doi, input.isbn, input.publisher, input.citation_key, input.source_path, input.imported_file_path, now],
     )?;
     get_document_by_id(app, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows.into())
 }
@@ -447,30 +587,36 @@ pub fn update_document_metadata(
     conn.execute(
         r#"UPDATE documents SET
           title = COALESCE(?1, title),
-          authors = COALESCE(?2, authors),
-          search_text = COALESCE(?3, search_text),
-          year = COALESCE(?4, year),
-          abstract = COALESCE(?5, abstract),
-          doi = COALESCE(?6, doi),
-          citation_key = COALESCE(?7, citation_key),
-          metadata_status = COALESCE(?8, metadata_status),
-          reading_stage = COALESCE(?9, reading_stage),
-          rating = COALESCE(?10, rating),
-          favorite = COALESCE(?11, favorite),
-          has_ocr = COALESCE(?12, has_ocr),
-          ocr_status = COALESCE(?13, ocr_status),
-          last_opened_at = COALESCE(?14, last_opened_at),
-          last_read_page = COALESCE(?15, last_read_page),
-          imported_file_path = COALESCE(?16, imported_file_path),
-          updated_at = ?17
-          WHERE id = ?18"#,
+          document_type = COALESCE(?2, document_type),
+          authors = COALESCE(?3, authors),
+          search_text = COALESCE(?4, search_text),
+          year = COALESCE(?5, year),
+          abstract = COALESCE(?6, abstract),
+          doi = COALESCE(?7, doi),
+          isbn = COALESCE(?8, isbn),
+          publisher = COALESCE(?9, publisher),
+          citation_key = COALESCE(?10, citation_key),
+          metadata_status = COALESCE(?11, metadata_status),
+          reading_stage = COALESCE(?12, reading_stage),
+          rating = COALESCE(?13, rating),
+          favorite = COALESCE(?14, favorite),
+          has_ocr = COALESCE(?15, has_ocr),
+          ocr_status = COALESCE(?16, ocr_status),
+          last_opened_at = COALESCE(?17, last_opened_at),
+          last_read_page = COALESCE(?18, last_read_page),
+          imported_file_path = COALESCE(?19, imported_file_path),
+          updated_at = ?20
+          WHERE id = ?21"#,
         params![
             input.title,
+            input.document_type,
             input.authors,
             input.search_text,
             input.year,
             input.abstract_text,
             input.doi,
+            input.isbn,
+            input.publisher,
             input.citation_key,
             input.metadata_status,
             input.reading_stage,
@@ -491,7 +637,23 @@ pub fn update_document_metadata(
 #[tauri::command]
 pub fn delete_document(app: AppHandle, id: String) -> Result<bool, AppError> {
     let conn = open_db(&app)?;
+    let imported_file_path: Option<String> = conn
+        .query_row(
+            "SELECT imported_file_path FROM documents WHERE id = ?1",
+            params![id.clone()],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
     let rows = conn.execute("DELETE FROM documents WHERE id = ?1", params![id])?;
+    if rows > 0 {
+        if let Some(path) = imported_file_path {
+            let local_file = std::path::PathBuf::from(path);
+            if local_file.exists() {
+                std::fs::remove_file(local_file)?;
+            }
+        }
+    }
     Ok(rows > 0)
 }
 
@@ -567,12 +729,14 @@ pub fn create_note(app: AppHandle, input: CreateNoteInput) -> Result<Note, AppEr
     let id = format!("note-{}", uuid::Uuid::new_v4());
     let now = now_iso();
     conn.execute(
-        "INSERT INTO notes (id, document_id, title, content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, input.document_id, input.title, input.content, now, now],
+        "INSERT INTO notes (id, document_id, page_number, location_hint, title, content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, input.document_id, input.page_number, input.location_hint, input.title, input.content, now, now],
     )?;
     Ok(Note {
         id,
         document_id: input.document_id,
+        page_number: input.page_number,
+        location_hint: input.location_hint,
         title: input.title,
         content: input.content,
         created_at: now.clone(),
@@ -581,20 +745,70 @@ pub fn create_note(app: AppHandle, input: CreateNoteInput) -> Result<Note, AppEr
 }
 
 #[tauri::command]
+pub fn update_note(
+    app: AppHandle,
+    id: String,
+    input: UpdateNoteInput,
+) -> Result<Option<Note>, AppError> {
+    let conn = open_db(&app)?;
+    let now = now_iso();
+    conn.execute(
+        r#"UPDATE notes SET
+          page_number = COALESCE(?1, page_number),
+          location_hint = COALESCE(?2, location_hint),
+          title = COALESCE(?3, title),
+          content = COALESCE(?4, content),
+          updated_at = ?5
+          WHERE id = ?6"#,
+        params![input.page_number, input.location_hint, input.title, input.content, now, id],
+    )?;
+
+    let note = conn
+        .query_row(
+            "SELECT id, document_id, page_number, location_hint, title, content, created_at, updated_at FROM notes WHERE id = ?1",
+            params![id],
+            |r| {
+                Ok(Note {
+                    id: r.get(0)?,
+                    document_id: r.get(1)?,
+                    page_number: r.get(2)?,
+                    location_hint: r.get(3)?,
+                    title: r.get(4)?,
+                    content: r.get(5)?,
+                    created_at: r.get(6)?,
+                    updated_at: r.get(7)?,
+                })
+            },
+        )
+        .optional()?;
+
+    Ok(note)
+}
+
+#[tauri::command]
 pub fn list_notes(app: AppHandle) -> Result<Vec<Note>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare("SELECT id, document_id, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, document_id, page_number, location_hint, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC")?;
     let rows = stmt.query_map([], |r| {
         Ok(Note {
             id: r.get(0)?,
             document_id: r.get(1)?,
-            title: r.get(2)?,
-            content: r.get(3)?,
-            created_at: r.get(4)?,
-            updated_at: r.get(5)?,
+            page_number: r.get(2)?,
+            location_hint: r.get(3)?,
+            title: r.get(4)?,
+            content: r.get(5)?,
+            created_at: r.get(6)?,
+            updated_at: r.get(7)?,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
+}
+
+#[tauri::command]
+pub fn delete_note(app: AppHandle, id: String) -> Result<bool, AppError> {
+    let conn = open_db(&app)?;
+    let rows = conn.execute("DELETE FROM notes WHERE id = ?1", params![id])?;
+    Ok(rows > 0)
 }
 
 #[tauri::command]

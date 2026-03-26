@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#fafafa' },
+    { media: '(prefers-color-scheme: light)', color: '#f3ede2' },
     { media: '(prefers-color-scheme: dark)', color: '#1a1a1f' },
   ],
   width: 'device-width',
@@ -51,6 +51,7 @@ export default function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
+          enableColorScheme={false}
           disableTransitionOnChange
         >
           <AppProvider>
