@@ -268,11 +268,15 @@ function findMatchesInWordList(words: PdfWord[], query: string, maxResults = 100
 
 export async function loadPdfJsModule() {
   if (!pdfJsPromise) {
-    pdfJsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((module) => {
-      if (typeof window !== 'undefined' && !module.GlobalWorkerOptions.workerSrc) {
-        module.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString()
-      }
+    const runtimeImport = new Function('path', 'return import(path)') as (path: string) => Promise<{
+      getDocument: (source: Record<string, unknown>) => { promise: Promise<unknown>; destroy?: () => void }
+      GlobalWorkerOptions: { workerSrc: string }
+    }>
 
+    pdfJsPromise = runtimeImport('/pdfjs/pdf.js').then((module) => {
+      if (typeof window !== 'undefined' && !module.GlobalWorkerOptions.workerSrc) {
+        module.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.js'
+      }
       return module
     })
   }

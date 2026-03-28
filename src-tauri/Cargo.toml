@@ -26,6 +26,7 @@ thiserror = "1"
 rusqlite = { version = "0.32", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
+base64 = "0.22"
 
 [profile.release]
 panic = "abort"

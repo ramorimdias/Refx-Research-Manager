@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Database, HardDrive, Palette, Settings, ShieldAlert, Sparkles } from 'lucide-react'
+import { Database, Download, HardDrive, Palette, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { open } from '@/lib/tauri/client'
 import {
   DEFAULT_APP_SETTINGS,
   getBaseThemeMode,
@@ -25,6 +26,7 @@ import {
   saveAppSettings,
   type StoredAppSettings,
 } from '@/lib/app-settings'
+import * as repo from '@/lib/repositories/local-db'
 import { useAppStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
@@ -42,10 +44,14 @@ const sections: Array<{ id: SettingsSection; label: string; icon: typeof Setting
 export default function SettingsPage() {
   const router = useRouter()
   const { setTheme } = useTheme()
-  const { clearLocalData, scanDocumentsOcr, documents, isDesktopApp } = useAppStore()
+  const { clearLocalData, refreshData, scanDocumentsOcr, documents, isDesktopApp } = useAppStore()
   const [activeSection, setActiveSection] = useState<SettingsSection>('general')
   const [isClearing, setIsClearing] = useState(false)
   const [isScanningOcr, setIsScanningOcr] = useState(false)
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false)
+  const [isRestoringBackup, setIsRestoringBackup] = useState(false)
+  const [backups, setBackups] = useState<repo.DbBackupFileMetadata[]>([])
+  const [backupStatus, setBackupStatus] = useState<string | null>(null)
   const [settings, setSettings] = useState<StoredAppSettings>(DEFAULT_APP_SETTINGS)
   const hasLoadedSettingsRef = useRef(false)
 
@@ -96,6 +102,20 @@ export default function SettingsPage() {
     void applyAndSave()
   }, [isDesktopApp, setTheme, settings])
 
+  const loadBackups = async () => {
+    if (!isDesktopApp) {
+      setBackups([])
+      return
+    }
+    const nextBackups = await repo.listBackups()
+    setBackups(nextBackups)
+  }
+
+  useEffect(() => {
+    if (!isDesktopApp) return
+    void loadBackups()
+  }, [isDesktopApp])
+
   const applySettingsImmediately = () => {
     const accentVariant = getThemeAccentVariant(settings.theme)
     setTheme(getBaseThemeMode(settings.theme))
@@ -134,6 +154,55 @@ export default function SettingsPage() {
     } finally {
       setIsScanningOcr(false)
     }
+  }
+
+  const handleCreateBackup = async (scope: repo.DbBackupScope) => {
+    if (!isDesktopApp) return
+    setIsCreatingBackup(true)
+    setBackupStatus(null)
+    try {
+      const backup = await repo.createBackup(scope)
+      setBackupStatus(`Created ${backup.fileName}`)
+      await loadBackups()
+    } finally {
+      setIsCreatingBackup(false)
+    }
+  }
+
+  const handleRestoreBackup = async (path: string) => {
+    if (!isDesktopApp) return
+    const confirmed = window.confirm('Restore this backup now? Current local data in the selected scope will be replaced.')
+    if (!confirmed) return
+    setIsRestoringBackup(true)
+    setBackupStatus(null)
+    try {
+      await repo.restoreBackup(path)
+      const restoredSettings = await loadAppSettings(isDesktopApp)
+      setSettings(restoredSettings)
+      await refreshData()
+      setBackupStatus('Backup restored.')
+      await loadBackups()
+    } finally {
+      setIsRestoringBackup(false)
+    }
+  }
+
+  const handleRestoreFromFile = async () => {
+    if (!isDesktopApp) return
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: 'REFX Backup', extensions: ['json'] }],
+    })
+    if (!selected || Array.isArray(selected)) return
+    await handleRestoreBackup(selected)
+  }
+
+  const handleDeleteBackup = async (path: string) => {
+    if (!isDesktopApp) return
+    const confirmed = window.confirm('Delete this backup file?')
+    if (!confirmed) return
+    await repo.deleteBackup(path)
+    await loadBackups()
   }
 
   return (
@@ -360,6 +429,132 @@ export default function SettingsPage() {
                   <CardContent className="space-y-4">
                     <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
                       This removes documents, notes, comments, tags, and imported files, then recreates one empty library.
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Backups</CardTitle>
+                    <CardDescription>Single-file local backups for documents, notes, maps, and settings.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-sm font-medium">Automatic Backups</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">Create scheduled backups on app startup when due.</p>
+                        </div>
+                        <Checkbox
+                          checked={settings.autoBackupEnabled}
+                          onCheckedChange={(checked) => updateSettings('autoBackupEnabled', !!checked)}
+                        />
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <Label className="text-sm">Backup Scope</Label>
+                          <Select
+                            value={settings.autoBackupScope}
+                            onValueChange={(value) => updateSettings('autoBackupScope', value as StoredAppSettings['autoBackupScope'])}
+                          >
+                            <SelectTrigger className="mt-1.5">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="full">Everything</SelectItem>
+                              <SelectItem value="documents">Documents Only</SelectItem>
+                              <SelectItem value="settings">Settings Only</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-sm">Interval</Label>
+                          <Select
+                            value={settings.autoBackupIntervalDays}
+                            onValueChange={(value) => updateSettings('autoBackupIntervalDays', value as StoredAppSettings['autoBackupIntervalDays'])}
+                          >
+                            <SelectTrigger className="mt-1.5">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="1">Daily</SelectItem>
+                              <SelectItem value="3">Every 3 days</SelectItem>
+                              <SelectItem value="7">Weekly</SelectItem>
+                              <SelectItem value="14">Every 2 weeks</SelectItem>
+                              <SelectItem value="30">Monthly</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-3">
+                      <Label className="text-sm font-medium">Manual Backup</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => void handleCreateBackup('full')} disabled={isCreatingBackup}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Everything
+                        </Button>
+                        <Button variant="outline" onClick={() => void handleCreateBackup('documents')} disabled={isCreatingBackup}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Documents
+                        </Button>
+                        <Button variant="outline" onClick={() => void handleCreateBackup('settings')} disabled={isCreatingBackup}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Settings
+                        </Button>
+                        <Button variant="outline" onClick={() => void handleRestoreFromFile()} disabled={isRestoringBackup}>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Restore File
+                        </Button>
+                      </div>
+                      {backupStatus ? <p className="text-xs text-muted-foreground">{backupStatus}</p> : null}
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium">Saved Backups</Label>
+                        <Button variant="ghost" size="sm" onClick={() => void loadBackups()}>
+                          <RotateCcw className="mr-2 h-4 w-4" />
+                          Refresh
+                        </Button>
+                      </div>
+
+                      {backups.length === 0 ? (
+                        <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
+                          No backups yet.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {backups.map((backup) => (
+                            <div key={backup.path} className="rounded-xl border border-border/80 bg-background/70 p-3">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-medium">{backup.fileName}</p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {backup.scope} • {backup.documentCount} docs • {backup.noteCount} notes • {backup.relationCount} links
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">{new Date(backup.createdAt).toLocaleString()}</p>
+                                </div>
+                                <div className="flex gap-2">
+                                  <Button variant="outline" size="sm" onClick={() => void handleRestoreBackup(backup.path)} disabled={isRestoringBackup}>
+                                    Restore
+                                  </Button>
+                                  <Button variant="ghost" size="icon-sm" onClick={() => void handleDeleteBackup(backup.path)}>
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>

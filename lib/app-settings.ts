@@ -14,6 +14,9 @@ export type StoredAppSettings = {
     | 'dark-red'
     | 'dark-green'
   fontSize: '14' | '16' | '18'
+  autoBackupEnabled: boolean
+  autoBackupScope: 'full' | 'documents' | 'settings'
+  autoBackupIntervalDays: '1' | '3' | '7' | '14' | '30'
   autoOcr: boolean
   autoMetadata: boolean
   autoOnlineMetadataEnrichment: boolean
@@ -25,6 +28,9 @@ export type StoredAppSettings = {
 export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   theme: 'system',
   fontSize: '16',
+  autoBackupEnabled: false,
+  autoBackupScope: 'full',
+  autoBackupIntervalDays: '7',
   autoOcr: true,
   autoMetadata: true,
   autoOnlineMetadataEnrichment: false,
@@ -106,6 +112,9 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
   return {
     theme: parseValue(stored.theme, DEFAULT_APP_SETTINGS.theme),
     fontSize: parseValue(stored.fontSize, DEFAULT_APP_SETTINGS.fontSize),
+    autoBackupEnabled: parseValue(stored.autoBackupEnabled, DEFAULT_APP_SETTINGS.autoBackupEnabled),
+    autoBackupScope: parseValue(stored.autoBackupScope, DEFAULT_APP_SETTINGS.autoBackupScope),
+    autoBackupIntervalDays: parseValue(stored.autoBackupIntervalDays, DEFAULT_APP_SETTINGS.autoBackupIntervalDays),
     autoOcr: parseValue(stored.autoOcr, DEFAULT_APP_SETTINGS.autoOcr),
     autoMetadata: parseValue(stored.autoMetadata, DEFAULT_APP_SETTINGS.autoMetadata),
     autoOnlineMetadataEnrichment: parseValue(
@@ -132,6 +141,9 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
   await repo.setSettings({
     theme: JSON.stringify(settings.theme),
     fontSize: JSON.stringify(settings.fontSize),
+    autoBackupEnabled: JSON.stringify(settings.autoBackupEnabled),
+    autoBackupScope: JSON.stringify(settings.autoBackupScope),
+    autoBackupIntervalDays: JSON.stringify(settings.autoBackupIntervalDays),
     autoOcr: JSON.stringify(settings.autoOcr),
     autoMetadata: JSON.stringify(settings.autoMetadata),
     autoOnlineMetadataEnrichment: JSON.stringify(settings.autoOnlineMetadataEnrichment),

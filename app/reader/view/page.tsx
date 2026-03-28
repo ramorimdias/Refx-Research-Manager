@@ -10,10 +10,17 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import * as repo from '@/lib/repositories/local-db'
-import { appDataDir, copyFile, getCurrentWindow, isTauri, join, mkdir, open, readFile } from '@/lib/tauri/client'
+import { appDataDir, convertFileSrc, copyFile, getCurrentWindow, isTauri, join, mkdir, open, readFile } from '@/lib/tauri/client'
 import { useAppStore } from '@/lib/store'
 import { buildDocumentCommentTitle, getDocumentPageComments, getNextDocumentCommentNumber } from '@/lib/services/document-comment-service'
-import { extractPdfPageWords, extractSearchPreview, findPdfSearchOccurrences, type PdfWord, type SearchOccurrence } from '@/lib/services/document-processing'
+import {
+  extractPdfPageWords,
+  extractSearchPreview,
+  findPdfSearchOccurrences,
+  loadPdfJsModule,
+  type PdfWord,
+  type SearchOccurrence,
+} from '@/lib/services/document-processing'
 import { findDocumentPageHits } from '@/lib/services/document-search-service'
 import { DETACHED_READER_QUERY_VALUE, openDetachedReaderWindow } from '@/lib/services/reader-window-service'
 import { cn } from '@/lib/utils'
@@ -119,6 +126,8 @@ export default function ReaderViewPage() {
   const [isRunningOcr, setIsRunningOcr] = useState(false)
   const [showHighlights, setShowHighlights] = useState(true)
   const [pdfDocument, setPdfDocument] = useState<{ numPages: number; getPage: (pageNumber: number) => Promise<unknown>; destroy?: () => Promise<void> } | null>(null)
+  const [embeddedPdfUrl, setEmbeddedPdfUrl] = useState<string | null>(null)
+  const [viewerMode, setViewerMode] = useState<'pdfjs' | 'native' | 'unavailable'>('pdfjs')
   const [renderedPageSize, setRenderedPageSize] = useState({ width: 0, height: 0 })
   const [pageWords, setPageWords] = useState<PdfWord[]>([])
   const [searchQuery, setSearchQuery] = useState(queryFromRoute)
@@ -133,14 +142,6 @@ export default function ReaderViewPage() {
   const pageScrollLockRef = useRef(false)
   const initializedDocumentIdRef = useRef<string | null>(null)
   const routeSelectionKeyRef = useRef<string | null>(null)
-
-  const loadPdfJs = async () => {
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
-    if (typeof window !== 'undefined' && !pdfjs.GlobalWorkerOptions.workerSrc) {
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/legacy/build/pdf.worker.mjs', import.meta.url).toString()
-    }
-    return pdfjs
-  }
 
   useEffect(() => {
     setSearchQuery(queryFromRoute)
@@ -185,6 +186,8 @@ export default function ReaderViewPage() {
     const loadPdf = async () => {
       if (!document?.filePath || !isTauri()) {
         setPdfDocument(null)
+        setEmbeddedPdfUrl(null)
+        setViewerMode('unavailable')
         setRenderedPageSize({ width: 0, height: 0 })
         setPageWords([])
         return
@@ -193,7 +196,7 @@ export default function ReaderViewPage() {
       setIsPdfLoading(true)
 
       try {
-        const pdfjs = await loadPdfJs()
+        const pdfjs = await loadPdfJsModule()
         const bytes = await readFile(document.filePath)
         const task = pdfjs.getDocument({
           data: new Uint8Array(bytes),
@@ -215,14 +218,18 @@ export default function ReaderViewPage() {
         }
 
         setPdfDocument(nextPdf)
+        setEmbeddedPdfUrl(convertFileSrc(document.filePath))
+        setViewerMode('pdfjs')
         setViewerError(null)
         setPage((current) => Math.min(Math.max(1, current), nextPdf.numPages))
       } catch (error) {
         console.error('Failed to load PDF for embedded viewer:', error)
         setPdfDocument(null)
+        setEmbeddedPdfUrl(convertFileSrc(document.filePath))
+        setViewerMode('native')
         setRenderedPageSize({ width: 0, height: 0 })
         setPageWords([])
-        setViewerError('Embedded PDF preview is unavailable. Open this document in your system PDF app.')
+        setViewerError('Advanced PDF rendering is unavailable. Showing a basic PDF preview instead.')
       } finally {
         if (!cancelled) {
           setIsPdfLoading(false)
@@ -262,7 +269,7 @@ export default function ReaderViewPage() {
         return
       }
 
-      if (document.filePath && isTauri()) {
+      if (viewerMode === 'pdfjs' && document.filePath && isTauri()) {
         try {
           const results = await findPdfSearchOccurrences(document.filePath, searchQuery, document.pageCount)
           if (!cancelled) {
@@ -287,13 +294,13 @@ export default function ReaderViewPage() {
     return () => {
       cancelled = true
     }
-  }, [document, searchQuery])
+  }, [document, searchQuery, viewerMode])
 
   useEffect(() => {
     let cancelled = false
 
     const loadPageWords = async () => {
-      if (!document?.filePath || !isTauri()) {
+      if (!document?.filePath || !isTauri() || viewerMode !== 'pdfjs') {
         setPageWords([])
         return
       }
@@ -315,13 +322,14 @@ export default function ReaderViewPage() {
     return () => {
       cancelled = true
     }
-  }, [document?.filePath, page])
+  }, [document?.filePath, page, viewerMode])
 
   const activeOccurrence = searchOccurrences[activeOccurrenceIndex] ?? null
   const currentPageOccurrences = useMemo(
     () => searchOccurrences.filter((occurrence) => occurrence.estimatedPage === page),
     [page, searchOccurrences],
   )
+  const canUsePreciseViewer = viewerMode === 'pdfjs' && Boolean(pdfDocument)
   const currentPageHighlights = useMemo(
     () => currentPageOccurrences.filter((occurrence) => occurrence.rects?.length),
     [currentPageOccurrences],
@@ -864,18 +872,18 @@ export default function ReaderViewPage() {
           </Button>
         </div>
         <div ref={readerViewportRef} className="flex-1 overflow-auto bg-muted/30 p-4">
-          {showHighlights && searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && (
-              <div className="mx-auto mb-3 max-w-5xl rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-               Showing page-level matches for this page.
-              </div>
-            )}
-            {isSelectingCommentPosition && (
-              <div className="mx-auto mb-3 max-w-5xl rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
-               Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} belongs on the page.
-              </div>
-            )}
-          {pdfDocument ? (
-            <div className="flex min-h-full items-start justify-center">
+          {showHighlights && searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && viewerMode === 'pdfjs' && (
+                <div className="mx-auto mb-3 max-w-5xl rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                 Showing page-level matches for this page.
+                </div>
+              )}
+              {isSelectingCommentPosition && canUsePreciseViewer && (
+                <div className="mx-auto mb-3 max-w-5xl rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
+                 Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} belongs on the page.
+                </div>
+              )}
+            {canUsePreciseViewer ? (
+              <div className="flex min-h-full items-start justify-center">
               <div
                 className={cn(
                   'relative overflow-hidden rounded border bg-white shadow-sm',
@@ -971,9 +979,30 @@ export default function ReaderViewPage() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
-            </div>
-          ) : (
+            ) : embeddedPdfUrl ? (
+              <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-3">
+                {viewerError ? (
+                  <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                    {viewerError}
+                  </div>
+                ) : null}
+                <div className="overflow-hidden rounded border bg-white shadow-sm">
+                  <object
+                    key={`${embeddedPdfUrl}-${page}-${zoom}`}
+                    data={`${embeddedPdfUrl}#page=${page}&zoom=${zoom}`}
+                    type="application/pdf"
+                    aria-label={document?.title ?? 'PDF preview'}
+                    className="h-[calc(100vh-13rem)] w-full bg-white"
+                  >
+                    <div className="flex h-[calc(100vh-13rem)] items-center justify-center p-6 text-sm text-muted-foreground">
+                      PDF preview unavailable. Open the file externally from the toolbar if needed.
+                    </div>
+                  </object>
+                </div>
+              </div>
+            ) : (
               <div className="space-y-2 p-6">
                <p>{viewerError ?? 'PDF unavailable.'}</p>
                 {isDesktopApp && document.id && (
@@ -1067,7 +1096,7 @@ export default function ReaderViewPage() {
                   Cancel
                 </Button>
               ) : !isNoteEditorOpen ? (
-                <Button size="sm" onClick={handleStartNewComment} disabled={!pdfDocument}>
+                <Button size="sm" onClick={handleStartNewComment} disabled={!canUsePreciseViewer}>
                   New Note
                 </Button>
               ) : null
@@ -1096,7 +1125,7 @@ export default function ReaderViewPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => setIsSelectingCommentPosition(true)}
-                    disabled={!pdfDocument}
+                    disabled={!canUsePreciseViewer}
                   >
                     <MapPin className="mr-2 h-4 w-4" />
                     {commentDraftPosition ? 'Move Balloon' : 'Choose Position'}

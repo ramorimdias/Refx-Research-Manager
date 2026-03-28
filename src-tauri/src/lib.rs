@@ -1,4 +1,5 @@
 mod commands;
+mod backup;
 
 use tauri::Manager;
 
@@ -51,6 +52,11 @@ pub fn run() {
             commands::get_settings,
             commands::set_settings,
             commands::clear_local_data,
+            backup::create_backup,
+            backup::list_backups,
+            backup::delete_backup,
+            backup::restore_backup,
+            backup::run_scheduled_backup_if_due,
         ])
         .setup(|app| {
             if let (Some(window), Some(icon)) = (

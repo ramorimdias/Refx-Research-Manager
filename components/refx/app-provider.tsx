@@ -5,6 +5,7 @@ import Image from 'next/image'
 import { useAppStore } from '@/lib/store'
 import { Loader2 } from 'lucide-react'
 import { getBaseThemeMode, getThemeAccentVariant, loadAppSettings } from '@/lib/app-settings'
+import * as repo from '@/lib/repositories/local-db'
 import { useTheme } from 'next-themes'
 
 interface AppProviderProps {
@@ -48,6 +49,15 @@ export function AppProvider({ children }: AppProviderProps) {
         delete document.documentElement.dataset.refxAccent
       }
       document.documentElement.style.fontSize = `${settings.fontSize}px`
+
+      if (isDesktopApp && settings.autoBackupEnabled) {
+        void repo.runScheduledBackupIfDue(
+          settings.autoBackupScope,
+          Number(settings.autoBackupIntervalDays),
+        ).catch((error) => {
+          console.error('Automatic backup failed:', error)
+        })
+      }
     }
 
     void applySettings()

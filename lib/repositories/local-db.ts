@@ -292,6 +292,21 @@ export type DbGraphViewNodeLayout = {
   updatedAt: string
 }
 
+export type DbBackupScope = 'full' | 'documents' | 'settings'
+
+export type DbBackupFileMetadata = {
+  id: string
+  fileName: string
+  path: string
+  scope: DbBackupScope
+  createdAt: string
+  fileSize: number
+  automatic: boolean
+  documentCount: number
+  noteCount: number
+  relationCount: number
+}
+
 export type DbUpsertGraphViewNodeLayoutInput = {
   graphViewId: string
   documentId: string
@@ -472,4 +487,30 @@ export async function setSettings(values: Record<string, string>) {
 
 export async function clearLocalData() {
   return invoke<void>('clear_local_data')
+}
+
+export async function createBackup(scope: DbBackupScope, automatic?: boolean) {
+  return invoke<DbBackupFileMetadata>('create_backup', {
+    input: { scope, automatic },
+  })
+}
+
+export async function listBackups() {
+  return invoke<DbBackupFileMetadata[]>('list_backups')
+}
+
+export async function deleteBackup(path: string) {
+  return invoke<boolean>('delete_backup', { path })
+}
+
+export async function restoreBackup(path: string) {
+  return invoke<void>('restore_backup', {
+    input: { path },
+  })
+}
+
+export async function runScheduledBackupIfDue(scope: DbBackupScope, intervalDays: number) {
+  return invoke<DbBackupFileMetadata | null>('run_scheduled_backup_if_due', {
+    input: { scope, intervalDays },
+  })
 }

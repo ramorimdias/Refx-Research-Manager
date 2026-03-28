@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url)
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const repoRoot = dirname(scriptDir)
 const publicTesseractDir = join(repoRoot, 'public', 'tesseract')
+const publicPdfJsDir = join(repoRoot, 'public', 'pdfjs')
 const workerTargetDir = join(publicTesseractDir, 'worker')
 const coreTargetDir = join(publicTesseractDir, 'core')
 const langTargetDir = join(publicTesseractDir, 'lang', 'eng', '4.0.0_best_int')
@@ -43,9 +44,17 @@ function syncLanguageAssets() {
   cpSync(join(langDir, '4.0.0_best_int'), langTargetDir, { recursive: true })
 }
 
+function syncPdfJsAssets() {
+  const pdfJsDir = packageDir('pdfjs-dist')
+  resetDirectory(publicPdfJsDir)
+  copyFileSync(join(pdfJsDir, 'build', 'pdf.mjs'), join(publicPdfJsDir, 'pdf.js'))
+  copyFileSync(join(pdfJsDir, 'build', 'pdf.worker.mjs'), join(publicPdfJsDir, 'pdf.worker.js'))
+}
+
 resetDirectory(publicTesseractDir)
 syncWorkerAssets()
 syncCoreAssets()
 syncLanguageAssets()
+syncPdfJsAssets()
 
-console.log(`Synced local Tesseract assets into ${basename(publicTesseractDir)}/`)
+console.log(`Synced local Tesseract assets into ${basename(publicTesseractDir)}/ and PDF.js assets into ${basename(publicPdfJsDir)}/`)
