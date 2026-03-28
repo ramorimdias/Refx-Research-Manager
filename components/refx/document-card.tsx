@@ -11,8 +11,17 @@ import {
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import type { Document, DocumentEphemeralUiFlags } from '@/lib/types'
+import type { Document, DocumentEphemeralUiFlags, ReadingStage } from '@/lib/types'
 import { NewBadge, OcrStatusBadge, ReadingStageBadge, StarRating } from './common'
 import { useAppStore } from '@/lib/store'
 import { DocumentActions, DocumentContextMenu } from './document-actions'
@@ -21,6 +30,45 @@ interface DocumentCardProps {
   document: Document
   ephemeralFlags?: DocumentEphemeralUiFlags
   variant?: 'grid' | 'list'
+}
+
+const READING_STAGE_OPTIONS: Array<{ value: ReadingStage; label: string }> = [
+  { value: 'unread', label: 'Unread' },
+  { value: 'reading', label: 'Reading' },
+  { value: 'finished', label: 'Finished' },
+]
+
+function ReadingStageMenu({
+  stage,
+  onChange,
+}: {
+  stage: ReadingStage
+  onChange: (stage: ReadingStage) => void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="w-fit rounded-full"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ReadingStageBadge stage={stage} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
+        <DropdownMenuLabel>Reading Status</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={stage} onValueChange={(value) => onChange(value as ReadingStage)}>
+          {READING_STAGE_OPTIONS.map((option) => (
+            <DropdownMenuRadioItem key={option.value} value={option.value}>
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }: DocumentCardProps) {
@@ -75,7 +123,10 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
                   {doc.commentCount}
                 </div>
               )}
-              <ReadingStageBadge stage={doc.readingStage} />
+              <ReadingStageMenu
+                stage={doc.readingStage}
+                onChange={(readingStage) => void updateDocument(doc.id, { readingStage })}
+              />
               <StarRating
                 rating={doc.rating}
                 onChange={(rating) => updateDocument(doc.id, { rating })}
@@ -161,7 +212,10 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
 
           <div className="flex items-center justify-between border-t border-border/70 pt-3">
             <div className="flex items-center gap-2">
-              <ReadingStageBadge stage={doc.readingStage} />
+              <ReadingStageMenu
+                stage={doc.readingStage}
+                onChange={(readingStage) => void updateDocument(doc.id, { readingStage })}
+              />
               {doc.hasOcr && <OcrStatusBadge status={doc.ocrStatus} />}
             </div>
             <div className="flex items-center gap-2">

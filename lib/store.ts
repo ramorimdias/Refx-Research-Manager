@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { isTauri } from '@/lib/tauri/client'
 import { bootstrapDesktop, importPdfs } from '@/lib/services/desktop-service'
 import { deriveMetadataStatus, markMetadataFieldProvenanceAsUser, markMetadataFieldsAsUserEdited, parseMetadataProvenance, parseMetadataUserEditedFields } from '@/lib/services/document-metadata-service'
+import { normalizeReadingStage } from '@/lib/services/document-reading-stage'
 import { parseDocumentClassification } from '@/lib/services/document-classification-service'
 import { resumeDocumentIngestion } from '@/lib/services/document-ingestion-service'
 import {
@@ -279,7 +280,7 @@ function toUiDocument(
     processingError: d.processingError ?? undefined,
     processingUpdatedAt: d.processingUpdatedAt ? new Date(d.processingUpdatedAt) : undefined,
     lastProcessedAt: d.lastProcessedAt ? new Date(d.lastProcessedAt) : undefined,
-    readingStage: (d.readingStage ?? 'unread') as ReadingStage,
+    readingStage: normalizeReadingStage(d.readingStage),
     rating: d.rating ?? 0,
     favorite: d.favorite ?? false,
     tags: d.tags ?? [],

@@ -20,12 +20,14 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useDocumentListSelection } from '@/lib/hooks/use-document-list-selection'
 import { cn } from '@/lib/utils'
-import type { Document, DocumentEphemeralUiFlags } from '@/lib/types'
+import type { Document, DocumentEphemeralUiFlags, ReadingStage } from '@/lib/types'
 import { MetadataStatusBadge, NewBadge, OcrStatusBadge, ReadingStageBadge, StarRating } from './common'
 import { DocumentBulkActions } from './document-bulk-actions'
 import { useAppStore } from '@/lib/store'
@@ -63,6 +65,11 @@ const COLUMN_DEFINITIONS: ColumnDefinition[] = [
 
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMN_DEFINITIONS.map((column) => [column.key, column.defaultWidth])) as Record<ColumnKey, number>
 const DEFAULT_VISIBILITY = Object.fromEntries(COLUMN_DEFINITIONS.map((column) => [column.key, true])) as Record<ColumnKey, boolean>
+const READING_STAGE_OPTIONS: Array<{ value: ReadingStage; label: string }> = [
+  { value: 'unread', label: 'Unread' },
+  { value: 'reading', label: 'Reading' },
+  { value: 'finished', label: 'Finished' },
+]
 
 export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTableProps) {
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(DEFAULT_WIDTHS)
@@ -355,9 +362,34 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                   {columnVisibility.status && (
                     <TableCell>
                       <div className="flex flex-col gap-1">
-                        <ReadingStageBadge stage={doc.readingStage} />
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              data-selection-ignore="true"
+                              className="w-fit rounded-full"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <ReadingStageBadge stage={doc.readingStage} />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
+                            <DropdownMenuLabel>Reading Status</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuRadioGroup
+                              value={doc.readingStage}
+                              onValueChange={(value) => void updateDocument(doc.id, { readingStage: value as ReadingStage })}
+                            >
+                              {READING_STAGE_OPTIONS.map((stage) => (
+                                <DropdownMenuRadioItem key={stage.value} value={stage.value}>
+                                  {stage.label}
+                                </DropdownMenuRadioItem>
+                              ))}
+                            </DropdownMenuRadioGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         {doc.hasOcr && <OcrStatusBadge status={doc.ocrStatus} />}
-                        {doc.metadataStatus !== 'complete' && (
+                        {doc.metadataStatus === 'missing' && (
                           <MetadataStatusBadge status={doc.metadataStatus} />
                         )}
                       </div>

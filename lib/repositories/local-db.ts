@@ -175,6 +175,13 @@ export type DbAnnotation = {
   createdAt: string
 }
 
+export type DbCreateAnnotationInput = {
+  documentId: string
+  pageNumber: number
+  kind: string
+  content?: string
+}
+
 export type DbDocumentRelation = {
   id: string
   sourceDocumentId: string
@@ -382,6 +389,14 @@ export async function listAnnotationsForDocument(documentId: string) {
 
 export async function listAllAnnotations() {
   return invoke<DbAnnotation[]>('list_all_annotations')
+}
+
+export async function createAnnotation(input: DbCreateAnnotationInput) {
+  return invoke<DbAnnotation>('create_annotation', { input })
+}
+
+export async function deleteAnnotation(id: string) {
+  return invoke<boolean>('delete_annotation', { id })
 }
 
 export async function createRelation(input: DbCreateDocumentRelationInput) {

@@ -5,6 +5,16 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Search, SquareArrowOutUpRight, StickyNote, Trash2, ZoomIn, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Input } from '@/components/ui/input'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
 import { Textarea } from '@/components/ui/textarea'
@@ -23,7 +33,15 @@ import {
 } from '@/lib/services/document-processing'
 import { findDocumentPageHits } from '@/lib/services/document-search-service'
 import { DETACHED_READER_QUERY_VALUE, openDetachedReaderWindow } from '@/lib/services/reader-window-service'
+import { serializeAreaNoteAnchor, type NoteAreaRect } from '@/lib/services/document-note-anchor-service'
 import { cn } from '@/lib/utils'
+
+type ReaderAreaHighlight = {
+  id: string
+  pageNumber: number
+  rect: { x: number; y: number; width: number; height: number }
+  color: string
+}
 
 function highlightText(text: string, query: string) {
   const trimmed = query.trim()
@@ -70,6 +88,41 @@ function clamp01(value: number) {
   return Math.min(1, Math.max(0, value))
 }
 
+function parseAreaHighlight(annotation: repo.DbAnnotation): ReaderAreaHighlight | null {
+  if (annotation.kind !== 'highlight') return null
+  if (!annotation.content) return null
+
+  try {
+    const parsed = JSON.parse(annotation.content) as {
+      rect?: { x?: number; y?: number; width?: number; height?: number }
+      color?: string
+    }
+
+    if (
+      typeof parsed.rect?.x !== 'number'
+      || typeof parsed.rect?.y !== 'number'
+      || typeof parsed.rect?.width !== 'number'
+      || typeof parsed.rect?.height !== 'number'
+    ) {
+      return null
+    }
+
+    return {
+      id: annotation.id,
+      pageNumber: annotation.pageNumber,
+      rect: {
+        x: clamp01(parsed.rect.x),
+        y: clamp01(parsed.rect.y),
+        width: clamp01(parsed.rect.width),
+        height: clamp01(parsed.rect.height),
+      },
+      color: parsed.color ?? '#facc15',
+    }
+  } catch {
+    return null
+  }
+}
+
 function ReaderToolbarIconButton({
   label,
   children,
@@ -110,13 +163,15 @@ export default function ReaderViewPage() {
   const zoomFromRoute = Number(params.get('zoom') ?? '100')
   const returnTo = params.get('returnTo') ?? ''
   const isDetachedReaderWindow = params.get('detached') === DETACHED_READER_QUERY_VALUE
-  const { documents, notes, scanDocumentsOcr, setActiveDocument, updateDocument, loadNotes, refreshData, isDesktopApp } = useAppStore()
+  const { documents, notes, annotations, scanDocumentsOcr, setActiveDocument, updateDocument, loadNotes, refreshData, isDesktopApp } = useAppStore()
   const document = useMemo(() => documents.find((entry) => entry.id === id) ?? null, [documents, id])
   const [page, setPage] = useState(Number.isFinite(pageFromRoute) && pageFromRoute > 0 ? pageFromRoute : 1)
   const [zoom, setZoom] = useState(normalizeZoomLevel(zoomFromRoute))
   const [commentDraftContent, setCommentDraftContent] = useState('')
   const [commentDraftPosition, setCommentDraftPosition] = useState<{ x: number; y: number } | null>(null)
+  const [commentDraftAreaRect, setCommentDraftAreaRect] = useState<NoteAreaRect | null>(null)
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null)
+  const [isDeleteCommentDialogOpen, setIsDeleteCommentDialogOpen] = useState(false)
   const [isNoteEditorOpen, setIsNoteEditorOpen] = useState(false)
   const [isSelectingCommentPosition, setIsSelectingCommentPosition] = useState(false)
   const [isSavingComment, setIsSavingComment] = useState(false)
@@ -125,7 +180,7 @@ export default function ReaderViewPage() {
   const [hasViewerTimedOut, setHasViewerTimedOut] = useState(false)
   const [isPageRendering, setIsPageRendering] = useState(false)
   const [isRunningOcr, setIsRunningOcr] = useState(false)
-  const [showHighlights, setShowHighlights] = useState(true)
+  const [isHighlightMode, setIsHighlightMode] = useState(false)
   const [pdfDocument, setPdfDocument] = useState<{ numPages: number; getPage: (pageNumber: number) => Promise<unknown>; destroy?: () => Promise<void> } | null>(null)
   const [embeddedPdfUrl, setEmbeddedPdfUrl] = useState<string | null>(null)
   const [viewerMode, setViewerMode] = useState<'pdfjs' | 'native' | 'unavailable'>('pdfjs')
@@ -136,13 +191,18 @@ export default function ReaderViewPage() {
   const [searchOccurrences, setSearchOccurrences] = useState<SearchOccurrence[]>([])
   const occurrenceRefs = useRef<Array<HTMLButtonElement | null>>([])
   const commentCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const noteEditorTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shouldAutoScrollOccurrenceRef = useRef(false)
   const shouldAutoScrollCommentRef = useRef(false)
+  const shouldAutoFocusNoteEditorRef = useRef(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const readerViewportRef = useRef<HTMLDivElement | null>(null)
   const pageScrollLockRef = useRef(false)
   const initializedDocumentIdRef = useRef<string | null>(null)
   const routeSelectionKeyRef = useRef<string | null>(null)
+  const notePlacementStartRef = useRef<{ x: number; y: number } | null>(null)
+  const highlightDragStartRef = useRef<{ x: number; y: number } | null>(null)
+  const [draftHighlightRect, setDraftHighlightRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
 
   useEffect(() => {
     setSearchQuery(queryFromRoute)
@@ -360,6 +420,16 @@ export default function ReaderViewPage() {
     () => (id ? getDocumentPageComments(notes, id, page) : []),
     [id, notes, page],
   )
+  const currentPageAreaHighlights = useMemo(
+    () =>
+      (id
+        ? annotations
+            .filter((annotation) => annotation.documentId === id && annotation.pageNumber === page)
+            .map(parseAreaHighlight)
+            .filter((annotation): annotation is ReaderAreaHighlight => Boolean(annotation))
+        : []),
+    [annotations, id, page],
+  )
   const nextCommentNumber = useMemo(
     () => (id ? getNextDocumentCommentNumber(notes, id) : 1),
     [id, notes],
@@ -375,12 +445,30 @@ export default function ReaderViewPage() {
       ),
     [currentPageComments],
   )
+  const noteAreaComments = useMemo(
+    () => positionedPageComments.filter((comment) => comment.areaRect),
+    [positionedPageComments],
+  )
+  const notePointComments = useMemo(
+    () => positionedPageComments.filter((comment) => !comment.areaRect),
+    [positionedPageComments],
+  )
+  const draftNotePreview = useMemo(() => {
+    if (selectedCommentId || !commentDraftPosition) return null
+
+    return {
+      position: commentDraftPosition,
+      areaRect: commentDraftAreaRect,
+      commentNumber: nextCommentNumber,
+    }
+  }, [commentDraftAreaRect, commentDraftPosition, nextCommentNumber, selectedCommentId])
 
   useEffect(() => {
+    if (isSavingComment) return
     if (selectedCommentId && !currentPageComments.some((comment) => comment.id === selectedCommentId)) {
       setSelectedCommentId(null)
     }
-  }, [currentPageComments, selectedCommentId])
+  }, [currentPageComments, isSavingComment, selectedCommentId])
 
   useEffect(() => {
     if (selectedComment) {
@@ -390,15 +478,22 @@ export default function ReaderViewPage() {
           ? { x: selectedComment.positionX, y: selectedComment.positionY }
           : null,
       )
+      setCommentDraftAreaRect(selectedComment.areaRect ?? null)
     } else {
       setCommentDraftContent('')
       setCommentDraftPosition(null)
+      setCommentDraftAreaRect(null)
     }
-  }, [page, selectedComment?.content, selectedComment?.id, selectedComment?.positionX, selectedComment?.positionY])
+  }, [page, selectedComment?.areaRect, selectedComment?.content, selectedComment?.id, selectedComment?.positionX, selectedComment?.positionY])
 
   useEffect(() => {
     setIsSelectingCommentPosition(false)
     setIsNoteEditorOpen(false)
+    setCommentDraftAreaRect(null)
+    notePlacementStartRef.current = null
+    setIsHighlightMode(false)
+    setDraftHighlightRect(null)
+    highlightDragStartRef.current = null
   }, [page])
 
   useEffect(() => {
@@ -421,6 +516,17 @@ export default function ReaderViewPage() {
   }, [selectedCommentId])
 
   useEffect(() => {
+    if (!isNoteEditorOpen || !shouldAutoFocusNoteEditorRef.current) return
+
+    const rafId = window.requestAnimationFrame(() => {
+      noteEditorTextareaRef.current?.focus()
+      shouldAutoFocusNoteEditorRef.current = false
+    })
+
+    return () => window.cancelAnimationFrame(rafId)
+  }, [isNoteEditorOpen])
+
+  useEffect(() => {
     const viewport = readerViewportRef.current
     if (!viewport) return
 
@@ -431,6 +537,13 @@ export default function ReaderViewPage() {
     }
 
     const handleWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        const zoomStep = event.deltaY < 0 ? 2 : -2
+        setZoom((current) => Math.max(50, Math.min(250, current + zoomStep)))
+        return
+      }
+
       if (pageScrollLockRef.current || !pdfDocument) return
       if (isSelectingCommentPosition) return
 
@@ -650,14 +763,194 @@ export default function ReaderViewPage() {
     const y = clamp01((event.clientY - bounds.top) / bounds.height)
 
     setCommentDraftPosition({ x, y })
+    setCommentDraftAreaRect(null)
+    shouldAutoFocusNoteEditorRef.current = true
     setIsSelectingCommentPosition(false)
     setIsNoteEditorOpen(true)
+  }
+
+  const updateDraftNoteRect = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = notePlacementStartRef.current
+    if (!start) return
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return
+
+    const currentX = clamp01((event.clientX - bounds.left) / bounds.width)
+    const currentY = clamp01((event.clientY - bounds.top) / bounds.height)
+
+    setCommentDraftAreaRect({
+      x: Math.min(start.x, currentX),
+      y: Math.min(start.y, currentY),
+      width: Math.abs(currentX - start.x),
+      height: Math.abs(currentY - start.y),
+    })
+  }
+
+  const handleNotePlacementPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isSelectingCommentPosition) return
+    if (event.button !== 0) return
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const start = {
+      x: clamp01((event.clientX - bounds.left) / bounds.width),
+      y: clamp01((event.clientY - bounds.top) / bounds.height),
+    }
+
+    notePlacementStartRef.current = start
+    setCommentDraftPosition(start)
+    setCommentDraftAreaRect({
+      x: start.x,
+      y: start.y,
+      width: 0,
+      height: 0,
+    })
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleNotePlacementPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!notePlacementStartRef.current) return
+    updateDraftNoteRect(event)
+  }
+
+  const handleNotePlacementPointerEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = notePlacementStartRef.current
+    if (!start) return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    updateDraftNoteRect(event)
+
+    const nextRect = commentDraftAreaRect ?? {
+      x: start.x,
+      y: start.y,
+      width: 0,
+      height: 0,
+    }
+
+    notePlacementStartRef.current = null
+
+    if (nextRect.width >= 0.01 && nextRect.height >= 0.01) {
+      setCommentDraftPosition({ x: nextRect.x, y: nextRect.y })
+      setCommentDraftAreaRect(nextRect)
+    } else {
+      setCommentDraftPosition(start)
+      setCommentDraftAreaRect(null)
+    }
+
+    setIsSelectingCommentPosition(false)
+    setIsNoteEditorOpen(true)
+  }
+
+  const updateDraftHighlightRect = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = highlightDragStartRef.current
+    if (!start) return
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return
+
+    const currentX = clamp01((event.clientX - bounds.left) / bounds.width)
+    const currentY = clamp01((event.clientY - bounds.top) / bounds.height)
+
+    setDraftHighlightRect({
+      x: Math.min(start.x, currentX),
+      y: Math.min(start.y, currentY),
+      width: Math.abs(currentX - start.x),
+      height: Math.abs(currentY - start.y),
+    })
+  }
+
+  const handleHighlightPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isHighlightMode || !canUsePreciseViewer) return
+    if (event.button !== 0) return
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const start = {
+      x: clamp01((event.clientX - bounds.left) / bounds.width),
+      y: clamp01((event.clientY - bounds.top) / bounds.height),
+    }
+
+    highlightDragStartRef.current = start
+    setDraftHighlightRect({
+      x: start.x,
+      y: start.y,
+      width: 0,
+      height: 0,
+    })
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleHighlightPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!highlightDragStartRef.current) return
+    updateDraftHighlightRect(event)
+  }
+
+  const handleHighlightPointerEnd = async (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = highlightDragStartRef.current
+    if (!start) return
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+
+    updateDraftHighlightRect(event)
+
+    const rect = draftHighlightRect
+      ?? {
+        x: start.x,
+        y: start.y,
+        width: 0,
+        height: 0,
+      }
+
+    highlightDragStartRef.current = null
+    setDraftHighlightRect(null)
+
+    if (!id || !isDesktopApp) return
+    if (rect.width < 0.01 || rect.height < 0.01) return
+
+    await repo.createAnnotation({
+      documentId: id,
+      pageNumber: page,
+      kind: 'highlight',
+      content: JSON.stringify({
+        rect,
+        color: '#fde047',
+      }),
+    })
+    await refreshData()
+    setIsHighlightMode(false)
+  }
+
+  const handleDeleteAreaHighlight = async (highlightId: string) => {
+    if (!isDesktopApp) return
+    await repo.deleteAnnotation(highlightId)
+    await refreshData()
   }
 
   const handleStartNewComment = () => {
     setSelectedCommentId(null)
     setCommentDraftContent('')
     setCommentDraftPosition(null)
+    setCommentDraftAreaRect(null)
     setIsNoteEditorOpen(false)
     setIsSelectingCommentPosition(true)
   }
@@ -685,9 +978,11 @@ export default function ReaderViewPage() {
           ? { x: selectedComment.positionX, y: selectedComment.positionY }
           : null,
       )
+      setCommentDraftAreaRect(selectedComment.areaRect ?? null)
     } else {
       setCommentDraftContent('')
       setCommentDraftPosition(null)
+      setCommentDraftAreaRect(null)
     }
 
     setIsSelectingCommentPosition(false)
@@ -704,6 +999,7 @@ export default function ReaderViewPage() {
           pageNumber: page,
           title: selectedComment.title || buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber),
           content: commentDraftContent.trim(),
+          locationHint: commentDraftAreaRect ? serializeAreaNoteAnchor(commentDraftAreaRect) : '',
           positionX: commentDraftPosition.x,
           positionY: commentDraftPosition.y,
         })
@@ -713,6 +1009,7 @@ export default function ReaderViewPage() {
           pageNumber: page,
           title: buildDocumentCommentTitle(nextCommentNumber),
           content: commentDraftContent.trim(),
+          locationHint: commentDraftAreaRect ? serializeAreaNoteAnchor(commentDraftAreaRect) : undefined,
           positionX: commentDraftPosition.x,
           positionY: commentDraftPosition.y,
         })
@@ -724,19 +1021,20 @@ export default function ReaderViewPage() {
     } finally {
       setIsSavingComment(false)
       setIsSelectingCommentPosition(false)
+      notePlacementStartRef.current = null
     }
   }
 
   const handleDeleteComment = async () => {
     if (!selectedComment || !isDesktopApp) return
-    const confirmed = window.confirm(`Delete ${buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber)}?`)
-    if (!confirmed) return
 
     await repo.deleteNote(selectedComment.id)
     await loadNotes()
+    setIsDeleteCommentDialogOpen(false)
     setSelectedCommentId(null)
     setCommentDraftContent('')
     setCommentDraftPosition(null)
+    setCommentDraftAreaRect(null)
     setIsSelectingCommentPosition(false)
     setIsNoteEditorOpen(false)
   }
@@ -749,7 +1047,8 @@ export default function ReaderViewPage() {
   const backLabel = isDetachedReaderWindow ? 'Close window' : returnTo === 'search' ? 'Back to Search' : 'Back'
 
   return (
-    <ResizablePanelGroup direction="horizontal" className="h-full">
+    <>
+      <ResizablePanelGroup direction="horizontal" className="h-full">
       <ResizablePanel defaultSize={74} minSize={45}>
         <div className="flex h-full flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-2 border-b p-3">
@@ -815,11 +1114,17 @@ export default function ReaderViewPage() {
             <ZoomIn className="h-4 w-4" />
           </ReaderToolbarIconButton>
           <ReaderToolbarIconButton
-            label={showHighlights ? 'Hide highlights' : 'Show highlights'}
-            onClick={() => setShowHighlights((current) => !current)}
-            disabled={!searchQuery.trim() || searchOccurrences.length === 0}
-            aria-pressed={showHighlights}
-            className={cn(showHighlights && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
+            label={isHighlightMode ? 'Exit highlight mode' : 'Highlight mode'}
+            onClick={() => {
+              setIsSelectingCommentPosition(false)
+              setIsNoteEditorOpen(false)
+              setIsHighlightMode((current) => !current)
+              setDraftHighlightRect(null)
+              highlightDragStartRef.current = null
+            }}
+            disabled={!canUsePreciseViewer}
+            aria-pressed={isHighlightMode}
+            className={cn(isHighlightMode && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
           >
             <Highlighter className="h-4 w-4" />
           </ReaderToolbarIconButton>
@@ -893,9 +1198,14 @@ export default function ReaderViewPage() {
           </Button>
         </div>
         <div ref={readerViewportRef} className="flex-1 overflow-auto bg-muted/30 p-4">
-          {showHighlights && searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && viewerMode === 'pdfjs' && (
+          {searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && viewerMode === 'pdfjs' && (
                 <div className="mx-auto mb-3 max-w-5xl rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                  Showing page-level matches for this page.
+                </div>
+              )}
+              {isHighlightMode && canUsePreciseViewer && (
+                <div className="mx-auto mb-3 max-w-5xl rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
+                 Drag a box on the page to create one highlight. Right-click an existing highlight to remove it.
                 </div>
               )}
               {isSelectingCommentPosition && canUsePreciseViewer && (
@@ -908,7 +1218,7 @@ export default function ReaderViewPage() {
               <div
                 className={cn(
                   'relative overflow-hidden rounded border bg-white shadow-sm',
-                  isSelectingCommentPosition && 'cursor-crosshair ring-2 ring-primary/25',
+                  (isSelectingCommentPosition || isHighlightMode) && 'cursor-crosshair ring-2 ring-primary/25',
                 )}
                 onClick={handlePageCommentSelection}
               >
@@ -934,7 +1244,7 @@ export default function ReaderViewPage() {
                       ))}
                     </div>
                     <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-                      {positionedPageComments.map((comment) => {
+                      {notePointComments.map((comment) => {
                         const isActive = comment.id === selectedCommentId
                         return (
                           <button
@@ -967,7 +1277,60 @@ export default function ReaderViewPage() {
                         )
                       })}
                     </div>
-                    {showHighlights && (
+                    <div className="absolute inset-0 z-10 overflow-visible">
+                      {noteAreaComments.map((comment) => {
+                        const isActive = comment.id === selectedCommentId
+                        if (!comment.areaRect) return null
+
+                        return (
+                          <button
+                            key={comment.id}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleSelectComment(comment.id, { scrollIntoView: true })
+                            }}
+                            className={cn(
+                              'pointer-events-auto absolute rounded-sm bg-yellow-200/35 transition hover:bg-yellow-200/45',
+                              isActive && 'bg-yellow-200/45 ring-2 ring-yellow-400/55',
+                            )}
+                            style={{
+                              left: `${comment.areaRect.x * renderedPageSize.width}px`,
+                              top: `${comment.areaRect.y * renderedPageSize.height}px`,
+                              width: `${comment.areaRect.width * renderedPageSize.width}px`,
+                              height: `${comment.areaRect.height * renderedPageSize.height}px`,
+                            }}
+                            aria-label={`Select ${buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)}`}
+                            title={buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)}
+                          >
+                            <span
+                              className={cn(
+                                'absolute left-0 top-0 flex h-6 min-w-6 -translate-x-[calc(100%+0.375rem)] items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white shadow-sm',
+                                isActive ? 'bg-primary' : 'bg-amber-500',
+                              )}
+                            >
+                              {comment.commentNumber}
+                            </span>
+                          </button>
+                        )
+                      })}
+                      {draftNotePreview?.areaRect && !isSelectingCommentPosition ? (
+                        <div
+                          className="pointer-events-none absolute rounded-sm bg-yellow-200/60 ring-2 ring-dashed ring-amber-400/70"
+                          style={{
+                            left: `${draftNotePreview.areaRect.x * renderedPageSize.width}px`,
+                            top: `${draftNotePreview.areaRect.y * renderedPageSize.height}px`,
+                            width: `${draftNotePreview.areaRect.width * renderedPageSize.width}px`,
+                            height: `${draftNotePreview.areaRect.height * renderedPageSize.height}px`,
+                          }}
+                        >
+                          <span className="absolute left-0 top-0 flex h-6 min-w-6 -translate-x-[calc(100%+0.375rem)] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white shadow-sm">
+                            {draftNotePreview.commentNumber}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                    {
                       <div className="pointer-events-none absolute inset-0">
                         {currentPageHighlights.flatMap((occurrence) =>
                           (occurrence.rects ?? []).map((rect, rectIndex) => {
@@ -989,7 +1352,99 @@ export default function ReaderViewPage() {
                           }),
                         )}
                       </div>
-                    )}
+                    }
+                    {draftNotePreview?.position && !draftNotePreview.areaRect && !isSelectingCommentPosition ? (
+                      <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+                        <div
+                          className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border border-white bg-amber-500 text-xs font-semibold text-white shadow-lg opacity-85"
+                          style={{
+                            left: `${draftNotePreview.position.x * renderedPageSize.width}px`,
+                            top: `${draftNotePreview.position.y * renderedPageSize.height}px`,
+                          }}
+                        >
+                          {draftNotePreview.commentNumber}
+                          <span
+                            className="absolute left-1/2 top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border-r border-b border-white bg-amber-500"
+                            aria-hidden="true"
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    <div
+                      className={cn(
+                        'absolute inset-0 z-20',
+                        isSelectingCommentPosition ? 'pointer-events-auto' : 'pointer-events-none',
+                      )}
+                      onPointerDown={handleNotePlacementPointerDown}
+                      onPointerMove={handleNotePlacementPointerMove}
+                      onPointerUp={handleNotePlacementPointerEnd}
+                      onPointerCancel={() => {
+                        notePlacementStartRef.current = null
+                        setCommentDraftAreaRect(null)
+                      }}
+                    >
+                      {isSelectingCommentPosition && commentDraftAreaRect ? (
+                        <div
+                          className="pointer-events-none absolute rounded-sm bg-yellow-200/35"
+                          style={{
+                            left: `${commentDraftAreaRect.x * renderedPageSize.width}px`,
+                            top: `${commentDraftAreaRect.y * renderedPageSize.height}px`,
+                            width: `${commentDraftAreaRect.width * renderedPageSize.width}px`,
+                            height: `${commentDraftAreaRect.height * renderedPageSize.height}px`,
+                          }}
+                        >
+                          <span className="absolute left-0 top-0 flex h-6 min-w-6 -translate-x-[calc(100%+0.375rem)] items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-semibold text-white shadow-sm">
+                            {selectedComment?.commentNumber ?? nextCommentNumber}
+                          </span>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div
+                      className={cn(
+                        'absolute inset-0 z-20',
+                        isHighlightMode ? 'pointer-events-auto' : 'pointer-events-none',
+                      )}
+                      onPointerDown={handleHighlightPointerDown}
+                      onPointerMove={handleHighlightPointerMove}
+                      onPointerUp={(event) => {
+                        void handleHighlightPointerEnd(event)
+                      }}
+                      onPointerCancel={() => {
+                        highlightDragStartRef.current = null
+                        setDraftHighlightRect(null)
+                      }}
+                    >
+                      {currentPageAreaHighlights.map((highlight) => (
+                        <button
+                          key={highlight.id}
+                          type="button"
+                          className="pointer-events-auto absolute rounded-sm bg-yellow-200/32 transition hover:bg-yellow-200/42"
+                          style={{
+                            left: `${highlight.rect.x * renderedPageSize.width}px`,
+                            top: `${highlight.rect.y * renderedPageSize.height}px`,
+                            width: `${highlight.rect.width * renderedPageSize.width}px`,
+                            height: `${highlight.rect.height * renderedPageSize.height}px`,
+                          }}
+                          onContextMenu={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            void handleDeleteAreaHighlight(highlight.id)
+                          }}
+                          title="Right-click to remove highlight"
+                        />
+                      ))}
+                      {draftHighlightRect ? (
+                        <div
+                          className="pointer-events-none absolute rounded-sm bg-yellow-200/36"
+                          style={{
+                            left: `${draftHighlightRect.x * renderedPageSize.width}px`,
+                            top: `${draftHighlightRect.y * renderedPageSize.height}px`,
+                            width: `${draftHighlightRect.width * renderedPageSize.width}px`,
+                            height: `${draftHighlightRect.height * renderedPageSize.height}px`,
+                          }}
+                        />
+                      ) : null}
+                    </div>
                   </div>
                 )}
                 {(isPdfLoading || isPageRendering) && (
@@ -1160,6 +1615,7 @@ export default function ReaderViewPage() {
                   </Button>
                 </div>
                 <Textarea
+                  ref={noteEditorTextareaRef}
                   value={commentDraftContent}
                   onChange={(event) => setCommentDraftContent(event.target.value)}
                   placeholder="Write your note"
@@ -1232,7 +1688,7 @@ export default function ReaderViewPage() {
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => void handleDeleteComment()}
+                              onClick={() => setIsDeleteCommentDialogOpen(true)}
                               disabled={!isDesktopApp || isSavingComment}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
@@ -1254,6 +1710,28 @@ export default function ReaderViewPage() {
         </div>
         </div>
       </ResizablePanel>
-    </ResizablePanelGroup>
+      </ResizablePanelGroup>
+      <AlertDialog open={isDeleteCommentDialogOpen} onOpenChange={setIsDeleteCommentDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedComment
+                ? `This will permanently remove ${buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber)} from this document.`
+                : 'This will permanently remove this note from the document.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={() => void handleDeleteComment()}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }

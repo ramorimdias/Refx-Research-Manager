@@ -18,9 +18,7 @@ import type { MetadataStatus, ReadingStage } from '@/lib/types'
 const readingStages: { value: ReadingStage; label: string }[] = [
   { value: 'unread', label: 'Unread' },
   { value: 'reading', label: 'Reading' },
-  { value: 'skimmed', label: 'Skimmed' },
-  { value: 'read', label: 'Read' },
-  { value: 'archived', label: 'Archived' },
+  { value: 'finished', label: 'Finished' },
 ]
 
 const metadataStatuses: { value: MetadataStatus; label: string }[] = [

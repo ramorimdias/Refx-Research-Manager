@@ -32,13 +32,12 @@
     "next-env.d.ts",
     "**/*.d.ts",
     "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    "**/*.tsx"
   ],
   "exclude": [
     "node_modules",
     ".pnpm-store",
+    ".next",
     "src-tauri",
     "out",
     "dist"

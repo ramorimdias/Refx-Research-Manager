@@ -14,7 +14,7 @@ export interface Library {
   updatedAt: Date
 }
 
-export type ReadingStage = 'unread' | 'reading' | 'skimmed' | 'read' | 'archived'
+export type ReadingStage = 'unread' | 'reading' | 'finished'
 export type ProcessingStatus = 'pending' | 'queued' | 'processing' | 'complete' | 'failed' | 'skipped'
 export type OcrStatus = 'pending' | 'processing' | 'complete' | 'failed' | 'not_needed'
 export type MetadataStatus = 'missing' | 'partial' | 'complete'

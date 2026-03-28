@@ -296,6 +296,27 @@ export default function SettingsPage() {
               <>
                 <Card>
                   <CardHeader>
+                    <CardTitle className="text-base">Profile</CardTitle>
+                    <CardDescription>Name used across your workspace.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium">Your Name</Label>
+                      <Input
+                        value={settings.userName}
+                        onChange={(event) => updateSettings('userName', event.target.value)}
+                        className="mt-2"
+                        placeholder="Enter your name"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Leave this blank if you prefer an impersonal greeting. You can change it anytime.
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
                     <CardTitle className="text-base">Workspace Mode</CardTitle>
                     <CardDescription>Everything stays local in this build.</CardDescription>
                   </CardHeader>

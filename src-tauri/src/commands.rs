@@ -297,6 +297,15 @@ pub struct CreateNoteInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateAnnotationInput {
+    pub document_id: String,
+    pub page_number: i64,
+    pub kind: String,
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateNoteInput {
     pub page_number: Option<i64>,
     pub location_hint: Option<String>,
@@ -2310,6 +2319,41 @@ pub fn list_all_annotations(app: AppHandle) -> Result<Vec<Annotation>, AppError>
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
+}
+
+#[tauri::command]
+pub fn create_annotation(app: AppHandle, input: CreateAnnotationInput) -> Result<Annotation, AppError> {
+    let conn = open_db(&app)?;
+    let id = format!("annotation-{}", uuid::Uuid::new_v4());
+    let now = now_iso();
+
+    conn.execute(
+        "INSERT INTO annotations (id, document_id, page_number, kind, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            id,
+            input.document_id,
+            input.page_number,
+            input.kind,
+            input.content,
+            now,
+        ],
+    )?;
+
+    Ok(Annotation {
+        id,
+        document_id: input.document_id,
+        page_number: input.page_number,
+        kind: input.kind,
+        content: input.content,
+        created_at: now,
+    })
+}
+
+#[tauri::command]
+pub fn delete_annotation(app: AppHandle, id: String) -> Result<bool, AppError> {
+    let conn = open_db(&app)?;
+    let deleted = conn.execute("DELETE FROM annotations WHERE id = ?1", params![id])?;
+    Ok(deleted > 0)
 }
 
 #[tauri::command]

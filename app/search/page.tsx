@@ -641,9 +641,7 @@ export default function SearchPage() {
                     <SelectItem value="all">Any stage</SelectItem>
                     <SelectItem value="unread">Unread</SelectItem>
                     <SelectItem value="reading">Reading</SelectItem>
-                    <SelectItem value="skimmed">Skimmed</SelectItem>
-                    <SelectItem value="read">Read</SelectItem>
-                    <SelectItem value="archived">Archived</SelectItem>
+                    <SelectItem value="finished">Finished</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

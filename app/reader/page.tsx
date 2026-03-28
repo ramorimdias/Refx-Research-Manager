@@ -5,7 +5,6 @@ import { useMemo } from 'react'
 import { ArrowRight, BookOpen, Clock, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
 import { EmptyState } from '@/components/refx/common'
 import { useAppStore } from '@/lib/store'
 
@@ -15,8 +14,9 @@ export default function ReaderIndexPage() {
   const continueReading = useMemo(
     () =>
       documents
-        .filter((doc) => doc.readingStage === 'reading' && doc.lastReadPage && doc.pageCount)
-        .sort((a, b) => (b.lastOpenedAt?.getTime() ?? 0) - (a.lastOpenedAt?.getTime() ?? 0)),
+        .filter((doc) => doc.readingStage === 'reading' && doc.lastOpenedAt)
+        .sort((a, b) => (b.lastOpenedAt?.getTime() ?? 0) - (a.lastOpenedAt?.getTime() ?? 0))
+        .slice(0, 4),
     [documents],
   )
 
@@ -74,12 +74,9 @@ export default function ReaderIndexPage() {
                         {document.authors.length > 2 && ' et al.'}
                       </p>
                     </div>
-                    <div className="shrink-0">
-                      <span className="text-sm text-muted-foreground">
-                        Page {document.lastReadPage} of {document.pageCount}
-                      </span>
-                      <Progress value={((document.lastReadPage ?? 0) / (document.pageCount ?? 1)) * 100} className="mt-2 h-2 w-32" />
-                    </div>
+                    <span className="shrink-0 text-sm text-muted-foreground">
+                      Continue reading
+                    </span>
                     <ArrowRight className="h-5 w-5 text-muted-foreground" />
                   </CardContent>
                 </Card>

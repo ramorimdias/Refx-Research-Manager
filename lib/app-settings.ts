@@ -3,6 +3,8 @@
 import * as repo from '@/lib/repositories/local-db'
 
 export type StoredAppSettings = {
+  userName: string
+  skipNamePrompt: boolean
   theme:
     | 'light'
     | 'dark'
@@ -27,6 +29,8 @@ export type StoredAppSettings = {
 }
 
 export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
+  userName: '',
+  skipNamePrompt: false,
   theme: 'system',
   fontSize: '16',
   autoCheckForUpdates: true,
@@ -112,6 +116,8 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
 
   const stored = await repo.getSettings()
   return {
+    userName: parseValue(stored.userName, DEFAULT_APP_SETTINGS.userName),
+    skipNamePrompt: parseValue(stored.skipNamePrompt, DEFAULT_APP_SETTINGS.skipNamePrompt),
     theme: parseValue(stored.theme, DEFAULT_APP_SETTINGS.theme),
     fontSize: parseValue(stored.fontSize, DEFAULT_APP_SETTINGS.fontSize),
     autoCheckForUpdates: parseValue(stored.autoCheckForUpdates, DEFAULT_APP_SETTINGS.autoCheckForUpdates),
@@ -142,6 +148,8 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
   }
 
   await repo.setSettings({
+    userName: JSON.stringify(settings.userName),
+    skipNamePrompt: JSON.stringify(settings.skipNamePrompt),
     theme: JSON.stringify(settings.theme),
     fontSize: JSON.stringify(settings.fontSize),
     autoCheckForUpdates: JSON.stringify(settings.autoCheckForUpdates),

@@ -99,10 +99,6 @@ export function CommandBar() {
             <StickyNote className="mr-2 h-4 w-4" />
             <span>Notes</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push('/discover'))}>
-            <Search className="mr-2 h-4 w-4" />
-            <span>Discover</span>
-          </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/settings'))}>
             <Settings className="mr-2 h-4 w-4" />
             <span>Settings</span>

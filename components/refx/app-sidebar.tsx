@@ -10,7 +10,6 @@ import {
   BookOpen,
   FileText,
   StickyNote,
-  Compass,
   GitBranch,
   BarChart3,
   ChevronLeft,
@@ -41,7 +40,6 @@ const mainNavItems = [
   { href: '/reader', label: 'Reader', icon: BookOpen },
   { href: '/references', label: 'References', icon: FileText },
   { href: '/notes', label: 'Notes', icon: StickyNote },
-  { href: '/discover', label: 'Discover', icon: Compass },
   { href: '/maps', label: 'Maps', icon: GitBranch },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
 ]

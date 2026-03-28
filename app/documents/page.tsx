@@ -45,9 +45,7 @@ import { cn } from '@/lib/utils'
 const readingStages: Array<{ value: ReadingStage; label: string }> = [
   { value: 'unread', label: 'Unread' },
   { value: 'reading', label: 'Reading' },
-  { value: 'skimmed', label: 'Skimmed' },
-  { value: 'read', label: 'Read' },
-  { value: 'archived', label: 'Archived' },
+  { value: 'finished', label: 'Finished' },
 ]
 
 type RelationListItem = {

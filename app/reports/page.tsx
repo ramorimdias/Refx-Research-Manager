@@ -11,7 +11,7 @@ export default function ReportsPage() {
 
   const stats = useMemo(() => {
     const totalDocuments = documents.length
-    const readDocuments = documents.filter((document) => document.readingStage === 'read').length
+    const readDocuments = documents.filter((document) => document.readingStage === 'finished').length
     const readingDocuments = documents.filter((document) => document.readingStage === 'reading').length
     const favoriteCount = documents.filter((document) => document.favorite).length
     const averageRating =
@@ -46,7 +46,7 @@ export default function ReportsPage() {
       <div className="space-y-6 p-6">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatsCard label="Total Documents" value={stats.totalDocuments} icon={FileText} />
-          <StatsCard label="Read" value={stats.readDocuments} icon={BookOpen} />
+          <StatsCard label="Finished" value={stats.readDocuments} icon={BookOpen} />
           <StatsCard label="Currently Reading" value={stats.readingDocuments} icon={Clock} />
           <StatsCard label="Favorites" value={stats.favoriteCount} icon={Star} />
         </div>
@@ -58,7 +58,7 @@ export default function ReportsPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                {stats.readDocuments} of {stats.totalDocuments} documents are marked as read.
+                {stats.readDocuments} of {stats.totalDocuments} documents are marked as finished.
               </p>
               <p className="text-sm text-muted-foreground">
                 {stats.readingDocuments} documents are currently in progress.

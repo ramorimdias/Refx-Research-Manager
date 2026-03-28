@@ -1,9 +1,16 @@
 import type { DbNote } from '@/lib/repositories/local-db'
+import { parseAreaNoteAnchor } from '@/lib/services/document-note-anchor-service'
 
 export type PositionedComment = DbNote & {
   commentNumber: number
   positionX?: number
   positionY?: number
+  areaRect?: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
 }
 
 export function buildDocumentCommentTitle(commentNumber: number) {
@@ -29,7 +36,12 @@ export function getDocumentComments(notes: DbNote[], documentId: string) {
 }
 
 export function getDocumentPageComments(notes: DbNote[], documentId: string, pageNumber: number) {
-  return getDocumentComments(notes, documentId).filter((note) => note.pageNumber === pageNumber)
+  return getDocumentComments(notes, documentId)
+    .filter((note) => note.pageNumber === pageNumber)
+    .map((note) => ({
+      ...note,
+      areaRect: parseAreaNoteAnchor(note.locationHint) ?? undefined,
+    }))
 }
 
 export function getNextDocumentCommentNumber(notes: DbNote[], documentId: string) {

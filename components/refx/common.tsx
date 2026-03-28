@@ -7,13 +7,11 @@ import type { MetadataStatus, OcrStatus, ReadingStage } from '@/lib/types'
 import {
   AlertCircle,
   AlertTriangle,
-  Archive,
   BookMarked,
   BookOpen,
   CheckCheck,
   CheckCircle2,
   Clock,
-  Eye,
   FileCheck,
   Loader2,
   XCircle,
@@ -22,9 +20,7 @@ import {
 const readingStageConfig: Record<ReadingStage, { label: string; icon: typeof BookOpen; className: string }> = {
   unread: { label: 'Unread', icon: BookOpen, className: 'bg-muted text-muted-foreground' },
   reading: { label: 'Reading', icon: BookMarked, className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  skimmed: { label: 'Skimmed', icon: Eye, className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  read: { label: 'Read', icon: CheckCircle2, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-  archived: { label: 'Archived', icon: Archive, className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
+  finished: { label: 'Finished', icon: CheckCircle2, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
 }
 
 const metadataStatusConfig: Record<MetadataStatus, { label: string; icon: typeof AlertCircle; className: string }> = {

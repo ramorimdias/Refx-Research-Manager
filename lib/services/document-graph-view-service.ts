@@ -329,7 +329,7 @@ export function buildNodeAppearance(input: {
         ? '#bfdbfe'
         : '#e2e8f0'
   } else if (colorMode === 'status') {
-    fillColor = document.readingStage === 'read'
+    fillColor = document.readingStage === 'finished'
       ? '#bbf7d0'
       : document.readingStage === 'reading'
         ? '#fde68a'

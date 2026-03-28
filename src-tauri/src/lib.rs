@@ -46,6 +46,8 @@ pub fn run() {
             commands::remove_tag_from_document,
             commands::list_all_annotations,
             commands::list_annotations_for_document,
+            commands::create_annotation,
+            commands::delete_annotation,
             commands::create_note,
             commands::update_note,
             commands::list_notes,

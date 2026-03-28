@@ -16,11 +16,13 @@ import {
 } from '@/components/ui/select'
 import { useAppStore } from '@/lib/store'
 import * as repo from '@/lib/repositories/local-db'
+import { getNoteLocationLabel } from '@/lib/services/document-note-anchor-service'
 
 function formatNoteReference(note: ReturnType<typeof useAppStore.getState>['notes'][number]) {
   const noteLabel = note.commentNumber ? `Note ${note.commentNumber}` : note.title || 'Note'
   const pageLabel = note.pageNumber ? ` (p. ${note.pageNumber})` : ''
-  const locationLabel = note.locationHint ? ` - ${note.locationHint}` : ''
+  const location = getNoteLocationLabel(note.locationHint)
+  const locationLabel = location ? ` - ${location}` : ''
   return `${noteLabel}${pageLabel}${locationLabel}`
 }
 
