@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Database, Download, HardDrive, Palette, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Database, Download, HardDrive, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -30,6 +30,8 @@ import * as repo from '@/lib/repositories/local-db'
 import { useAppStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
+import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
+import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
 
 type SettingsSection = 'general' | 'display' | 'processing' | 'data' | 'about'
 
@@ -53,6 +55,11 @@ export default function SettingsPage() {
   const [backups, setBackups] = useState<repo.DbBackupFileMetadata[]>([])
   const [backupStatus, setBackupStatus] = useState<string | null>(null)
   const [settings, setSettings] = useState<StoredAppSettings>(DEFAULT_APP_SETTINGS)
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false)
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null)
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdateSummary | null>(null)
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false)
   const hasLoadedSettingsRef = useRef(false)
 
   useEffect(() => {
@@ -203,6 +210,46 @@ export default function SettingsPage() {
     if (!confirmed) return
     await repo.deleteBackup(path)
     await loadBackups()
+  }
+
+  const handleCheckForUpdates = async () => {
+    setIsCheckingUpdates(true)
+    setUpdateStatus(null)
+    try {
+      const result = await checkForAppUpdate()
+      if (!result.supported) {
+        setAvailableUpdate(null)
+        setUpdateStatus(result.reason)
+        return
+      }
+
+      if (!result.update) {
+        setAvailableUpdate(null)
+        setUpdateStatus('You are on the latest version.')
+        return
+      }
+
+      setAvailableUpdate(result.update)
+      setUpdateStatus(`Refx ${result.update.version} is available.`)
+      setIsUpdateDialogOpen(true)
+    } catch (error) {
+      setUpdateStatus(error instanceof Error ? error.message : 'Unable to check for updates.')
+    } finally {
+      setIsCheckingUpdates(false)
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    setIsInstallingUpdate(true)
+    setUpdateStatus('Preparing update...')
+    try {
+      await downloadAndInstallAppUpdate((message) => {
+        setUpdateStatus(message)
+      })
+    } catch (error) {
+      setUpdateStatus(error instanceof Error ? error.message : 'Update install failed.')
+      setIsInstallingUpdate(false)
+    }
   }
 
   return (
@@ -423,6 +470,44 @@ export default function SettingsPage() {
               <>
                 <Card>
                   <CardHeader>
+                    <CardTitle className="text-base">App Updates</CardTitle>
+                    <CardDescription>Check for signed releases published on GitHub.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-sm font-medium">Check automatically</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">Look for updates when REFX starts.</p>
+                      </div>
+                      <Checkbox
+                        checked={settings.autoCheckForUpdates}
+                        onCheckedChange={(checked) => updateSettings('autoCheckForUpdates', !!checked)}
+                      />
+                    </div>
+
+                    <Separator />
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" onClick={() => void handleCheckForUpdates()} disabled={isCheckingUpdates}>
+                        {isCheckingUpdates ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        {isCheckingUpdates ? 'Checking...' : 'Check for Updates'}
+                      </Button>
+                      <Button onClick={() => void handleInstallUpdate()} disabled={isInstallingUpdate || !availableUpdate}>
+                        {isInstallingUpdate ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                        {isInstallingUpdate ? 'Installing...' : 'Download & Install'}
+                      </Button>
+                    </div>
+
+                    {updateStatus ? (
+                      <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                        {updateStatus}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
                     <CardTitle className="text-base">Local Data</CardTitle>
                   <CardDescription>Reset local content while keeping app preferences.</CardDescription>
                   </CardHeader>
@@ -597,6 +682,14 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+      <AppUpdateDialog
+        open={isUpdateDialogOpen}
+        onOpenChange={setIsUpdateDialogOpen}
+        update={availableUpdate}
+        isInstalling={isInstallingUpdate}
+        installStatus={updateStatus}
+        onInstall={() => void handleInstallUpdate()}
+      />
     </div>
   )
 }

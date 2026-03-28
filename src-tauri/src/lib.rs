@@ -10,6 +10,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_app_data_dir,
             commands::ensure_app_directories,
@@ -59,6 +60,9 @@ pub fn run() {
             backup::run_scheduled_backup_if_due,
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
             if let (Some(window), Some(icon)) = (
                 app.get_webview_window("main"),
                 app.default_window_icon().cloned(),

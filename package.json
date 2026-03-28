@@ -13,6 +13,7 @@
     "tauri": "pnpm exec tauri",
     "tauri:dev": "pnpm tauri:icons && pnpm exec tauri dev",
     "tauri:build": "pnpm tauri:icons && pnpm exec tauri build",
+    "tauri:build:update": "node scripts/tauri-build-updater.mjs",
     "tauri:icons": "node scripts/ensure-tauri-icons.mjs"
   },
   "dependencies": {
@@ -47,8 +48,10 @@
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "@tauri-apps/plugin-fs": "^2.0.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "@tauri-apps/plugin-sql": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.10.0",
     "@tesseract.js-data/eng": "^1.0.0",
     "@vercel/analytics": "1.6.1",
     "autoprefixer": "^10.4.20",

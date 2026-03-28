@@ -122,6 +122,7 @@ export default function ReaderViewPage() {
   const [isSavingComment, setIsSavingComment] = useState(false)
   const [viewerError, setViewerError] = useState<string | null>(null)
   const [isPdfLoading, setIsPdfLoading] = useState(false)
+  const [hasViewerTimedOut, setHasViewerTimedOut] = useState(false)
   const [isPageRendering, setIsPageRendering] = useState(false)
   const [isRunningOcr, setIsRunningOcr] = useState(false)
   const [showHighlights, setShowHighlights] = useState(true)
@@ -182,17 +183,27 @@ export default function ReaderViewPage() {
   useEffect(() => {
     let cancelled = false
     let loadedPdf: { destroy?: () => Promise<void> } | null = null
+    let settled = false
+    const timeoutId = window.setTimeout(() => {
+      if (!cancelled && !settled) {
+        setHasViewerTimedOut(true)
+        setIsPdfLoading(false)
+      }
+    }, 2500)
 
     const loadPdf = async () => {
       if (!document?.filePath || !isTauri()) {
+        settled = true
         setPdfDocument(null)
         setEmbeddedPdfUrl(null)
         setViewerMode('unavailable')
         setRenderedPageSize({ width: 0, height: 0 })
         setPageWords([])
+        setHasViewerTimedOut(false)
         return
       }
 
+      setHasViewerTimedOut(false)
       setIsPdfLoading(true)
 
       try {
@@ -217,18 +228,24 @@ export default function ReaderViewPage() {
           return
         }
 
+        settled = true
+        window.clearTimeout(timeoutId)
         setPdfDocument(nextPdf)
         setEmbeddedPdfUrl(convertFileSrc(document.filePath))
         setViewerMode('pdfjs')
         setViewerError(null)
+        setHasViewerTimedOut(false)
         setPage((current) => Math.min(Math.max(1, current), nextPdf.numPages))
       } catch (error) {
         console.error('Failed to load PDF for embedded viewer:', error)
+        settled = true
+        window.clearTimeout(timeoutId)
         setPdfDocument(null)
         setEmbeddedPdfUrl(convertFileSrc(document.filePath))
         setViewerMode('native')
         setRenderedPageSize({ width: 0, height: 0 })
         setPageWords([])
+        setHasViewerTimedOut(false)
         setViewerError('Advanced PDF rendering is unavailable. Showing a basic PDF preview instead.')
       } finally {
         if (!cancelled) {
@@ -241,6 +258,7 @@ export default function ReaderViewPage() {
 
     return () => {
       cancelled = true
+      window.clearTimeout(timeoutId)
       void loadedPdf?.destroy?.()
     }
   }, [document?.filePath])
@@ -330,6 +348,9 @@ export default function ReaderViewPage() {
     [page, searchOccurrences],
   )
   const canUsePreciseViewer = viewerMode === 'pdfjs' && Boolean(pdfDocument)
+  const showViewerLoading =
+    Boolean(document?.filePath)
+    && (isPdfLoading || (!canUsePreciseViewer && !embeddedPdfUrl && !hasViewerTimedOut))
   const currentPageHighlights = useMemo(
     () => currentPageOccurrences.filter((occurrence) => occurrence.rects?.length),
     [currentPageOccurrences],
@@ -981,6 +1002,13 @@ export default function ReaderViewPage() {
                 )}
                 </div>
               </div>
+            ) : showViewerLoading ? (
+              <div className="flex min-h-[calc(100vh-13rem)] items-center justify-center">
+                <div className="flex items-center gap-2 rounded-full border bg-background/95 px-3 py-2 text-sm shadow-sm">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  Opening PDF...
+                </div>
+              </div>
             ) : embeddedPdfUrl ? (
               <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-3">
                 {viewerError ? (
@@ -1004,7 +1032,7 @@ export default function ReaderViewPage() {
               </div>
             ) : (
               <div className="space-y-2 p-6">
-               <p>{viewerError ?? 'PDF unavailable.'}</p>
+               <p>{hasViewerTimedOut ? 'PDF unavailable.' : viewerError ?? 'PDF unavailable.'}</p>
                 {isDesktopApp && document.id && (
                   <div className="flex items-center gap-2">
                   <Button size="sm" onClick={() => void importPdfForDocument()}>

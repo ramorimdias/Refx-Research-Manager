@@ -4,9 +4,16 @@ import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useAppStore } from '@/lib/store'
 import { Loader2 } from 'lucide-react'
-import { getBaseThemeMode, getThemeAccentVariant, loadAppSettings } from '@/lib/app-settings'
+import { getBaseThemeMode, getThemeAccentVariant, loadAppSettings, type StoredAppSettings } from '@/lib/app-settings'
 import * as repo from '@/lib/repositories/local-db'
 import { useTheme } from 'next-themes'
+import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
+import {
+  checkForAppUpdate,
+  dismissPendingAppUpdate,
+  downloadAndInstallAppUpdate,
+  type AppUpdateSummary,
+} from '@/lib/services/app-update-service'
 
 interface AppProviderProps {
   children: React.ReactNode
@@ -15,6 +22,11 @@ interface AppProviderProps {
 export function AppProvider({ children }: AppProviderProps) {
   const [isUiPrefsReady, setIsUiPrefsReady] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [appSettings, setAppSettings] = useState<StoredAppSettings | null>(null)
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdateSummary | null>(null)
+  const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false)
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
+  const [updateInstallStatus, setUpdateInstallStatus] = useState<string | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const initialized = useAppStore((state) => state.initialized)
   const isDesktopApp = useAppStore((state) => state.isDesktopApp)
@@ -41,6 +53,7 @@ export function AppProvider({ children }: AppProviderProps) {
 
     const applySettings = async () => {
       const settings = await loadAppSettings(isDesktopApp)
+      setAppSettings(settings)
       setTheme(getBaseThemeMode(settings.theme))
       const accentVariant = getThemeAccentVariant(settings.theme)
       if (accentVariant) {
@@ -62,6 +75,58 @@ export function AppProvider({ children }: AppProviderProps) {
 
     void applySettings()
   }, [initialized, isDesktopApp, setTheme])
+
+  useEffect(() => {
+    if (!initialized || !isDesktopApp || !appSettings?.autoCheckForUpdates) return
+
+    let cancelled = false
+
+    const runUpdateCheck = async () => {
+      try {
+        const result = await checkForAppUpdate()
+        if (!result.supported || !result.update || cancelled || typeof window === 'undefined') return
+
+        const dismissedKey = `refx.update.dismissed.${result.update.version}`
+        if (window.sessionStorage.getItem(dismissedKey) === 'true') return
+
+        setAvailableUpdate(result.update)
+        setUpdateInstallStatus(null)
+        setIsUpdateDialogOpen(true)
+      } catch (error) {
+        console.warn('Automatic update check failed:', error)
+      }
+    }
+
+    void runUpdateCheck()
+
+    return () => {
+      cancelled = true
+    }
+  }, [appSettings?.autoCheckForUpdates, initialized, isDesktopApp])
+
+  const handleUpdateDialogOpenChange = (open: boolean) => {
+    setIsUpdateDialogOpen(open)
+    if (!open && availableUpdate && typeof window !== 'undefined') {
+      window.sessionStorage.setItem(`refx.update.dismissed.${availableUpdate.version}`, 'true')
+      dismissPendingAppUpdate()
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    if (!availableUpdate) return
+
+    setIsInstallingUpdate(true)
+    setUpdateInstallStatus('Preparing update...')
+    try {
+      await downloadAndInstallAppUpdate((message) => {
+        setUpdateInstallStatus(message)
+      })
+    } catch (error) {
+      console.error('Failed to install app update:', error)
+      setUpdateInstallStatus(error instanceof Error ? error.message : 'Update install failed.')
+      setIsInstallingUpdate(false)
+    }
+  }
 
   useEffect(() => {
     if (!initialized || typeof window === 'undefined') return
@@ -100,5 +165,17 @@ export function AppProvider({ children }: AppProviderProps) {
       </div>
     )
   }
-  return children
+  return (
+    <>
+      {children}
+      <AppUpdateDialog
+        open={isUpdateDialogOpen}
+        onOpenChange={handleUpdateDialogOpenChange}
+        update={availableUpdate}
+        isInstalling={isInstallingUpdate}
+        installStatus={updateInstallStatus}
+        onInstall={() => void handleInstallUpdate()}
+      />
+    </>
+  )
 }
