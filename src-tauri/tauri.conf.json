@@ -29,7 +29,6 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "useLocalToolsDir": true,
     "targets": [
       "nsis",
       "dmg",
