@@ -73,6 +73,7 @@ interface AppState {
   rightPanelOpen: boolean
   initialize: () => Promise<void>
   refreshData: () => Promise<void>
+  setSidebarCollapsed: (collapsed: boolean) => void
   setActiveLibrary: (id: string | null) => void
   setActiveDocument: (id: string | null) => void
   setViewMode: (mode: ViewMode) => void
@@ -518,7 +519,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   globalSearchQuery: '',
   persistentSearch: defaultPersistentSearch(),
   commandPaletteOpen: false,
-  sidebarCollapsed: false,
+  sidebarCollapsed: true,
   currentPage: 1,
   zoom: 100,
   annotationMode: null,
@@ -577,6 +578,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   setActiveLibrary: (id) => set({ activeLibraryId: id }),
   setActiveDocument: (id) => set({ activeDocumentId: id }),
   setViewMode: (mode) => set({ viewMode: mode }),

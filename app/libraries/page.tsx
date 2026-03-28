@@ -1,6 +1,6 @@
 'use client'
 
-import { DragEvent, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Search,
   Grid3X3,
@@ -12,7 +12,6 @@ import {
   Pencil,
   Plus,
   Trash2,
-  FileUp,
   Filter,
   PanelLeftClose,
   PanelLeftOpen,
@@ -66,7 +65,6 @@ import { useDocumentViewFlags } from '@/lib/hooks/use-document-view-flags'
 import type { SortField, ViewMode } from '@/lib/types'
 import { Spinner } from '@/components/ui/spinner'
 import { cn } from '@/lib/utils'
-import { getCurrentWindow, isTauri } from '@/lib/tauri/client'
 import * as repo from '@/lib/repositories/local-db'
 
 type LibraryFormState = {
@@ -113,6 +111,7 @@ const DEFAULT_PHYSICAL_BOOK_FORM: PhysicalBookFormState = {
 }
 
 const DOCUMENTS_PER_PAGE = 20
+const PENDING_IMPORT_STORAGE_KEY = 'refx.pending-import-paths'
 
 function buildPaginationItems(currentPage: number, totalPages: number) {
   if (totalPages <= 7) {
@@ -163,7 +162,6 @@ export default function LibrariesPage() {
   const documents = useFilteredDocuments()
   const [isImporting, setIsImporting] = useState(false)
   const [filtersCollapsed, setFiltersCollapsed] = useState(true)
-  const [isDragActive, setIsDragActive] = useState(false)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -173,7 +171,6 @@ export default function LibrariesPage() {
   const [physicalBookForm, setPhysicalBookForm] = useState<PhysicalBookFormState>(DEFAULT_PHYSICAL_BOOK_FORM)
   const [deleteLibraryConfirmation, setDeleteLibraryConfirmation] = useState('')
   const [pendingImportCount, setPendingImportCount] = useState<number | null>(null)
-  const dragDepthRef = useRef(0)
 
   const activeLibrary = libraries.find((lib) => lib.id === activeLibraryId)
   const paginationSessionKey = JSON.stringify({
@@ -226,46 +223,32 @@ export default function LibrariesPage() {
   }, [filtersCollapsed])
 
   useEffect(() => {
-    if (!isTauri()) return
+    const consumePendingImports = () => {
+      if (typeof window === 'undefined') return
+      const raw = window.sessionStorage.getItem(PENDING_IMPORT_STORAGE_KEY)
+      if (!raw) return
 
-    let disposed = false
-    let unlisten: (() => void) | undefined
+      try {
+        const parsed = JSON.parse(raw)
+        const droppedPaths = Array.isArray(parsed)
+          ? parsed.filter((value): value is string => typeof value === 'string' && value.toLowerCase().endsWith('.pdf'))
+          : []
 
-    void getCurrentWindow()
-      .onDragDropEvent((event) => {
-        if (disposed) return
-
-        if (event.payload.type === 'enter' || event.payload.type === 'over') {
-          setIsDragActive(true)
-          return
+        if (droppedPaths.length > 0) {
+          window.sessionStorage.removeItem(PENDING_IMPORT_STORAGE_KEY)
+          void handleImport(droppedPaths)
         }
-
-        if (event.payload.type === 'leave') {
-          setIsDragActive(false)
-          return
-        }
-
-        if (event.payload.type === 'drop') {
-          setIsDragActive(false)
-          const droppedPaths = event.payload.paths.filter((value) => value.toLowerCase().endsWith('.pdf'))
-          if (droppedPaths.length > 0) {
-            void handleImport(droppedPaths)
-          }
-        }
-      })
-      .then((dispose) => {
-        if (disposed) {
-          dispose()
-          return
-        }
-        unlisten = dispose
-      })
-
-    return () => {
-      disposed = true
-      unlisten?.()
+      } catch {
+        window.sessionStorage.removeItem(PENDING_IMPORT_STORAGE_KEY)
+      }
     }
-  }, [isImporting, isDesktopApp, activeLibraryId])
+
+    consumePendingImports()
+    window.addEventListener('refx-import-drop-queued', consumePendingImports)
+    return () => {
+      window.removeEventListener('refx-import-drop-queued', consumePendingImports)
+    }
+  }, [isDesktopApp, activeLibraryId, isImporting])
 
   const handleImport = async (paths?: string[]) => {
     if (!isDesktopApp || isImporting) return
@@ -277,13 +260,6 @@ export default function LibrariesPage() {
       setIsImporting(false)
       setPendingImportCount(null)
     }
-  }
-
-  const getDroppedPaths = (event: DragEvent<HTMLDivElement>) => {
-    const fileList = Array.from(event.dataTransfer.files ?? [])
-    return fileList
-      .map((file) => (file as File & { path?: string }).path)
-      .filter((value): value is string => Boolean(value && value.toLowerCase().endsWith('.pdf')))
   }
 
   const resetLibraryForm = () => {
@@ -425,48 +401,13 @@ export default function LibrariesPage() {
 
   return (
     <>
-      <div
-        className="flex h-full"
-        onDragEnter={(event) => {
-          if (isTauri()) return
-          event.preventDefault()
-          if (!isDesktopApp) return
-          dragDepthRef.current += 1
-          setIsDragActive(true)
-        }}
-        onDragOver={(event) => {
-          if (isTauri()) return
-          event.preventDefault()
-          if (!isDesktopApp) return
-          event.dataTransfer.dropEffect = 'copy'
-          setIsDragActive(true)
-        }}
-        onDragLeave={(event) => {
-          if (isTauri()) return
-          event.preventDefault()
-          if (!isDesktopApp) return
-          dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
-          if (dragDepthRef.current === 0 || event.currentTarget === event.target) {
-            setIsDragActive(false)
-          }
-        }}
-        onDrop={(event) => {
-          if (isTauri()) return
-          event.preventDefault()
-          dragDepthRef.current = 0
-          setIsDragActive(false)
-          const droppedPaths = getDroppedPaths(event)
-          if (droppedPaths.length > 0) {
-            void handleImport(droppedPaths)
-          }
-        }}
-      >
+      <div className="flex h-full">
         {!filtersCollapsed && <FilterPanel />}
 
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center justify-between gap-4 border-b border-border p-4">
+          <div className="flex items-center justify-between gap-4 border-b border-border/80 bg-background/92 px-5 py-4 backdrop-blur">
             <div className="flex items-center gap-4 flex-1">
-              <Button variant="outline" size="sm" onClick={() => setFiltersCollapsed((current) => !current)}>
+              <Button variant="outline" size="sm" className="rounded-full" onClick={() => setFiltersCollapsed((current) => !current)}>
                 {filtersCollapsed ? <PanelLeftOpen className="mr-2 h-4 w-4" /> : <PanelLeftClose className="mr-2 h-4 w-4" />}
                 Filters
                 {activeFilterCount > 0 && (
@@ -480,7 +421,7 @@ export default function LibrariesPage() {
                 value={activeLibraryId || 'all'}
                 onValueChange={(val) => setActiveLibrary(val === 'all' ? null : val)}
               >
-                <SelectTrigger className="w-64">
+                <SelectTrigger className="w-60">
                   <SelectValue placeholder="All Libraries" />
                 </SelectTrigger>
                 <SelectContent>
@@ -499,10 +440,10 @@ export default function LibrariesPage() {
                 </SelectContent>
               </Select>
 
-              <div className="relative flex-1 max-w-md">
+              <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search documents..."
+                  placeholder="Search"
                   className="pl-9"
                   value={filters.search || ''}
                   onChange={(e) => setFilters({ ...filters, search: e.target.value || undefined })}
@@ -511,17 +452,17 @@ export default function LibrariesPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={openCreateDialog}>
+              <Button variant="outline" size="sm" className="rounded-full" onClick={openCreateDialog}>
                 <Plus className="mr-2 h-4 w-4" />
-                New Library
+                Library
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
+              <Button size="sm" className="rounded-full" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
                 <Upload className="mr-2 h-4 w-4" />
                 {isImporting ? 'Importing...' : 'Import'}
               </Button>
-              <Button variant="outline" size="sm" onClick={openPhysicalBookDialog}>
+              <Button variant="outline" size="sm" className="rounded-full" onClick={openPhysicalBookDialog}>
                 <BookMarked className="mr-2 h-4 w-4" />
-                Register Book
+                Book
               </Button>
 
               <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
@@ -541,7 +482,7 @@ export default function LibrariesPage() {
           </div>
 
           {filtersCollapsed && activeFilterCount > 0 && (
-            <div className="border-b border-border bg-muted/20 px-4 py-2">
+            <div className="border-b border-border/70 bg-muted/30 px-5 py-2">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Filter className="h-4 w-4" />
                 <span>{activeFilterCount} active filter{activeFilterCount > 1 ? 's' : ''}</span>
@@ -550,14 +491,14 @@ export default function LibrariesPage() {
           )}
 
           {activeLibrary && (
-            <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-3">
+            <div className="flex items-center justify-between border-b border-border/70 bg-muted/25 px-5 py-3">
               <div className="flex items-center gap-3">
                 <div
-                  className="h-4 w-4 rounded"
+                  className="h-3 w-3 rounded-full"
                   style={{ backgroundColor: activeLibrary.color }}
                 />
                 <div>
-                  <h2 className="font-semibold">{activeLibrary.name}</h2>
+                  <h2 className="text-lg font-semibold tracking-tight">{activeLibrary.name}</h2>
                   <p className="text-sm text-muted-foreground">{activeLibrary.description || 'Local library'}</p>
                 </div>
               </div>
@@ -580,7 +521,7 @@ export default function LibrariesPage() {
                     <SelectItem value="rating">Rating</SelectItem>
                   </SelectContent>
                 </Select>
-                <Button variant="outline" size="sm" onClick={openRenameDialog}>
+                <Button variant="outline" size="sm" className="rounded-full" onClick={openRenameDialog}>
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit
                 </Button>
@@ -590,49 +531,34 @@ export default function LibrariesPage() {
 
           <div
             className={cn(
-              'relative flex-1 overflow-auto p-4 transition-colors',
-              (isDragActive || isImporting) && 'bg-muted/20',
+              'relative flex-1 overflow-auto p-5 transition-colors',
+              isImporting && 'bg-muted/20',
             )}
           >
-            {isDragActive && (
-              <div className="pointer-events-none absolute inset-4 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary bg-primary/10 shadow-[0_0_0_9999px_rgba(15,23,42,0.12)] backdrop-blur-[1px]">
-                <div className="rounded-2xl border border-primary/30 bg-background/95 px-8 py-10 text-center shadow-xl">
-                  <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/12 text-primary">
-                    <FileUp className="h-7 w-7" />
-                  </div>
-                  <p className="text-base font-semibold">Drop PDFs to import into this library</p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    Release to copy the files into the local Refx library storage.
-                  </p>
-                </div>
-              </div>
-            )}
             {isImporting && (
-              <div className="absolute inset-4 z-10 flex items-start justify-center">
-                <div className="flex items-center gap-3 rounded-full border bg-background/95 px-4 py-2 shadow-lg">
+              <div className="absolute inset-x-5 top-5 z-10 flex items-start justify-center">
+                <div className="flex items-center gap-3 rounded-full border border-border/80 bg-background/96 px-4 py-2 shadow-lg">
                   <Spinner className="size-4" />
                   <div className="text-sm">
-                    <span className="font-medium">Importing documents</span>
-                    <span className="text-muted-foreground">
-                      {pendingImportCount ? ` (${pendingImportCount})` : ''} and copying them to local storage...
-                    </span>
+                    <span className="font-medium">Importing</span>
+                    <span className="text-muted-foreground">{pendingImportCount ? ` ${pendingImportCount} file${pendingImportCount === 1 ? '' : 's'}` : ' files'}</span>
                   </div>
                 </div>
               </div>
             )}
             {documents.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="mb-4 rounded-full bg-muted p-4">
+                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/70">
                   <FolderOpen className="h-8 w-8 text-muted-foreground" />
                 </div>
                 <h3 className="mb-2 text-lg font-semibold">No documents found</h3>
                 <p className="mb-6 max-w-sm text-sm text-muted-foreground">
                   {filters.search || Object.keys(filters).length > 1
                     ? 'Try adjusting your filters or search query.'
-                    : 'Get started by importing PDFs or adding documents manually.'}
+                    : 'Import PDFs or register a book to get started.'}
                 </p>
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
+                  <Button onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
                     <Upload className="mr-2 h-4 w-4" />
                     {isImporting ? 'Importing PDFs...' : 'Import PDFs'}
                   </Button>

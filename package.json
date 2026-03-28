@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "pnpm ocr:assets && pnpm exec next dev",
+    "dev": "pnpm ocr:assets && pnpm exec next dev --webpack -p 3001",
     "build": "pnpm ocr:assets && pnpm exec next build",
     "start": "next start",
     "lint": "eslint .",

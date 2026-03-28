@@ -3,7 +3,16 @@
 import * as repo from '@/lib/repositories/local-db'
 
 export type StoredAppSettings = {
-  theme: 'light' | 'dark' | 'system'
+  theme:
+    | 'light'
+    | 'dark'
+    | 'system'
+    | 'light-brown'
+    | 'light-red'
+    | 'light-green'
+    | 'dark-brown'
+    | 'dark-red'
+    | 'dark-green'
   fontSize: '14' | '16' | '18'
   autoOcr: boolean
   autoMetadata: boolean
@@ -22,6 +31,53 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   advancedClassificationMode: 'off',
   crossrefContactEmail: '',
   semanticScholarApiKey: '',
+}
+
+export function getBaseThemeMode(theme: StoredAppSettings['theme']): 'light' | 'dark' | 'system' {
+  if (theme === 'system') return 'system'
+  if (theme.startsWith('dark')) return 'dark'
+  return 'light'
+}
+
+export function getThemeAccentVariant(theme: StoredAppSettings['theme']): string | null {
+  switch (theme) {
+    case 'light-brown':
+    case 'light-red':
+    case 'light-green':
+    case 'dark-brown':
+    case 'dark-red':
+    case 'dark-green':
+      return theme
+    default:
+      return null
+  }
+}
+
+export function toggleStoredThemeVariant(
+  theme: StoredAppSettings['theme'],
+  resolvedTheme?: string,
+): StoredAppSettings['theme'] {
+  switch (theme) {
+    case 'light-brown':
+      return 'dark-brown'
+    case 'dark-brown':
+      return 'light-brown'
+    case 'light-red':
+      return 'dark-red'
+    case 'dark-red':
+      return 'light-red'
+    case 'light-green':
+      return 'dark-green'
+    case 'dark-green':
+      return 'light-green'
+    case 'system':
+      return resolvedTheme === 'dark' ? 'light' : 'dark'
+    case 'dark':
+      return 'light'
+    case 'light':
+    default:
+      return 'dark'
+  }
 }
 
 const SETTINGS_STORAGE_KEY = 'refx-settings'

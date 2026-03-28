@@ -1,15 +1,13 @@
 'use client'
 
-import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Command, Moon, Search, Sun } from 'lucide-react'
+import { Command, Moon, Search, Settings2, Sun } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
-import { Kbd } from '@/components/ui/kbd'
-import { loadAppSettings, saveAppSettings } from '@/lib/app-settings'
+import { getBaseThemeMode, loadAppSettings, saveAppSettings, toggleStoredThemeVariant } from '@/lib/app-settings'
 
 export function TopBar() {
   const router = useRouter()
@@ -34,10 +32,9 @@ export function TopBar() {
   }
 
   const toggleTheme = async () => {
-    const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark'
-    setTheme(nextTheme)
-
     const settings = await loadAppSettings(isDesktopApp)
+    const nextTheme = toggleStoredThemeVariant(settings.theme, resolvedTheme)
+    setTheme(getBaseThemeMode(nextTheme))
     await saveAppSettings(isDesktopApp, {
       ...settings,
       theme: nextTheme,
@@ -45,8 +42,8 @@ export function TopBar() {
   }
 
   return (
-    <header className="flex h-14 items-center justify-between gap-4 border-b border-border bg-background px-4">
-      <div className="relative w-full max-w-2xl">
+    <header className="flex h-16 items-center justify-between gap-4 border-b border-border/80 bg-background/92 px-5 backdrop-blur">
+      <div className="relative w-full max-w-xl">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={inputRef}
@@ -58,24 +55,23 @@ export function TopBar() {
               submitGlobalSearch()
             }
           }}
-          className="pl-9"
-          placeholder="Search your library and press Enter"
+          className="h-10 rounded-full border-border/80 bg-card pl-9 pr-4"
+          placeholder="Search"
         />
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" className="gap-2" onClick={() => toggleCommandPalette(true)}>
+        <Button variant="outline" size="sm" className="gap-2 rounded-full" onClick={() => toggleCommandPalette(true)}>
           <Command className="h-4 w-4" />
-          <span className="hidden md:inline">Commands</span>
-          <Kbd>
-            <span className="text-xs">Ctrl</span>K
-          </Kbd>
+          <span className="hidden lg:inline">Command</span>
+          <span className="hidden text-[11px] text-muted-foreground md:inline">Ctrl K</span>
         </Button>
 
         {mounted && (
           <Button
-            variant="ghost"
+            variant="outline"
             size="icon"
+            className="rounded-full"
             onClick={() => void toggleTheme()}
             aria-label="Toggle theme"
           >
@@ -83,8 +79,8 @@ export function TopBar() {
           </Button>
         )}
 
-        <Button variant="ghost" size="sm" asChild className="hidden lg:inline-flex">
-          <Link href="/settings">Settings</Link>
+        <Button variant="outline" size="icon" className="rounded-full" onClick={() => router.push('/settings')} aria-label="Open settings">
+          <Settings2 className="h-4 w-4" />
         </Button>
       </div>
     </header>

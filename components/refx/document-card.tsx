@@ -31,19 +31,22 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
   if (variant === 'list') {
     return (
       <DocumentContextMenu document={doc}>
-        <Card className={cn('group transition-colors hover:border-primary/50', ephemeralFlags?.isNewlyAdded && 'border-emerald-300/60 bg-emerald-500/[0.04]')}>
+        <Card className={cn('group transition-colors hover:border-primary/40 hover:shadow-[0_14px_34px_rgba(15,23,42,0.06)]', ephemeralFlags?.isNewlyAdded && 'border-emerald-300/60 bg-emerald-500/[0.04]')}>
           <CardContent className="flex items-center gap-4 p-4">
-            <button
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
               onClick={() => toggleFavorite(doc.id)}
               className={cn(
-                'shrink-0 transition-colors',
+                'shrink-0 rounded-full transition-colors',
                 doc.favorite
                   ? 'text-amber-400'
                   : 'text-muted-foreground/30 hover:text-amber-400'
               )}
             >
               <Star className="h-4 w-4" fill={doc.favorite ? 'currentColor' : 'none'} />
-            </button>
+            </Button>
 
             <Link href={openHref} className="flex min-w-0 flex-1 items-center gap-4">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
@@ -82,8 +85,8 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
                 trigger={
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+                    size="icon-sm"
+                    className="rounded-full opacity-0 transition-opacity group-hover:opacity-100"
                   >
                     <MoreHorizontal className="h-4 w-4" />
                   </Button>
@@ -98,31 +101,34 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
 
   return (
     <DocumentContextMenu document={doc}>
-      <Card className={cn('group transition-colors hover:border-primary/50', ephemeralFlags?.isNewlyAdded && 'border-emerald-300/60 bg-emerald-500/[0.04]')}>
+      <Card className={cn('group transition-colors hover:border-primary/40 hover:shadow-[0_14px_34px_rgba(15,23,42,0.06)]', ephemeralFlags?.isNewlyAdded && 'border-emerald-300/60 bg-emerald-500/[0.04]')}>
         <CardContent className="p-4">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-              <FileText className="h-6 w-6 text-primary" />
+          <div className="mb-3 flex items-start justify-between">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
+              <Icon className="h-6 w-6 text-primary" />
             </div>
             <div className="flex items-center gap-1">
-              <button
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => toggleFavorite(doc.id)}
                 className={cn(
-                  'p-1 transition-colors',
+                  'rounded-full transition-colors',
                   doc.favorite
                     ? 'text-amber-400'
                     : 'text-muted-foreground/30 hover:text-amber-400'
                 )}
               >
                 <Star className="h-4 w-4" fill={doc.favorite ? 'currentColor' : 'none'} />
-              </button>
+              </Button>
               <DocumentActions
                 document={doc}
                 trigger={
                   <Button
                     variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+                    size="icon-sm"
+                    className="rounded-full opacity-0 transition-opacity group-hover:opacity-100"
                   >
                     <MoreHorizontal className="h-4 w-4" />
                   </Button>
@@ -153,7 +159,7 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
             ))}
           </div>
 
-          <div className="flex items-center justify-between pt-3 border-t border-border">
+          <div className="flex items-center justify-between border-t border-border/70 pt-3">
             <div className="flex items-center gap-2">
               <ReadingStageBadge stage={doc.readingStage} />
               {doc.hasOcr && <OcrStatusBadge status={doc.ocrStatus} />}

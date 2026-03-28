@@ -122,7 +122,8 @@ If by “VS” you mean **VS Code**, this is the fastest workflow:
 If you are using **Visual Studio (full IDE)** instead of VS Code, the equivalent flow is:
 - Git menu → **Clone Repository**
 - Use **Git Changes** / **Pull** to sync
-- Use **Manage Branches** to create/switch branches
+-pnpm tauri:dev
+ Use **Manage Branches** to create/switch branches
 
 ---
 
@@ -137,7 +138,6 @@ pnpm dev
 ### Desktop app (Tauri dev)
 
 ```bash
-pnpm tauri:dev
 ```
 
 This will:

@@ -77,26 +77,26 @@ export function FilterPanel() {
   if (!isOpen) return null
 
   return (
-    <div className="w-64 shrink-0 border-r border-border">
-      <div className="flex items-center justify-between border-b border-border p-4">
+    <div className="w-64 shrink-0 border-r border-border/80 bg-background/86 backdrop-blur">
+      <div className="flex items-center justify-between border-b border-border/80 px-4 py-3">
         <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4" />
+          <Filter className="h-4 w-4 text-muted-foreground" />
           <span className="font-medium">Filters</span>
           {activeFilterCount > 0 && (
-            <Badge variant="secondary" className="h-5 px-1.5">
+            <Badge variant="secondary" className="h-5 rounded-full px-1.5 text-[11px]">
               {activeFilterCount}
             </Badge>
           )}
         </div>
         {activeFilterCount > 0 && (
-          <Button variant="ghost" size="sm" onClick={() => setFilters({})}>
+          <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setFilters({})}>
             Clear
           </Button>
         )}
       </div>
 
       <div className="space-y-4 p-4">
-        <div className="space-y-2">
+        <div className="space-y-3 rounded-xl border border-border/70 bg-card/70 p-3">
           <div className="flex items-center space-x-2">
             <Checkbox
               id="favorite"
@@ -135,11 +135,11 @@ export function FilterPanel() {
         <Separator />
 
         <Collapsible defaultOpen>
-          <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium">
+          <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium text-foreground">
             Reading Stage
-            <ChevronDown className="h-4 w-4" />
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-2">
+          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
             {readingStages.map((stage) => (
               <div key={stage.value} className="flex items-center space-x-2">
                 <Checkbox
@@ -158,11 +158,11 @@ export function FilterPanel() {
         <Separator />
 
         <Collapsible defaultOpen>
-          <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium">
+          <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium text-foreground">
             Metadata Status
-            <ChevronDown className="h-4 w-4" />
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-2">
+          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
             {metadataStatuses.map((status) => (
               <div key={status.value} className="flex items-center space-x-2">
                 <Checkbox
@@ -181,11 +181,11 @@ export function FilterPanel() {
         <Separator />
 
         <Collapsible defaultOpen>
-          <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium">
+          <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium text-foreground">
             Tags
-            <ChevronDown className="h-4 w-4" />
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-2 space-y-2">
+          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
             {availableTags.length > 0 ? (
               availableTags.map((tag) => (
                 <div key={tag.name} className="flex items-center space-x-2">

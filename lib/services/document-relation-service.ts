@@ -16,6 +16,7 @@ export type DocumentGraphNodeData = {
   isHovered?: boolean
   isCurrentDocument?: boolean
   isSearchMatch?: boolean
+  isSelected?: boolean
   isDimmed?: boolean
 }
 
@@ -77,6 +78,7 @@ export function buildDocumentGraphNodes(
 
 export function buildDocumentGraphEdges(
   relations: DocumentRelation[],
+  selectedDocumentId?: string | null,
   selectedRelationId?: string | null,
   hoveredRelationId?: string | null,
 ): Edge[] {
@@ -86,6 +88,8 @@ export function buildDocumentGraphEdges(
     const isSemanticManual = relation.linkOrigin === 'user' && relation.linkType !== 'manual'
     const isProposed = relation.relationStatus === 'proposed'
     const isRejected = relation.relationStatus === 'rejected'
+    const isConnectedToSelectedDocument = selectedDocumentId != null
+      && (relation.sourceDocumentId === selectedDocumentId || relation.targetDocumentId === selectedDocumentId)
     const isSelected = relation.id === selectedRelationId
     const isHovered = relation.id === hoveredRelationId
     const semanticColor = relation.linkType === 'supports'
@@ -108,23 +112,25 @@ export function buildDocumentGraphEdges(
           : isAuto
             ? '#94a3b8'
             : '#0f766e'
-    const selectedColor = isProposed
-      ? '#b45309'
-      : isCitation
-        ? '#6d28d9'
-        : isSemanticManual
-          ? semanticColor
-          : isAuto
-            ? '#475569'
-            : '#0f766e'
-    const strokeColor = isSelected || isHovered ? selectedColor : baseColor
+    const selectedColor = '#f59e0b'
+    const connectedNodeColor = '#f59e0b'
+    const hoveredColor = '#0ea5e9'
+    const strokeColor = isSelected
+      ? selectedColor
+      : isHovered
+        ? hoveredColor
+        : isConnectedToSelectedDocument
+        ? connectedNodeColor
+        : baseColor
 
     return {
       id: relation.id,
       source: relation.sourceDocumentId,
       target: relation.targetDocumentId,
+      sourceHandle: 'center-source',
+      targetHandle: 'center-target',
       type: 'relationship',
-      animated: isSelected || isHovered,
+      animated: false,
       markerStart: isSelected ? {
         type: MarkerType.Arrow,
         width: 14,
@@ -133,8 +139,8 @@ export function buildDocumentGraphEdges(
       } : undefined,
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        width: isSelected ? 28 : 18,
-        height: isSelected ? 28 : 18,
+        width: isSelected ? 28 : isConnectedToSelectedDocument ? 22 : 18,
+        height: isSelected ? 28 : isConnectedToSelectedDocument ? 22 : 18,
         color: strokeColor,
       },
       label: relation.linkType !== 'manual'
@@ -142,7 +148,17 @@ export function buildDocumentGraphEdges(
         : relation.label,
       style: {
         stroke: strokeColor,
-        strokeWidth: isSelected ? 4.5 : isHovered ? 3.2 : isProposed ? 2.6 : isCitation ? 2.2 : isAuto ? 1.6 : 2.4,
+        strokeWidth: isSelected
+          ? 4.5
+          : isHovered || isConnectedToSelectedDocument
+            ? 3.2
+            : isProposed
+              ? 2.6
+              : isCitation
+                ? 2.2
+                : isAuto
+                  ? 1.6
+                  : 2.4,
         strokeDasharray: isProposed
           ? '4 4'
           : isCitation
@@ -152,15 +168,20 @@ export function buildDocumentGraphEdges(
               : isAuto
                 ? '6 4'
                 : undefined,
-        filter: isSelected
+        filter: isSelected || isConnectedToSelectedDocument
           ? `drop-shadow(0 0 8px ${
-            isProposed
+            isConnectedToSelectedDocument && !isSelected
+              ? 'rgba(245, 158, 11, 0.35)'
+              : isProposed
               ? 'rgba(217, 119, 6, 0.32)'
               : isCitation
                 ? 'rgba(109, 40, 217, 0.32)'
                 : 'rgba(15, 118, 110, 0.35)'
           })`
+          : isHovered
+            ? 'drop-shadow(0 0 8px rgba(14, 165, 233, 0.32))'
           : undefined,
+        opacity: isConnectedToSelectedDocument && !isSelected && !isHovered ? 0.95 : 1,
       },
       labelStyle: {
         fill: isSelected ? '#0f172a' : '#334155',
@@ -176,6 +197,7 @@ export function buildDocumentGraphEdges(
       data: {
         ...relation,
         isHovered,
+        isConnectedToSelectedDocument,
       },
     }
   })

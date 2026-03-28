@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight, Highlighter, Loader2, MapPin, Search, SquareArrowOutUpRight, StickyNote, Trash2, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Search, SquareArrowOutUpRight, StickyNote, Trash2, ZoomIn, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -79,7 +79,10 @@ function ReaderToolbarIconButton({
           size="icon"
           aria-label={label}
           title={label}
-          className={cn('h-8 w-8 text-muted-foreground hover:text-foreground', className)}
+          className={cn(
+            'h-9 w-9 rounded-full border border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted/70 hover:text-foreground',
+            className,
+          )}
           {...props}
         >
           {children}
@@ -797,9 +800,9 @@ export default function ReaderViewPage() {
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
               aria-label="Search inside this document"
-              placeholder="Search inside this document"
-              className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-            />
+                placeholder="Search document"
+                className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+              />
             <ReaderToolbarIconButton
               label="Previous match"
               onClick={() => rotateOccurrence('prev')}
@@ -819,11 +822,11 @@ export default function ReaderViewPage() {
             </span>
           </div>
           {document.filePath && (
-            <ReaderToolbarIconButton
-              label="Detach into new window"
-              onClick={() => void detachReaderWindow()}
-              disabled={!isDesktopApp || !document.filePath}
-            >
+              <ReaderToolbarIconButton
+               label="Open in window"
+                onClick={() => void detachReaderWindow()}
+                disabled={!isDesktopApp || !document.filePath}
+              >
               <SquareArrowOutUpRight className="h-4 w-4" />
             </ReaderToolbarIconButton>
           )}
@@ -850,18 +853,27 @@ export default function ReaderViewPage() {
                   : 'Run OCR'}
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-border/80"
+            onClick={() => router.push(`/documents?id=${document.id}`)}
+          >
+            <FilePenLine className="mr-2 h-4 w-4" />
+            Edit Details
+          </Button>
         </div>
         <div ref={readerViewportRef} className="flex-1 overflow-auto bg-muted/30 p-4">
           {showHighlights && searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && (
-            <div className="mx-auto mb-3 max-w-5xl rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Page-level match navigation is active, but exact PDF highlight boxes are not available for this page yet.
-            </div>
-          )}
-          {isSelectingCommentPosition && (
-            <div className="mx-auto mb-3 max-w-5xl rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
-              Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} applies on the page.
-            </div>
-          )}
+              <div className="mx-auto mb-3 max-w-5xl rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+               Showing page-level matches for this page.
+              </div>
+            )}
+            {isSelectingCommentPosition && (
+              <div className="mx-auto mb-3 max-w-5xl rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
+               Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} belongs on the page.
+              </div>
+            )}
           {pdfDocument ? (
             <div className="flex min-h-full items-start justify-center">
               <div
@@ -962,10 +974,10 @@ export default function ReaderViewPage() {
               </div>
             </div>
           ) : (
-            <div className="space-y-2 p-6">
-              <p>{viewerError ?? 'PDF unavailable. Import a PDF in desktop mode.'}</p>
-              {isDesktopApp && document.id && (
-                <div className="flex items-center gap-2">
+              <div className="space-y-2 p-6">
+               <p>{viewerError ?? 'PDF unavailable.'}</p>
+                {isDesktopApp && document.id && (
+                  <div className="flex items-center gap-2">
                   <Button size="sm" onClick={() => void importPdfForDocument()}>
                     Import PDF...
                   </Button>
@@ -988,11 +1000,11 @@ export default function ReaderViewPage() {
       <ResizablePanel defaultSize={26} minSize={18} maxSize={45}>
         <div className="flex h-full flex-col border-l">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-          <div className="space-y-2 rounded-lg border p-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Search className="h-4 w-4" />
-            Document Search
-          </div>
+            <div className="space-y-2 rounded-lg border p-3">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Search className="h-4 w-4" />
+             Search
+            </div>
           <div className="space-y-2">
             <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Keyword or phrase" />
             <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -1046,10 +1058,10 @@ export default function ReaderViewPage() {
 
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <StickyNote className="h-4 w-4" />
-                Page Notes
-              </div>
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <StickyNote className="h-4 w-4" />
+                 Notes
+                </div>
               {isSelectingCommentPosition ? (
                 <Button variant="outline" size="sm" onClick={handleCancelCommentEditor}>
                   Cancel
@@ -1062,11 +1074,11 @@ export default function ReaderViewPage() {
               }
             </div>
 
-            {isSelectingCommentPosition ? (
-              <div className="rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-sm text-foreground">
-                Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} applies on the page.
-              </div>
-            ) : null}
+              {isSelectingCommentPosition ? (
+                <div className="rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-sm text-foreground">
+                 Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} belongs on the page.
+                </div>
+              ) : null}
 
             {isNoteEditorOpen ? (
               <div className="rounded-lg border p-3">

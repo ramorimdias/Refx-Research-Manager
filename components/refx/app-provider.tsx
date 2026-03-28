@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { useAppStore } from '@/lib/store'
 import { Loader2 } from 'lucide-react'
-import { loadAppSettings } from '@/lib/app-settings'
+import { getBaseThemeMode, getThemeAccentVariant, loadAppSettings } from '@/lib/app-settings'
 import { useTheme } from 'next-themes'
 
 interface AppProviderProps {
@@ -12,10 +12,13 @@ interface AppProviderProps {
 }
 
 export function AppProvider({ children }: AppProviderProps) {
+  const [isUiPrefsReady, setIsUiPrefsReady] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const initialize = useAppStore((state) => state.initialize)
   const initialized = useAppStore((state) => state.initialized)
   const isDesktopApp = useAppStore((state) => state.isDesktopApp)
+  const sidebarCollapsed = useAppStore((state) => state.sidebarCollapsed)
+  const setSidebarCollapsed = useAppStore((state) => state.setSidebarCollapsed)
   const { setTheme } = useTheme()
 
   useEffect(() => {
@@ -37,14 +40,35 @@ export function AppProvider({ children }: AppProviderProps) {
 
     const applySettings = async () => {
       const settings = await loadAppSettings(isDesktopApp)
-      setTheme(settings.theme)
+      setTheme(getBaseThemeMode(settings.theme))
+      const accentVariant = getThemeAccentVariant(settings.theme)
+      if (accentVariant) {
+        document.documentElement.dataset.refxAccent = accentVariant
+      } else {
+        delete document.documentElement.dataset.refxAccent
+      }
       document.documentElement.style.fontSize = `${settings.fontSize}px`
     }
 
     void applySettings()
   }, [initialized, isDesktopApp, setTheme])
 
-  if (isLoading || !initialized) {
+  useEffect(() => {
+    if (!initialized || typeof window === 'undefined') return
+
+    const stored = window.localStorage.getItem('refx.ui.sidebar-collapsed')
+    if (stored !== null) {
+      setSidebarCollapsed(stored === 'true')
+    }
+    setIsUiPrefsReady(true)
+  }, [initialized, setSidebarCollapsed])
+
+  useEffect(() => {
+    if (!initialized || !isUiPrefsReady || typeof window === 'undefined') return
+    window.localStorage.setItem('refx.ui.sidebar-collapsed', String(sidebarCollapsed))
+  }, [initialized, isUiPrefsReady, sidebarCollapsed])
+
+  if (isLoading || !initialized || !isUiPrefsReady) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
@@ -60,7 +84,7 @@ export function AppProvider({ children }: AppProviderProps) {
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm">Loading your research library...</span>
+            <span className="text-sm">Loading workspace...</span>
           </div>
         </div>
       </div>

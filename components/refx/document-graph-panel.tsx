@@ -89,7 +89,7 @@ export function DocumentGraphPanel({
 
   if (!selectedDocument && !selectedRelation) {
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="p-5">
           <h2 className="text-base font-semibold">Relationship Details</h2>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -102,7 +102,7 @@ export function DocumentGraphPanel({
 
   if (selectedRelation && sourceDocument && targetDocument) {
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="p-5">
           <div className="flex items-center gap-2">
             <div className="rounded-full bg-teal-100 p-2 text-teal-700">
@@ -117,7 +117,7 @@ export function DocumentGraphPanel({
           </div>
         </div>
         <Separator />
-        <ScrollArea className="flex-1">
+        <ScrollArea className="h-0 min-h-0 flex-1">
           <div className="space-y-5 p-5">
             <div className="rounded-2xl border bg-card p-4">
               <div className="flex items-center gap-2 text-sm font-medium">
@@ -274,7 +274,7 @@ export function DocumentGraphPanel({
   if (!selectedDocument) return null
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="p-5">
         <div className="flex items-center gap-2">
           <div className="rounded-full bg-sky-100 p-2 text-sky-700">
@@ -289,7 +289,7 @@ export function DocumentGraphPanel({
         </div>
       </div>
       <Separator />
-      <ScrollArea className="flex-1">
+      <ScrollArea className="h-0 min-h-0 flex-1">
         <div className="space-y-5 p-5">
           <div className="flex flex-wrap gap-2">
             {selectedDocument.authors.slice(0, 3).map((author) => (

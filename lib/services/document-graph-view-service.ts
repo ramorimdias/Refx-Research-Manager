@@ -189,6 +189,7 @@ export function deriveGraphView(input: {
   focusMode: boolean
   scopeMode: GraphScopeMode
   manualVisibleDocumentIds: string[]
+  hiddenDocumentIds?: string[]
   yearMin?: number
   yearMax?: number
   hideOrphans: boolean
@@ -204,6 +205,7 @@ export function deriveGraphView(input: {
     focusMode,
     scopeMode,
     manualVisibleDocumentIds,
+    hiddenDocumentIds = [],
     yearMin,
     yearMax,
     hideOrphans,
@@ -226,6 +228,10 @@ export function deriveGraphView(input: {
     : new Set(documents.map((document) => document.id))
 
   let visibleDocuments = documents.filter((document) => scopedBaseIds.has(document.id))
+  if (hiddenDocumentIds.length > 0) {
+    const hiddenIds = new Set(hiddenDocumentIds)
+    visibleDocuments = visibleDocuments.filter((document) => !hiddenIds.has(document.id))
+  }
   if (yearMin !== undefined) {
     visibleDocuments = visibleDocuments.filter((document) => (document.year ?? Number.MIN_SAFE_INTEGER) >= yearMin)
   }
@@ -345,7 +351,7 @@ export function buildNodeAppearance(input: {
   return {
     borderColor,
     fillColor,
-    sizePx: baseSize + (isSelected ? 12 : isHovered ? 6 : 0),
+    sizePx: baseSize,
   } satisfies DocumentGraphAppearance
 }
 
@@ -356,15 +362,19 @@ export function runReheatLayout(input: {
 }) {
   const { nodeIds, relations, currentPositions } = input
   const positions = new Map<string, { x: number; y: number }>()
+  const center = { x: 720, y: 420 }
+  const minSpacing = 260
 
   for (const [index, nodeId] of nodeIds.entries()) {
+    const seedAngle = (index / Math.max(1, nodeIds.length)) * Math.PI * 2
+    const seedRadius = 180 + Math.floor(index / 10) * 110
     positions.set(nodeId, currentPositions.get(nodeId) ?? {
-      x: 120 + (index % 5) * 220,
-      y: 120 + Math.floor(index / 5) * 220,
+      x: center.x + Math.cos(seedAngle) * seedRadius,
+      y: center.y + Math.sin(seedAngle) * seedRadius,
     })
   }
 
-  for (let iteration = 0; iteration < 30; iteration += 1) {
+  for (let iteration = 0; iteration < 96; iteration += 1) {
     const displacements = new Map<string, { x: number; y: number }>(
       nodeIds.map((nodeId) => [nodeId, { x: 0, y: 0 }]),
     )
@@ -375,8 +385,12 @@ export function runReheatLayout(input: {
         const right = positions.get(nodeIds[j])!
         const dx = left.x - right.x
         const dy = left.y - right.y
-        const distance = Math.max(40, Math.hypot(dx, dy))
-        const force = 1500 / (distance * distance)
+        const distance = Math.max(1, Math.hypot(dx, dy))
+        const collisionStrength = distance < minSpacing
+          ? ((minSpacing - distance) / minSpacing) * 14
+          : 0
+        const repulsion = 30000 / (distance * distance)
+        const force = repulsion + collisionStrength
         const xForce = (dx / distance) * force
         const yForce = (dy / distance) * force
         displacements.get(nodeIds[i])!.x += xForce
@@ -392,8 +406,8 @@ export function runReheatLayout(input: {
       if (!source || !target) continue
       const dx = target.x - source.x
       const dy = target.y - source.y
-      const distance = Math.max(60, Math.hypot(dx, dy))
-      const spring = (distance - 240) * 0.004
+      const distance = Math.max(1, Math.hypot(dx, dy))
+      const spring = (distance - 280) * 0.0018
       const xForce = (dx / distance) * spring
       const yForce = (dy / distance) * spring
       displacements.get(relation.sourceDocumentId)!.x += xForce
@@ -405,10 +419,44 @@ export function runReheatLayout(input: {
     for (const nodeId of nodeIds) {
       const current = positions.get(nodeId)!
       const displacement = displacements.get(nodeId)!
+      const dxToCenter = center.x - current.x
+      const dyToCenter = center.y - current.y
+      const centeringX = dxToCenter * 0.0018
+      const centeringY = dyToCenter * 0.0018
+      const temperature = 1 - iteration / 96
       positions.set(nodeId, {
-        x: current.x + displacement.x * 22,
-        y: current.y + displacement.y * 22,
+        x: current.x + (displacement.x + centeringX) * (14 + temperature * 10),
+        y: current.y + (displacement.y + centeringY) * (14 + temperature * 10),
       })
+    }
+  }
+
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    for (let i = 0; i < nodeIds.length; i += 1) {
+      for (let j = i + 1; j < nodeIds.length; j += 1) {
+        const leftId = nodeIds[i]
+        const rightId = nodeIds[j]
+        const left = positions.get(leftId)!
+        const right = positions.get(rightId)!
+        const dx = right.x - left.x
+        const dy = right.y - left.y
+        const distance = Math.max(1, Math.hypot(dx, dy))
+
+        if (distance >= minSpacing) continue
+
+        const overlap = (minSpacing - distance) / 2
+        const unitX = dx / distance
+        const unitY = dy / distance
+
+        positions.set(leftId, {
+          x: left.x - unitX * overlap,
+          y: left.y - unitY * overlap,
+        })
+        positions.set(rightId, {
+          x: right.x + unitX * overlap,
+          y: right.y + unitY * overlap,
+        })
+      }
     }
   }
 

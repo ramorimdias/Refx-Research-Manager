@@ -41,33 +41,38 @@ const ocrStatusConfig: Record<OcrStatus, { label: string; icon: typeof Clock; cl
   not_needed: { label: 'Native Text', icon: CheckCheck, className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
 }
 
-export function ReadingStageBadge({ stage }: { stage: ReadingStage }) {
-  const config = readingStageConfig[stage]
-  const Icon = config.icon
+function CompactBadge({
+  icon: Icon,
+  label,
+  className,
+}: {
+  icon: typeof BookOpen
+  label: string
+  className: string
+}) {
   return (
-    <Badge variant="secondary" className={cn('gap-1 font-normal', config.className)}>
+    <Badge variant="secondary" className={cn('h-6 gap-1.5 rounded-full px-2.5 text-[11px] font-medium', className)}>
       <Icon className="h-3 w-3" />
-      {config.label}
+      {label}
     </Badge>
   )
 }
 
+export function ReadingStageBadge({ stage }: { stage: ReadingStage }) {
+  const config = readingStageConfig[stage]
+  return <CompactBadge icon={config.icon} label={config.label} className={config.className} />
+}
+
 export function MetadataStatusBadge({ status }: { status: MetadataStatus }) {
   const config = metadataStatusConfig[status]
-  const Icon = config.icon
-  return (
-    <Badge variant="secondary" className={cn('gap-1 font-normal', config.className)}>
-      <Icon className="h-3 w-3" />
-      {config.label}
-    </Badge>
-  )
+  return <CompactBadge icon={config.icon} label={config.label} className={config.className} />
 }
 
 export function OcrStatusBadge({ status }: { status: OcrStatus }) {
   const config = ocrStatusConfig[status]
   const Icon = config.icon
   return (
-    <Badge variant="secondary" className={cn('gap-1 font-normal', config.className)}>
+    <Badge variant="secondary" className={cn('h-6 gap-1.5 rounded-full px-2.5 text-[11px] font-medium', config.className)}>
       <Icon className={cn('h-3 w-3', status === 'processing' && 'animate-spin')} />
       {config.label}
     </Badge>
@@ -90,23 +95,26 @@ export function TagChip({
   return (
     <Badge
       variant="secondary"
-      className={cn('gap-1.5 font-normal cursor-default', onClick && 'cursor-pointer hover:bg-secondary/80')}
+      className={cn(
+        'h-6 gap-1.5 rounded-full border border-border/70 bg-muted/60 px-2.5 text-[11px] font-medium text-foreground shadow-none',
+        onClick && 'cursor-pointer hover:bg-muted',
+      )}
       onClick={onClick}
     >
-      {color && <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />}
+      {color ? <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} /> : null}
       {name}
-      {removable && onRemove && (
+      {removable && onRemove ? (
         <button
           onClick={(event) => {
             event.preventDefault()
             event.stopPropagation()
             onRemove()
           }}
-          className="ml-1 hover:text-foreground"
+          className="ml-0.5 rounded-full px-1 text-muted-foreground transition hover:bg-muted-foreground/10 hover:text-foreground"
         >
-          x
+          ×
         </button>
-      )}
+      ) : null}
     </Badge>
   )
 }
@@ -115,7 +123,7 @@ export function NewBadge() {
   return (
     <Badge
       variant="outline"
-      className="border-emerald-300/70 bg-emerald-500/[0.08] text-[10px] font-semibold tracking-[0.14em] text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300"
+      className="h-5 rounded-full border-emerald-300/60 bg-emerald-500/[0.08] px-2 text-[10px] font-semibold tracking-[0.12em] text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300"
     >
       NEW
     </Badge>
@@ -143,7 +151,7 @@ export function StarRating({
             onChange?.(star === rating ? 0 : star)
           }}
           className={cn(
-            'text-lg transition-colors',
+            'text-base leading-none transition-colors',
             star <= rating ? 'text-amber-400' : 'text-muted-foreground/30',
             !readonly && 'cursor-pointer hover:text-amber-400',
             readonly && 'cursor-default',
@@ -168,12 +176,12 @@ export function EmptyState({
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="mb-4 rounded-full bg-muted p-4">
-        <Icon className="h-8 w-8 text-muted-foreground" />
+    <div className="flex flex-col items-center justify-center py-14 text-center">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/70 text-muted-foreground">
+        <Icon className="h-6 w-6" />
       </div>
-      <h3 className="mb-2 text-lg font-semibold">{title}</h3>
-      <p className="mb-6 max-w-sm text-sm text-muted-foreground">{description}</p>
+      <h3 className="mb-1 text-lg font-semibold tracking-tight">{title}</h3>
+      <p className="mb-5 max-w-sm text-sm text-muted-foreground">{description}</p>
       {action}
     </div>
   )
@@ -191,19 +199,19 @@ export function StatsCard({
   icon?: typeof BookOpen
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="rounded-2xl border border-border/80 bg-card p-4 shadow-[0_8px_24px_rgba(15,23,42,0.04)]">
       <div className="flex items-center justify-between">
         <span className="text-sm text-muted-foreground">{label}</span>
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
+        {Icon ? <Icon className="h-4 w-4 text-muted-foreground" /> : null}
       </div>
       <div className="mt-2 flex items-baseline gap-2">
         <span className="text-2xl font-semibold">{value}</span>
-        {trend && (
+        {trend ? (
           <span className={cn('text-xs', trend.value >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')}>
             {trend.value >= 0 ? '+' : ''}
             {trend.value}% {trend.label}
           </span>
-        )}
+        ) : null}
       </div>
     </div>
   )
@@ -219,10 +227,10 @@ export function SectionHeader({
   action?: ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="section-header">
       <div>
-        <h2 className="text-lg font-semibold">{title}</h2>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+        <h2 className="section-title">{title}</h2>
+        {description ? <p className="section-caption">{description}</p> : null}
       </div>
       {action}
     </div>

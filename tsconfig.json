@@ -36,6 +36,10 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".pnpm-store",
+    "src-tauri",
+    "out",
+    "dist"
   ]
 }

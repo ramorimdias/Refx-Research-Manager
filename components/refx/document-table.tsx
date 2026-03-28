@@ -201,14 +201,14 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
   )
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-background">
-      <div className="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-2">
+    <div className="overflow-hidden rounded-2xl border border-border/80 bg-background shadow-[0_10px_28px_rgba(15,23,42,0.04)]">
+      <div className="flex items-center justify-between border-b border-border/80 bg-muted/20 px-4 py-3">
         {selection.hasSelection ? (
           <DocumentBulkActions
             selectedDocumentIds={selection.selectedDocumentIds}
             onClearSelection={selection.clearSelection}
           >
-            <Button size="sm" variant="outline" onClick={() => void refreshTagSuggestionsForDocuments(selection.selectedDocumentIds)}>
+            <Button size="sm" variant="outline" className="rounded-full" onClick={() => void refreshTagSuggestionsForDocuments(selection.selectedDocumentIds)}>
               Generate Suggestions
             </Button>
           </DocumentBulkActions>
@@ -219,7 +219,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline">
+              <Button size="sm" variant="outline" className="rounded-full">
                 <Settings2 className="mr-2 h-4 w-4" />
                 Columns
               </Button>
@@ -292,15 +292,18 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
 
                   {columnVisibility.favorite && (
                     <TableCell>
-                      <button
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => toggleFavorite(doc.id)}
                         className={cn(
-                          'transition-colors',
+                          'rounded-full transition-colors',
                           doc.favorite ? 'text-amber-400' : 'text-muted-foreground/30 hover:text-amber-400',
                         )}
                       >
                         <Star className="h-4 w-4" fill={doc.favorite ? 'currentColor' : 'none'} />
-                      </button>
+                      </Button>
                     </TableCell>
                   )}
 
@@ -364,7 +367,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                   {columnVisibility.comments && (
                     <TableCell className="text-center">
                       <div className="flex items-center justify-center gap-2">
-                        <Button asChild variant="outline" size="icon" className="h-8 w-8">
+                        <Button asChild variant="outline" size="icon-sm" className="rounded-full">
                           <Link href={`/comments?id=${doc.id}`}>
                             <MessageSquare className="h-3.5 w-3.5" />
                             <span className="sr-only">Open comments</span>
@@ -389,8 +392,8 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                       trigger={
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+                          size="icon-sm"
+                          className="rounded-full opacity-0 transition-opacity group-hover:opacity-100"
                         >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>

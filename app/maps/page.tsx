@@ -21,7 +21,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Position,
-  getBezierPath,
+  getStraightPath,
   type Connection,
   type EdgeProps,
   type Node,
@@ -31,6 +31,7 @@ import {
   type OnConnectStart,
   type OnEdgesChange,
   type OnNodesChange,
+  type NodeMouseHandler,
   type NodeDragHandler,
   useEdgesState,
   useNodesState,
@@ -38,6 +39,7 @@ import {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import {
+  Check,
   ArrowRight,
   GitBranch,
   Pin,
@@ -46,12 +48,21 @@ import {
   Save,
   Trash2,
   WandSparkles,
+  ChevronsUpDown,
 } from 'lucide-react'
 import { DocumentGraphControls } from '@/components/refx/document-graph-controls'
 import { DocumentGraphPanel } from '@/components/refx/document-graph-panel'
 import { EmptyState } from '@/components/refx/common'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command'
 import {
   Dialog,
   DialogContent,
@@ -62,6 +73,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
   Select,
   SelectContent,
@@ -70,6 +82,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable'
 import { useAppStore } from '@/lib/store'
 import {
   buildNodeAppearance,
@@ -116,7 +133,23 @@ type GraphViewDraft = {
   description: string
 }
 
+type GraphContextMenuState =
+  | {
+      kind: 'node'
+      documentId: string
+      x: number
+      y: number
+    }
+  | {
+      kind: 'edge'
+      relationId: string
+      x: number
+      y: number
+    }
+  | null
+
 const GRAPH_PREFERENCES_STORAGE_KEY = 'refx.maps.phase4.preferences'
+const WORKING_MAP_LAYOUT_STORAGE_KEY = 'refx.maps.working-layouts'
 const DEFAULT_GRAPH_PREFERENCES: GraphPreferences = {
   colorMode: 'density',
   confidenceThreshold: 0,
@@ -132,6 +165,8 @@ const DEFAULT_GRAPH_VIEW_DRAFT: GraphViewDraft = {
   name: '',
   description: '',
 }
+
+type WorkingMapLayouts = Record<string, Record<string, { x: number; y: number }>>
 
 function resolveEdgeDirections(
   sourceX: number,
@@ -174,22 +209,45 @@ function RelationshipEdge({
     targetX,
     targetY,
   )
-  const [edgePath, labelX, labelY] = getBezierPath({
+  const [edgePath, labelX, labelY] = getStraightPath({
     sourceX,
     sourceY,
-    sourcePosition,
     targetX,
     targetY,
-    targetPosition,
   })
-  const edgeData = (data ?? {}) as { confidence?: number; isHovered?: boolean; relationStatus?: string }
+  const edgeData = (data ?? {}) as {
+    confidence?: number
+    isHovered?: boolean
+    isConnectedToSelectedDocument?: boolean
+    relationStatus?: string
+  }
   const confidence = typeof edgeData.confidence === 'number'
     ? Math.round(edgeData.confidence * 100)
     : null
+  const arrowAngle = Math.atan2(targetY - sourceY, targetX - sourceX) * (180 / Math.PI)
 
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerStart={markerStart} markerEnd={markerEnd} style={style} />
+      <EdgeLabelRenderer>
+        <div
+          className={cn(
+            'pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border shadow-sm',
+            selected
+              ? 'border-amber-300 bg-white text-amber-600'
+              : edgeData.isHovered || edgeData.isConnectedToSelectedDocument
+                ? 'border-slate-300 bg-white text-slate-700'
+                : 'border-slate-200/80 bg-white/92 text-slate-500',
+          )}
+          style={{
+            left: labelX,
+            top: labelY,
+            transform: `translate(-50%, -50%) rotate(${arrowAngle}deg)`,
+          }}
+        >
+          <ArrowRight className="h-3.5 w-3.5" />
+        </div>
+      </EdgeLabelRenderer>
       {(label && (selected || edgeData.isHovered)) ? (
         <EdgeLabelRenderer>
           <div
@@ -226,6 +284,7 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
     isFocused,
     isHovered,
     isSearchMatch,
+    isSelected,
     onStartConnection,
     outboundCitationCount = 0,
     pendingConnectionDirection,
@@ -241,9 +300,9 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
       className={cn(
         'relative z-10 flex h-full w-full items-center justify-center overflow-visible rounded-full text-center shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur transition-all',
         pendingConnectionDirection && 'ring-4 ring-teal-100',
-        selected && 'ring-4 ring-teal-200',
-        isFocused && !selected && 'ring-4 ring-violet-100',
-        isHovered && !selected && 'ring-2 ring-sky-100',
+        isSelected && 'ring-4 ring-amber-300 shadow-[0_0_0_8px_rgba(251,191,36,0.22),0_16px_40px_rgba(15,23,42,0.12)]',
+        isFocused && !isSelected && 'ring-4 ring-violet-100',
+        isHovered && !isSelected && 'ring-2 ring-sky-100',
         isSearchMatch && 'shadow-[0_0_0_4px_rgba(245,158,11,0.18),0_16px_40px_rgba(15,23,42,0.08)]',
       )}
       style={{
@@ -260,7 +319,6 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
         <p className="line-clamp-2 text-xs leading-5 text-slate-600">{authorText}</p>
         <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">
           {document.year ? <span>{document.year}</span> : null}
-          {isCurrentDocument ? <span className="rounded-full bg-teal-700 px-2 py-1 text-white">Current</span> : null}
         </div>
         <p className="text-[10px] text-slate-500">
           {inboundCitationCount} in • {outboundCitationCount} out • {relationCount} total
@@ -268,22 +326,39 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
       </div>
 
       <Handle
+        id="center-target"
         type="target"
-        position={Position.Right}
-        className="!z-0 !h-10 !w-10 !border-0 !bg-transparent !opacity-0"
+        position={Position.Left}
+        isConnectableStart={false}
+        isConnectableEnd={false}
+        className="!pointer-events-none !z-0 !h-1 !w-1 !border-0 !bg-transparent !opacity-0"
         style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
       />
       <Handle
+        id="drop-target"
+        type="target"
+        position={Position.Right}
+        isConnectableStart={false}
+        isConnectableEnd
+        className="!absolute !z-0 !h-full !w-full !rounded-full !border-0 !bg-transparent !opacity-0"
+        style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
+      />
+      <Handle
+        id="center-source"
         type="source"
         position={Position.Right}
-        className="!z-0 !h-10 !w-10 !border-0 !bg-transparent !opacity-0"
+        isConnectableStart={false}
+        isConnectableEnd={false}
+        className="!pointer-events-none !z-0 !h-1 !w-1 !border-0 !bg-transparent !opacity-0"
         style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
       />
 
-      {selected ? (
+      {isSelected ? (
         <>
-          <button
-            type="button"
+          <Handle
+            id="inbound"
+            type="source"
+            position={Position.Left}
             aria-label={`Create an inbound relation for ${document.title}`}
             title="Inbound relation"
             onClick={(event) => {
@@ -291,16 +366,19 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
               onStartConnection(document.id, 'inbound')
             }}
             className={cn(
-              'absolute top-1/2 left-[-18px] z-30 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)] transition',
+              'nodrag nopan !absolute !top-1/2 !left-[-18px] !z-30 !flex !h-10 !w-10 !-translate-y-1/2 !items-center !justify-center !rounded-full !border-2 !border-white !text-white !shadow-[0_8px_24px_rgba(15,23,42,0.18)] !transition',
               pendingConnectionDirection === 'inbound'
-                ? 'bg-teal-700 ring-4 ring-teal-100'
-                : 'bg-slate-600 hover:bg-slate-700',
+                ? '!bg-teal-700 ring-4 ring-teal-100'
+                : '!bg-slate-600 hover:!bg-slate-700',
             )}
+            style={{ transform: 'translateY(-50%)' }}
           >
             <ArrowRight className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
+          </Handle>
+          <Handle
+            id="outbound"
+            type="source"
+            position={Position.Right}
             aria-label={`Create an outbound relation for ${document.title}`}
             title="Outbound relation"
             onClick={(event) => {
@@ -308,14 +386,15 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
               onStartConnection(document.id, 'outbound')
             }}
             className={cn(
-              'absolute top-1/2 right-[-18px] z-30 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border-2 border-white text-white shadow-[0_8px_24px_rgba(15,23,42,0.18)] transition',
+              'nodrag nopan !absolute !top-1/2 !right-[-18px] !z-30 !flex !h-10 !w-10 !-translate-y-1/2 !items-center !justify-center !rounded-full !border-2 !border-white !text-white !shadow-[0_8px_24px_rgba(15,23,42,0.18)] !transition',
               pendingConnectionDirection === 'outbound'
-                ? 'bg-teal-700 ring-4 ring-teal-100'
-                : 'bg-teal-600 hover:bg-teal-700',
+                ? '!bg-teal-700 ring-4 ring-teal-100'
+                : '!bg-teal-600 hover:!bg-teal-700',
             )}
+            style={{ transform: 'translateY(-50%)' }}
           >
             <ArrowRight className="h-4 w-4" />
-          </button>
+          </Handle>
         </>
       ) : null}
 
@@ -362,6 +441,23 @@ function readStoredGraphPreferences() {
   }
 }
 
+function readWorkingMapLayouts() {
+  if (typeof window === 'undefined') return {} as WorkingMapLayouts
+
+  try {
+    const raw = window.localStorage.getItem(WORKING_MAP_LAYOUT_STORAGE_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw) as WorkingMapLayouts
+  } catch {
+    return {}
+  }
+}
+
+function writeWorkingMapLayouts(value: WorkingMapLayouts) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(WORKING_MAP_LAYOUT_STORAGE_KEY, JSON.stringify(value))
+}
+
 function MapsPageContent() {
   const params = useSearchParams()
   const focusDocumentId = params.get('focus')
@@ -399,20 +495,25 @@ function MapsPageContent() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(focusDocumentId)
   const [selectedRelationId, setSelectedRelationId] = useState<string | null>(null)
   const [manualVisibleDocumentIds, setManualVisibleDocumentIds] = useState<string[]>([])
+  const [hiddenDocumentIds, setHiddenDocumentIds] = useState<string[]>([])
   const [activeGraphViewId, setActiveGraphViewId] = useState<string | null>(null)
   const [pendingConnectionDocumentId, setPendingConnectionDocumentId] = useState<string | null>(null)
   const [pendingConnectionDirection, setPendingConnectionDirection] = useState<ConnectionDirection | null>(null)
   const [newManualLinkType, setNewManualLinkType] = useState<DocumentRelationLinkType>('manual')
   const [searchQuery, setSearchQuery] = useState('')
+  const [isAddDocumentPopoverOpen, setIsAddDocumentPopoverOpen] = useState(false)
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const [isDeletingRelation, setIsDeletingRelation] = useState(false)
+  const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null)
   const [isRebuildingAutoLinks, setIsRebuildingAutoLinks] = useState(false)
   const [isRebuildingDocumentCitations, setIsRebuildingDocumentCitations] = useState(false)
   const [isReheatingLayout, setIsReheatingLayout] = useState(false)
   const [isSaveViewDialogOpen, setIsSaveViewDialogOpen] = useState(false)
   const [isEditingViewDialogOpen, setIsEditingViewDialogOpen] = useState(false)
   const [graphViewDraft, setGraphViewDraft] = useState<GraphViewDraft>(DEFAULT_GRAPH_VIEW_DRAFT)
+  const [workingLayoutPositions, setWorkingLayoutPositions] = useState<Record<string, { x: number; y: number }>>({})
   const dragConnectionSourceIdRef = useRef<string | null>(null)
+  const dragConnectionHandleIdRef = useRef<string | null>(null)
   const dragConnectionCompletedRef = useRef(false)
 
   useEffect(() => {
@@ -423,6 +524,18 @@ function MapsPageContent() {
     if (typeof window === 'undefined') return
     window.localStorage.setItem(GRAPH_PREFERENCES_STORAGE_KEY, JSON.stringify(graphPreferences))
   }, [graphPreferences])
+
+  useEffect(() => {
+    if (!activeLibraryId || activeGraphViewId) {
+      if (activeGraphViewId) {
+        setWorkingLayoutPositions({})
+      }
+      return
+    }
+
+    const storedLayouts = readWorkingMapLayouts()
+    setWorkingLayoutPositions(storedLayouts[activeLibraryId] ?? {})
+  }, [activeGraphViewId, activeLibraryId])
 
   useEffect(() => {
     if (!activeLibraryId) return
@@ -453,7 +566,10 @@ function MapsPageContent() {
   )
 
   useEffect(() => {
-    if (!activeGraphView) return
+    if (!activeGraphView) {
+      setHiddenDocumentIds([])
+      return
+    }
 
     setGraphPreferences({
       colorMode: activeGraphView.colorMode,
@@ -468,8 +584,13 @@ function MapsPageContent() {
       yearMax: activeGraphView.yearMax,
     })
     setManualVisibleDocumentIds(activeGraphView.documentIds)
+    setHiddenDocumentIds(
+      graphViewLayouts
+        .filter((layout) => layout.graphViewId === activeGraphView.id && layout.hidden)
+        .map((layout) => layout.documentId),
+    )
     setSelectedDocumentId(activeGraphView.selectedDocumentId ?? null)
-  }, [activeGraphView])
+  }, [activeGraphView, graphViewLayouts])
 
   const libraryDocuments = useMemo(() => {
     if (!activeLibrary) return []
@@ -503,12 +624,13 @@ function MapsPageContent() {
         focusMode: graphPreferences.focusMode,
         scopeMode: graphPreferences.scopeMode,
         manualVisibleDocumentIds,
+        hiddenDocumentIds,
         yearMin: graphPreferences.yearMin,
         yearMax: graphPreferences.yearMax,
         hideOrphans: graphPreferences.hideOrphans,
         searchQuery: deferredSearchQuery,
       }),
-    [deferredSearchQuery, graphPreferences, libraryDocuments, libraryRelations, manualVisibleDocumentIds, selectedDocumentId],
+    [deferredSearchQuery, graphPreferences, hiddenDocumentIds, libraryDocuments, libraryRelations, manualVisibleDocumentIds, selectedDocumentId],
   )
 
   const visibleDocuments = derivedGraphView.documents
@@ -540,6 +662,25 @@ function MapsPageContent() {
       ),
     [activeGraphViewId, graphViewLayouts],
   )
+
+  const effectiveLayoutMap = useMemo(() => {
+    if (activeGraphViewId) return graphViewLayoutMap
+
+    return new Map(
+      Object.entries(workingLayoutPositions).map(([documentId, position]) => [
+        documentId,
+        {
+          documentId,
+          graphViewId: '__working__',
+          hidden: false,
+          pinned: false,
+          updatedAt: new Date(),
+          x: position.x,
+          y: position.y,
+        },
+      ]),
+    )
+  }, [activeGraphViewId, graphViewLayoutMap, workingLayoutPositions])
 
   const sourceDocument = useMemo(
     () =>
@@ -592,7 +733,7 @@ function MapsPageContent() {
     ).length
     : 0
   const selectedDocumentPinned = selectedDocument
-    ? graphViewLayoutMap.get(selectedDocument.id)?.pinned ?? false
+    ? effectiveLayoutMap.get(selectedDocument.id)?.pinned ?? false
     : false
 
   const clearPendingConnection = () => {
@@ -652,13 +793,14 @@ function MapsPageContent() {
           isFocused: graphPreferences.focusMode && selectedDocumentId === document.id,
           isHovered: hoveredDocumentId === document.id,
           isSearchMatch: searchMatches.has(document.id),
+          isSelected: selectedDocumentId === document.id,
           sizePx: nodeAppearance.sizePx,
         }]
       }),
     ) as Record<string, Partial<DocumentGraphNodeData>>
 
     const nextNodes = buildDocumentGraphNodes(visibleDocuments, visibleRelations, appearance).map((node) => {
-      const savedLayout = graphViewLayoutMap.get(node.id)
+      const savedLayout = effectiveLayoutMap.get(node.id)
 
       return {
         ...node,
@@ -688,11 +830,11 @@ function MapsPageContent() {
     })
 
     const lockedPositions = new Map(
-      Array.from(graphViewLayoutMap.values()).map((layout) => [layout.documentId, { x: layout.x, y: layout.y }]),
+      Array.from(effectiveLayoutMap.values()).map((layout) => [layout.documentId, { x: layout.x, y: layout.y }]),
     )
 
     setNodes((currentNodes) => preserveNodePositions(nextNodes, currentNodes, lockedPositions))
-    setEdges(buildDocumentGraphEdges(visibleRelations, selectedRelationId, hoveredRelationId))
+    setEdges(buildDocumentGraphEdges(visibleRelations, selectedDocumentId, selectedRelationId, hoveredRelationId))
   }, [
     activeDocumentId,
     activeLibrary?.color,
@@ -708,7 +850,7 @@ function MapsPageContent() {
     selectedRelationId,
     setEdges,
     setNodes,
-    graphViewLayoutMap,
+    effectiveLayoutMap,
     visibleDocuments,
     visibleMetrics,
     visibleRelations,
@@ -717,41 +859,9 @@ function MapsPageContent() {
   const handleConnect: OnConnect = async (connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return
     dragConnectionCompletedRef.current = true
-
-    const created = await createRelation({
-      sourceDocumentId: connection.source,
-      targetDocumentId: connection.target,
-      linkType: newManualLinkType,
-      linkOrigin: 'user',
-    })
-
-    if (!created) return
-
-    setManualVisibleDocumentIds((currentIds) => Array.from(new Set([...currentIds, connection.source!, connection.target!])))
-    clearPendingConnection()
-    setSelectedDocumentId(null)
-    setSelectedRelationId(created.id)
-  }
-
-  const handleConnectStart: OnConnectStart = (_, params) => {
-    dragConnectionCompletedRef.current = false
-    dragConnectionSourceIdRef.current = params.handleType === 'source' ? params.nodeId : null
-  }
-
-  const handleConnectEnd: OnConnectEnd = async (event) => {
-    const sourceDocumentId = dragConnectionSourceIdRef.current
-    dragConnectionSourceIdRef.current = null
-
-    if (dragConnectionCompletedRef.current) {
-      dragConnectionCompletedRef.current = false
-      return
-    }
-    if (!sourceDocumentId) return
-
-    const rawTarget = event.target
-    if (!(rawTarget instanceof Element)) return
-    const targetDocumentId = rawTarget.closest('[data-document-node-id]')?.getAttribute('data-document-node-id')
-    if (!targetDocumentId || targetDocumentId === sourceDocumentId) return
+    const direction = connection.sourceHandle === 'inbound' ? 'inbound' : 'outbound'
+    const sourceDocumentId = direction === 'inbound' ? connection.target : connection.source
+    const targetDocumentId = direction === 'inbound' ? connection.source : connection.target
 
     const created = await createRelation({
       sourceDocumentId,
@@ -763,6 +873,47 @@ function MapsPageContent() {
     if (!created) return
 
     setManualVisibleDocumentIds((currentIds) => Array.from(new Set([...currentIds, sourceDocumentId, targetDocumentId])))
+    clearPendingConnection()
+    setSelectedDocumentId(null)
+    setSelectedRelationId(created.id)
+  }
+
+  const handleConnectStart: OnConnectStart = (_, params) => {
+    dragConnectionCompletedRef.current = false
+    dragConnectionHandleIdRef.current = params.handleId ?? null
+    dragConnectionSourceIdRef.current = params.handleType === 'source' ? params.nodeId : null
+  }
+
+  const handleConnectEnd: OnConnectEnd = async (event) => {
+    const sourceDocumentId = dragConnectionSourceIdRef.current
+    const sourceHandleId = dragConnectionHandleIdRef.current
+    dragConnectionSourceIdRef.current = null
+    dragConnectionHandleIdRef.current = null
+
+    if (dragConnectionCompletedRef.current) {
+      dragConnectionCompletedRef.current = false
+      return
+    }
+    if (!sourceDocumentId) return
+
+    const rawTarget = event.target
+    if (!(rawTarget instanceof Element)) return
+    const targetDocumentId = rawTarget.closest('[data-document-node-id]')?.getAttribute('data-document-node-id')
+    if (!targetDocumentId || targetDocumentId === sourceDocumentId) return
+    const direction = sourceHandleId === 'inbound' ? 'inbound' : 'outbound'
+    const relationSourceDocumentId = direction === 'inbound' ? targetDocumentId : sourceDocumentId
+    const relationTargetDocumentId = direction === 'inbound' ? sourceDocumentId : targetDocumentId
+
+    const created = await createRelation({
+      sourceDocumentId: relationSourceDocumentId,
+      targetDocumentId: relationTargetDocumentId,
+      linkType: newManualLinkType,
+      linkOrigin: 'user',
+    })
+
+    if (!created) return
+
+    setManualVisibleDocumentIds((currentIds) => Array.from(new Set([...currentIds, relationSourceDocumentId, relationTargetDocumentId])))
     clearPendingConnection()
     setSelectedDocumentId(null)
     setSelectedRelationId(created.id)
@@ -804,6 +955,71 @@ function MapsPageContent() {
     }
   }
 
+  const handleDeleteRelationWithoutPrompt = async (relationId: string) => {
+    setIsDeletingRelation(true)
+    try {
+      const deleted = await deleteRelation(relationId)
+      if (deleted) {
+        setSelectedRelationId((currentId) => (currentId === relationId ? null : currentId))
+      }
+    } finally {
+      setIsDeletingRelation(false)
+    }
+  }
+
+  const handleDeleteAllLinksForDocument = async (documentId: string) => {
+    const connectedRelations = libraryRelations.filter(
+      (relation) =>
+        relation.sourceDocumentId === documentId || relation.targetDocumentId === documentId,
+    )
+
+    if (connectedRelations.length === 0) return
+
+    const confirmed = window.confirm(`Delete ${connectedRelations.length} link(s) connected to this node?`)
+    if (!confirmed) return
+
+    setIsDeletingRelation(true)
+    try {
+      await Promise.all(connectedRelations.map((relation) => deleteRelation(relation.id)))
+      setSelectedRelationId((currentId) =>
+        currentId && connectedRelations.some((relation) => relation.id === currentId) ? null : currentId,
+      )
+    } finally {
+      setIsDeletingRelation(false)
+    }
+  }
+
+  const handleInvertRelation = async (relationId: string) => {
+    const relation = libraryRelations.find((entry) => entry.id === relationId)
+    if (!relation) return
+
+    const inverted = await createRelation({
+      sourceDocumentId: relation.targetDocumentId,
+      targetDocumentId: relation.sourceDocumentId,
+      linkType: relation.linkType,
+      linkOrigin: relation.linkOrigin,
+      relationStatus: relation.relationStatus,
+      confidence: relation.confidence,
+      label: relation.label,
+      notes: relation.notes,
+      matchMethod: relation.matchMethod,
+      rawReferenceText: relation.rawReferenceText,
+      normalizedReferenceText: relation.normalizedReferenceText,
+      normalizedTitle: relation.normalizedTitle,
+      normalizedFirstAuthor: relation.normalizedFirstAuthor,
+      referenceIndex: relation.referenceIndex,
+      parseConfidence: relation.parseConfidence,
+      parseWarnings: relation.parseWarnings,
+      matchDebugInfo: relation.matchDebugInfo,
+    })
+
+    if (!inverted) return
+
+    await handleDeleteRelationWithoutPrompt(relationId)
+    setSelectedDocumentId(null)
+    setSelectedRelationId(inverted.id)
+  }
+
   const handleUpdateRelationStatus = async (relationId: string, relationStatus: 'confirmed' | 'rejected') => {
     await updateRelation(relationId, { relationStatus })
     setSelectedRelationId(relationId)
@@ -841,16 +1057,38 @@ function MapsPageContent() {
 
   const handleNodesChange: OnNodesChange = (changes) => onNodesChange(changes)
   const handleEdgesChange: OnEdgesChange = (changes) => onEdgesChange(changes)
+  const handleNodeDragStart: NodeMouseHandler = (_, node) => {
+    setSelectedDocumentId(node.id)
+    setSelectedRelationId(null)
+    setActiveDocument(node.id)
+  }
   const handleNodeDragStop: NodeDragHandler = async (_, node) => {
-    if (!activeGraphViewId) return
-    const existingLayout = graphViewLayoutMap.get(node.id)
-    await upsertGraphViewNodeLayout({
-      graphViewId: activeGraphViewId,
-      documentId: node.id,
-      x: node.position.x,
-      y: node.position.y,
-      pinned: existingLayout?.pinned ?? false,
-      hidden: false,
+    if (activeGraphViewId) {
+      const existingLayout = graphViewLayoutMap.get(node.id)
+      await upsertGraphViewNodeLayout({
+        graphViewId: activeGraphViewId,
+        documentId: node.id,
+        x: node.position.x,
+        y: node.position.y,
+        pinned: existingLayout?.pinned ?? false,
+        hidden: false,
+      })
+      return
+    }
+
+    if (!activeLibraryId) return
+
+    setWorkingLayoutPositions((currentLayouts) => {
+      const nextLayouts = {
+        ...currentLayouts,
+        [node.id]: { x: node.position.x, y: node.position.y },
+      }
+      const storedLayouts = readWorkingMapLayouts()
+      writeWorkingMapLayouts({
+        ...storedLayouts,
+        [activeLibraryId]: nextLayouts,
+      })
+      return nextLayouts
     })
   }
 
@@ -858,11 +1096,19 @@ function MapsPageContent() {
     if (!documentId || documentId === '__none__') return
     const nextDocumentIds = Array.from(new Set([...manualVisibleDocumentIds, documentId]))
     setManualVisibleDocumentIds(nextDocumentIds)
+    setHiddenDocumentIds((currentIds) => currentIds.filter((id) => id !== documentId))
     setSelectedRelationId(null)
     setSelectedDocumentId(documentId)
     setActiveDocument(documentId)
     if (activeGraphView) {
       await updateGraphView(activeGraphView.id, { documentIds: nextDocumentIds })
+      await upsertGraphViewNodeLayout({
+        graphViewId: activeGraphView.id,
+        documentId,
+        x: reactFlow.getNode(documentId)?.position.x ?? 0,
+        y: reactFlow.getNode(documentId)?.position.y ?? 0,
+        hidden: false,
+      })
     }
   }
 
@@ -1017,10 +1263,16 @@ function MapsPageContent() {
   }
 
   const handleRemoveDocumentFromCurrentView = async (documentId: string) => {
-    setManualVisibleDocumentIds((currentIds) => currentIds.filter((id) => id !== documentId))
+    setHiddenDocumentIds((currentIds) => Array.from(new Set([...currentIds, documentId])))
     if (!activeGraphView) return
-    const nextDocumentIds = activeGraphView.documentIds.filter((id) => id !== documentId)
-    await updateGraphView(activeGraphView.id, { documentIds: nextDocumentIds })
+    await upsertGraphViewNodeLayout({
+      graphViewId: activeGraphView.id,
+      documentId,
+      x: reactFlow.getNode(documentId)?.position.x ?? 0,
+      y: reactFlow.getNode(documentId)?.position.y ?? 0,
+      hidden: true,
+      pinned: graphViewLayoutMap.get(documentId)?.pinned ?? false,
+    })
     if (selectedDocumentId === documentId) {
       setSelectedDocumentId(null)
     }
@@ -1087,6 +1339,18 @@ function MapsPageContent() {
       })),
     )
 
+    if (!activeGraphViewId && activeLibraryId) {
+      const nextWorkingLayouts = Object.fromEntries(
+        Array.from(nextPositions.entries()).map(([documentId, position]) => [documentId, position]),
+      )
+      setWorkingLayoutPositions(nextWorkingLayouts)
+      const storedLayouts = readWorkingMapLayouts()
+      writeWorkingMapLayouts({
+        ...storedLayouts,
+        [activeLibraryId]: nextWorkingLayouts,
+      })
+    }
+
     window.setTimeout(() => setIsReheatingLayout(false), 250)
   }
 
@@ -1108,15 +1372,15 @@ function MapsPageContent() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-[radial-gradient(circle_at_top_left,_rgba(13,148,136,0.08),_transparent_28%),linear-gradient(180deg,_rgba(248,250,252,1)_0%,_rgba(241,245,249,1)_100%)]">
-      <div className="border-b bg-white/80 px-6 py-4 backdrop-blur">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(13,148,136,0.06),_transparent_24%),linear-gradient(180deg,_rgba(248,250,252,1)_0%,_rgba(244,246,248,1)_100%)]">
+      <div className="shrink-0 border-b border-border/80 bg-background/92 px-6 py-4 backdrop-blur">
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Document Relationship Graph</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">Maps</h1>
               <p className="text-sm text-muted-foreground">
                 {activeLibrary ? `${activeLibrary.name} • ` : ''}
-                Explore manual links and citation structure with neighborhood focus, search, and visual encoding controls.
+                Explore document relationships.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1124,7 +1388,7 @@ function MapsPageContent() {
                 value={activeGraphViewId ?? '__working__'}
                 onValueChange={(value) => setActiveGraphViewId(value === '__working__' ? null : value)}
               >
-                <SelectTrigger className="w-[200px] bg-white">
+                <SelectTrigger className="w-[190px] bg-background">
                   <SelectValue placeholder="Working map" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1140,61 +1404,85 @@ function MapsPageContent() {
                 value={newManualLinkType}
                 onValueChange={(value) => setNewManualLinkType(value as DocumentRelationLinkType)}
               >
-                <SelectTrigger className="w-[200px] bg-white">
+                <SelectTrigger className="w-[180px] bg-background">
                   <SelectValue placeholder="New manual link type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="manual">New link: manual</SelectItem>
-                  <SelectItem value="related">New link: related</SelectItem>
-                  <SelectItem value="supports">New link: supports</SelectItem>
-                  <SelectItem value="contradicts">New link: contradicts</SelectItem>
-                  <SelectItem value="same_topic">New link: same topic</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                  <SelectItem value="related">Related</SelectItem>
+                  <SelectItem value="supports">Supports</SelectItem>
+                  <SelectItem value="contradicts">Contradicts</SelectItem>
+                  <SelectItem value="same_topic">Same topic</SelectItem>
                 </SelectContent>
               </Select>
-              <Select onValueChange={(value) => void handleAddDocumentToMap(value)}>
-                <SelectTrigger className="w-[240px] bg-white">
-                  <SelectValue placeholder="Add document to map" />
-                </SelectTrigger>
-                <SelectContent>
-                  {addableDocuments.length > 0 ? (
-                    addableDocuments.map((document) => (
-                      <SelectItem key={document.id} value={document.id}>
-                        {document.title}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <SelectItem value="__none__" disabled>
-                      All matching documents are already visible
-                    </SelectItem>
-                  )}
-                </SelectContent>
-              </Select>
+              <Popover open={isAddDocumentPopoverOpen} onOpenChange={setIsAddDocumentPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isAddDocumentPopoverOpen}
+                    className="w-[220px] justify-between bg-background"
+                  >
+                    Add document
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[320px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search documents..." />
+                    <CommandList>
+                      <CommandEmpty>No matching document found.</CommandEmpty>
+                      <CommandGroup>
+                        {addableDocuments.map((document) => (
+                          <CommandItem
+                            key={document.id}
+                            value={`${document.title} ${document.authors.join(' ')} ${document.year ?? ''}`}
+                            onSelect={() => {
+                              void handleAddDocumentToMap(document.id)
+                              setIsAddDocumentPopoverOpen(false)
+                            }}
+                          >
+                            <Check className="mr-2 h-4 w-4 opacity-0" />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate">{document.title}</p>
+                              <p className="truncate text-xs text-slate-500">
+                                {document.authors.slice(0, 2).join(', ') || 'Unknown author'}
+                                {document.year ? ` - ${document.year}` : ''}
+                              </p>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
               {activeGraphView ? (
                 <Button variant="outline" onClick={() => void persistActiveViewSnapshot()}>
                   <Save className="mr-2 h-4 w-4" />
-                  Save Current View
+                  Save
                 </Button>
               ) : null}
               <Button variant="outline" onClick={handleOpenSaveViewDialog}>
                 <Save className="mr-2 h-4 w-4" />
-                {activeGraphView ? 'Save As New View' : 'Save View'}
+                {activeGraphView ? 'Save As' : 'Save View'}
               </Button>
               {activeGraphView ? (
                 <>
                   <Button variant="outline" onClick={handleOpenEditViewDialog}>
-                    Rename View
+                    Rename
                   </Button>
                   <Button variant="outline" onClick={() => void handleDuplicateGraphView()}>
                     <Plus className="mr-2 h-4 w-4" />
-                    Duplicate View
+                    Duplicate
                   </Button>
                   <Button variant="outline" onClick={() => void handleResetCurrentViewPositions()}>
                     <Pin className="mr-2 h-4 w-4" />
-                    Reset View Positions
+                    Reset Positions
                   </Button>
                   <Button variant="outline" onClick={() => void handleDeleteActiveGraphView()}>
                     <Trash2 className="mr-2 h-4 w-4" />
-                    Delete View
+                    Delete
                   </Button>
                 </>
               ) : null}
@@ -1204,7 +1492,7 @@ function MapsPageContent() {
                 disabled={isReheatingLayout || visibleDocuments.length === 0}
               >
                 <WandSparkles className={cn('mr-2 h-4 w-4', isReheatingLayout && 'animate-pulse')} />
-                Reheat Layout
+                Reheat
               </Button>
               <Button
                 variant="outline"
@@ -1212,7 +1500,7 @@ function MapsPageContent() {
                 disabled={isRebuildingAutoLinks || !activeLibrary}
               >
                 <RefreshCw className={cn('mr-2 h-4 w-4', isRebuildingAutoLinks && 'animate-spin')} />
-                Rebuild Library Citations
+                Rebuild Citations
               </Button>
             </div>
           </div>
@@ -1250,21 +1538,22 @@ function MapsPageContent() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="relative min-h-0">
+      <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
+        <ResizablePanel defaultSize={72} minSize={45}>
+          <div className="relative h-full min-h-0 overflow-hidden">
           {visibleDocuments.length === 0 ? (
             <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
-              <Card className="border-dashed bg-white/92 p-4 shadow-sm">
+              <Card className="border-dashed bg-card/92 p-4 shadow-sm">
                 <p className="text-sm text-muted-foreground">
-                  No documents match the current graph controls. Relax filters, reset focus, or add mapped documents back into view.
+                  No documents match the current controls.
                 </p>
               </Card>
             </div>
           ) : visibleRelations.length === 0 ? (
             <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
-              <Card className="border-dashed bg-white/92 p-4 shadow-sm">
+              <Card className="border-dashed bg-card/92 p-4 shadow-sm">
                 <p className="text-sm text-muted-foreground">
-                  No relations match the current controls. Try lowering the confidence threshold, changing filters, or disabling focus mode.
+                  No links match the current controls.
                 </p>
               </Card>
             </div>
@@ -1274,6 +1563,7 @@ function MapsPageContent() {
             nodes={nodes}
             edges={edges}
             onNodesChange={handleNodesChange}
+            onNodeDragStart={handleNodeDragStart}
             onNodeDragStop={(event, node, nodesForDrag) => void handleNodeDragStop(event, node, nodesForDrag)}
             onEdgesChange={handleEdgesChange}
             onConnectStart={handleConnectStart}
@@ -1288,6 +1578,18 @@ function MapsPageContent() {
               setSelectedRelationId(null)
               setActiveDocument(node.id)
             }}
+            onNodeContextMenu={(event, node) => {
+              event.preventDefault()
+              setSelectedDocumentId(node.id)
+              setSelectedRelationId(null)
+              setContextMenu({
+                kind: 'node',
+                documentId: node.id,
+                x: event.clientX,
+                y: event.clientY,
+              })
+              setActiveDocument(node.id)
+            }}
             onNodeMouseEnter={(_, node) => setHoveredDocumentId(node.id)}
             onNodeMouseLeave={() => setHoveredDocumentId(null)}
             onEdgeClick={(_, edge) => {
@@ -1295,11 +1597,24 @@ function MapsPageContent() {
               clearPendingConnection()
               setSelectedRelationId(edge.id)
             }}
+            onEdgeContextMenu={(event, edge) => {
+              event.preventDefault()
+              setSelectedDocumentId(null)
+              clearPendingConnection()
+              setSelectedRelationId(edge.id)
+              setContextMenu({
+                kind: 'edge',
+                relationId: edge.id,
+                x: event.clientX,
+                y: event.clientY,
+              })
+            }}
             onEdgeMouseEnter={(_, edge) => setHoveredRelationId(edge.id)}
             onEdgeMouseLeave={() => setHoveredRelationId(null)}
             onPaneClick={() => {
               setSelectedDocumentId(null)
               setSelectedRelationId(null)
+              setContextMenu(null)
               clearPendingConnection()
             }}
             fitView
@@ -1320,34 +1635,93 @@ function MapsPageContent() {
             <Controls />
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#cbd5e1" />
           </ReactFlow>
-        </div>
+          {contextMenu ? (
+            <div
+              className="fixed z-[1000] min-w-[180px] rounded-md border bg-white p-1 shadow-lg"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
+              {contextMenu.kind === 'node' ? (
+                <>
+                  <button
+                    type="button"
+                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-slate-100"
+                    onClick={() => {
+                      void handleRemoveDocumentFromCurrentView(contextMenu.documentId)
+                      setContextMenu(null)
+                    }}
+                  >
+                    Delete node
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-slate-100"
+                    onClick={() => {
+                      void handleDeleteAllLinksForDocument(contextMenu.documentId)
+                      setContextMenu(null)
+                    }}
+                  >
+                    Delete all links
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-slate-100"
+                    onClick={() => {
+                      void handleDeleteRelationWithoutPrompt(contextMenu.relationId)
+                      setContextMenu(null)
+                    }}
+                  >
+                    Remove link
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-slate-100"
+                    onClick={() => {
+                      void handleInvertRelation(contextMenu.relationId)
+                      setContextMenu(null)
+                    }}
+                  >
+                    Invert link
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
+          </div>
+        </ResizablePanel>
 
-        <aside className="min-h-0 border-l bg-white/92 backdrop-blur">
-          <DocumentGraphPanel
-            selectedDocument={selectedDocument}
-            selectedRelation={selectedRelation}
-            sourceDocument={sourceDocument}
-            targetDocument={targetDocument}
-            selectedLibraryName={activeLibrary?.name ?? null}
-            relatedNotesCount={selectedDocumentNotesCount}
-            relatedIncomingCount={selectedDocumentIncomingCount}
-            relatedOutgoingCount={selectedDocumentOutgoingCount}
-            relatedProposedCitationsCount={selectedDocumentProposedCitationsCount}
-            onDeleteRelation={handleDeleteRelation}
-            onUpdateRelationStatus={handleUpdateRelationStatus}
-            onUpdateManualRelation={handleUpdateManualRelation}
-            onRebuildDocumentCitations={handleRebuildSelectedDocumentCitations}
-            onCenterDocument={centerOnDocument}
-            onShowNeighborsOnly={handleShowNeighborsOnly}
-            onPinDocument={handlePinDocument}
-            onResetDocumentPosition={handleResetDocumentPosition}
-            onRemoveDocumentFromView={handleRemoveDocumentFromCurrentView}
-            isPinned={selectedDocumentPinned}
-            isDeletingRelation={isDeletingRelation}
-            isRebuildingDocumentCitations={isRebuildingDocumentCitations}
-          />
-        </aside>
-      </div>
+        <ResizableHandle withHandle className="bg-border/80 hover:bg-border" />
+
+        <ResizablePanel defaultSize={28} minSize={20} maxSize={45}>
+          <aside className="h-full min-h-0 overflow-hidden border-l border-border/80 bg-background/94 backdrop-blur">
+            <DocumentGraphPanel
+              selectedDocument={selectedDocument}
+              selectedRelation={selectedRelation}
+              sourceDocument={sourceDocument}
+              targetDocument={targetDocument}
+              selectedLibraryName={activeLibrary?.name ?? null}
+              relatedNotesCount={selectedDocumentNotesCount}
+              relatedIncomingCount={selectedDocumentIncomingCount}
+              relatedOutgoingCount={selectedDocumentOutgoingCount}
+              relatedProposedCitationsCount={selectedDocumentProposedCitationsCount}
+              onDeleteRelation={handleDeleteRelation}
+              onUpdateRelationStatus={handleUpdateRelationStatus}
+              onUpdateManualRelation={handleUpdateManualRelation}
+              onRebuildDocumentCitations={handleRebuildSelectedDocumentCitations}
+              onCenterDocument={centerOnDocument}
+              onShowNeighborsOnly={handleShowNeighborsOnly}
+              onPinDocument={handlePinDocument}
+              onResetDocumentPosition={handleResetDocumentPosition}
+              onRemoveDocumentFromView={handleRemoveDocumentFromCurrentView}
+              isPinned={selectedDocumentPinned}
+              isDeletingRelation={isDeletingRelation}
+              isRebuildingDocumentCitations={isRebuildingDocumentCitations}
+            />
+          </aside>
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
       <Dialog open={isSaveViewDialogOpen} onOpenChange={setIsSaveViewDialogOpen}>
         <DialogContent>

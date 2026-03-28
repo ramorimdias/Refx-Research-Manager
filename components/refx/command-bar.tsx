@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/command'
 import { useAppStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
-import { loadAppSettings, saveAppSettings } from '@/lib/app-settings'
+import { getBaseThemeMode, loadAppSettings, saveAppSettings, toggleStoredThemeVariant } from '@/lib/app-settings'
 
 export function CommandBar() {
   const router = useRouter()
@@ -63,10 +63,9 @@ export function CommandBar() {
   }
 
   const toggleTheme = async () => {
-    const nextTheme = resolvedTheme === 'dark' ? 'light' : 'dark'
-    setTheme(nextTheme)
-
     const settings = await loadAppSettings(isDesktopApp)
+    const nextTheme = toggleStoredThemeVariant(settings.theme, resolvedTheme)
+    setTheme(getBaseThemeMode(nextTheme))
     await saveAppSettings(isDesktopApp, {
       ...settings,
       theme: nextTheme,
