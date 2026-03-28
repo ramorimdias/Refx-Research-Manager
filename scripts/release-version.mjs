@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 const repoRoot = process.cwd()
 const packageJsonPath = join(repoRoot, 'package.json')
 const tauriConfigPath = join(repoRoot, 'src-tauri', 'tauri.conf.json')
+const cargoTomlPath = join(repoRoot, 'src-tauri', 'Cargo.toml')
 
 const nextVersion = process.argv[2]?.trim()
 
@@ -63,19 +64,30 @@ const branch = capture('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
 const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf8'))
+const cargoToml = readFileSync(cargoTomlPath, 'utf8')
 
 const currentPackageVersion = packageJson.version
 const currentTauriVersion = tauriConfig.version
+const cargoVersionMatch = cargoToml.match(/^version = "([^"]+)"$/m)
+const currentCargoVersion = cargoVersionMatch?.[1]
+
+if (!currentCargoVersion) {
+  console.error('Release aborted: could not find version in src-tauri/Cargo.toml')
+  process.exit(1)
+}
 
 packageJson.version = nextVersion
 tauriConfig.version = nextVersion
+const nextCargoToml = cargoToml.replace(/^version = "([^"]+)"$/m, `version = "${nextVersion}"`)
 
 writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
 writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`)
+writeFileSync(cargoTomlPath, nextCargoToml)
 
 console.log(`Updated REFX version to ${nextVersion}`)
 console.log(`- package.json: ${currentPackageVersion} -> ${packageJson.version}`)
 console.log(`- src-tauri/tauri.conf.json: ${currentTauriVersion} -> ${tauriConfig.version}`)
+console.log(`- src-tauri/Cargo.toml: ${currentCargoVersion} -> ${nextVersion}`)
 console.log('')
 console.log('Building signed release...')
 
@@ -84,7 +96,7 @@ run('pnpm.cmd', ['tauri:build'])
 console.log('')
 console.log('Creating git release commit...')
 
-run('git', ['add', 'package.json', 'src-tauri/tauri.conf.json'])
+run('git', ['add', 'package.json', 'src-tauri/tauri.conf.json', 'src-tauri/Cargo.toml'])
 run('git', ['commit', '-m', `Release v${nextVersion}`])
 run('git', ['tag', `v${nextVersion}`])
 run('git', ['push', 'origin', branch, '--tags'])
