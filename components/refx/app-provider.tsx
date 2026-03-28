@@ -79,6 +79,7 @@ export function AppProvider({ children }: AppProviderProps) {
         void repo.runScheduledBackupIfDue(
           settings.autoBackupScope,
           Number(settings.autoBackupIntervalDays),
+          Number(settings.autoBackupKeepCount),
         ).catch((error) => {
           console.error('Automatic backup failed:', error)
         })

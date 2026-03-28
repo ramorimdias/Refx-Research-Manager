@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Search, SquareArrowOutUpRight, StickyNote, Trash2, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Printer, Search, SquareArrowOutUpRight, StickyNote, Trash2, ZoomIn, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -33,7 +33,7 @@ import {
 } from '@/lib/services/document-processing'
 import { findDocumentPageHits } from '@/lib/services/document-search-service'
 import { DETACHED_READER_QUERY_VALUE, openDetachedReaderWindow } from '@/lib/services/reader-window-service'
-import { serializeAreaNoteAnchor, type NoteAreaRect } from '@/lib/services/document-note-anchor-service'
+import { parseAreaNoteAnchor, serializeAreaNoteAnchor, type NoteAreaRect } from '@/lib/services/document-note-anchor-service'
 import { cn } from '@/lib/utils'
 
 type ReaderAreaHighlight = {
@@ -181,6 +181,7 @@ export default function ReaderViewPage() {
   const [isPageRendering, setIsPageRendering] = useState(false)
   const [isRunningOcr, setIsRunningOcr] = useState(false)
   const [isHighlightMode, setIsHighlightMode] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(false)
   const [pdfDocument, setPdfDocument] = useState<{ numPages: number; getPage: (pageNumber: number) => Promise<unknown>; destroy?: () => Promise<void> } | null>(null)
   const [embeddedPdfUrl, setEmbeddedPdfUrl] = useState<string | null>(null)
   const [viewerMode, setViewerMode] = useState<'pdfjs' | 'native' | 'unavailable'>('pdfjs')
@@ -551,13 +552,21 @@ export default function ReaderViewPage() {
       const nearTop = scrollTop <= 4
       const nearBottom = scrollTop + clientHeight >= scrollHeight - 4
 
-      if (event.deltaY > 0 && nearBottom && page < pdfDocument.numPages) {
+      if (
+        event.deltaY > 0 &&
+        nearBottom &&
+        page < pdfDocument.numPages
+      ) {
         event.preventDefault()
         pageScrollLockRef.current = true
         setPage((current) => Math.min(pdfDocument.numPages, current + 1))
         viewport.scrollTop = 0
         releaseLock()
-      } else if (event.deltaY < 0 && nearTop && page > 1) {
+      } else if (
+        event.deltaY < 0 &&
+        nearTop &&
+        page > 1
+      ) {
         event.preventDefault()
         pageScrollLockRef.current = true
         setPage((current) => Math.max(1, current - 1))
@@ -569,6 +578,7 @@ export default function ReaderViewPage() {
     }
 
     viewport.addEventListener('wheel', handleWheel, { passive: false })
+
     return () => {
       viewport.removeEventListener('wheel', handleWheel)
     }
@@ -751,6 +761,335 @@ export default function ReaderViewPage() {
       query: searchQuery.trim() || undefined,
       matchText: firstNonEmptyText(activeOccurrence?.matchedText, activeOccurrence?.snippet) || undefined,
     })
+  }
+
+  const handlePrintDocument = async () => {
+    if (!document?.filePath || !isTauri()) return
+
+    setIsPrinting(true)
+
+    const printFrame = window.document.createElement('iframe')
+    printFrame.setAttribute('aria-hidden', 'true')
+    printFrame.style.position = 'fixed'
+    printFrame.style.right = '0'
+    printFrame.style.bottom = '0'
+    printFrame.style.width = '1px'
+    printFrame.style.height = '1px'
+    printFrame.style.opacity = '0'
+    printFrame.style.pointerEvents = 'none'
+    printFrame.style.border = '0'
+    window.document.body.appendChild(printFrame)
+
+    const printWindow = printFrame.contentWindow
+    if (!printWindow) {
+      printFrame.remove()
+      setIsPrinting(false)
+      return
+    }
+
+    printWindow.document.open()
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${document.title} - Print</title>
+    <style>
+      :root { color-scheme: light; }
+      * {
+        box-sizing: border-box;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      @page {
+        size: A4 portrait;
+        margin: 4mm;
+      }
+      body {
+        margin: 0;
+        background: #f5f5f4;
+        color: #111827;
+        font-family: "Segoe UI", Arial, sans-serif;
+      }
+      .print-shell {
+        padding: 24px;
+      }
+      .print-status {
+        color: #6b7280;
+        font-size: 14px;
+      }
+      .print-page {
+        position: relative;
+        display: block;
+        width: 202mm;
+        height: 289mm;
+        margin: 0 auto 24px;
+        background: white;
+        box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+        overflow: visible;
+        font-size: 0;
+        line-height: 0;
+      }
+      .print-page img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        object-position: center;
+      }
+      .overlay {
+        position: absolute;
+        inset: 0;
+        overflow: visible;
+      }
+      .search-highlight {
+        position: absolute;
+        border-radius: 2px;
+      }
+      @media print {
+        body {
+          background: white;
+        }
+        .print-shell {
+          padding: 0;
+        }
+        .print-status {
+          display: none;
+        }
+        .print-page {
+          width: 202mm;
+          height: 289mm;
+          margin: 0;
+          box-shadow: none;
+          overflow: hidden;
+          break-inside: avoid;
+          page-break-inside: avoid;
+        }
+        .print-page:not(:last-child) {
+          break-after: page;
+          page-break-after: always;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="print-shell">
+      <div id="print-status" class="print-status">Preparing document for printing...</div>
+      <div id="print-pages"></div>
+    </div>
+  </body>
+</html>`)
+    printWindow.document.close()
+
+    const statusEl = printWindow.document.getElementById('print-status')
+    const pagesRoot = printWindow.document.getElementById('print-pages')
+
+    if (!statusEl || !pagesRoot) {
+      printFrame.remove()
+      setIsPrinting(false)
+      return
+    }
+
+    try {
+      const allAreaHighlights = annotations
+        .filter((annotation) => annotation.documentId === document.id)
+        .map(parseAreaHighlight)
+        .filter((annotation): annotation is ReaderAreaHighlight => Boolean(annotation))
+
+      const areaHighlightsByPage = new Map<number, ReaderAreaHighlight[]>()
+      for (const highlight of allAreaHighlights) {
+        const existing = areaHighlightsByPage.get(highlight.pageNumber) ?? []
+        existing.push(highlight)
+        areaHighlightsByPage.set(highlight.pageNumber, existing)
+      }
+
+      const noteOverlaysByPage = new Map<number, Array<{
+        commentNumber: number
+        positionX: number
+        positionY: number
+        areaRect: NoteAreaRect | null
+      }>>()
+
+      for (const note of notes) {
+        if (note.documentId !== document.id) continue
+        if (typeof note.pageNumber !== 'number') continue
+        if (typeof note.positionX !== 'number' || typeof note.positionY !== 'number') continue
+
+        const existing = noteOverlaysByPage.get(note.pageNumber) ?? []
+        existing.push({
+          commentNumber: note.commentNumber ?? nextCommentNumber,
+          positionX: note.positionX,
+          positionY: note.positionY,
+          areaRect: parseAreaNoteAnchor(note.locationHint),
+        })
+        noteOverlaysByPage.set(note.pageNumber, existing)
+      }
+
+      const searchHighlightsByPage = new Map<number, Array<{
+        occurrenceIndex: number
+        rect: { left: number; top: number; width: number; height: number }
+        isActive: boolean
+      }>>()
+
+      for (const occurrence of searchOccurrences) {
+        if (!occurrence.rects?.length) continue
+        const existing = searchHighlightsByPage.get(occurrence.estimatedPage) ?? []
+        for (const rect of occurrence.rects) {
+          existing.push({
+            occurrenceIndex: occurrence.index,
+            rect,
+            isActive: occurrence.index === activeOccurrenceIndex,
+          })
+        }
+        searchHighlightsByPage.set(occurrence.estimatedPage, existing)
+      }
+
+      const pdfjs = await loadPdfJsModule() as unknown as {
+        getDocument: (source: Record<string, unknown>) => { promise: Promise<{
+          numPages: number
+          getPage: (pageNumber: number) => Promise<{
+            getViewport: (args: { scale: number }) => { width: number; height: number }
+            render: (args: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> }
+            cleanup?: () => void
+          }>
+          destroy?: () => Promise<void>
+        }> }
+      }
+
+      const bytes = await readFile(document.filePath)
+      const loadingTask = pdfjs.getDocument({
+        data: new Uint8Array(bytes),
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        stopAtErrors: false,
+      })
+
+      const printablePdf = await loadingTask.promise
+
+      try {
+        for (let pageNumber = 1; pageNumber <= printablePdf.numPages; pageNumber += 1) {
+          statusEl.textContent = `Preparing page ${pageNumber} of ${printablePdf.numPages}...`
+
+          const pdfPage = await printablePdf.getPage(pageNumber)
+          const baseViewport = pdfPage.getViewport({ scale: 1 })
+          const renderViewport = pdfPage.getViewport({ scale: 2 })
+          const renderCanvas = window.document.createElement('canvas')
+          renderCanvas.width = Math.ceil(renderViewport.width)
+          renderCanvas.height = Math.ceil(renderViewport.height)
+          const renderContext = renderCanvas.getContext('2d')
+          if (!renderContext) continue
+
+          await pdfPage.render({
+            canvasContext: renderContext,
+            viewport: renderViewport,
+          }).promise
+
+          const pageSection = printWindow.document.createElement('section')
+          pageSection.className = 'print-page'
+          const scaleX = renderViewport.width / baseViewport.width
+          const scaleY = renderViewport.height / baseViewport.height
+
+          const searchHighlights = searchHighlightsByPage.get(pageNumber) ?? []
+          for (const searchHighlight of searchHighlights) {
+            const left = searchHighlight.rect.left * scaleX
+            const top = searchHighlight.rect.top * scaleY
+            const width = searchHighlight.rect.width * scaleX
+            const height = Math.max(10 * scaleY, searchHighlight.rect.height * scaleY)
+            renderContext.fillStyle = searchHighlight.isActive ? 'rgba(251, 191, 36, 0.42)' : 'rgba(125, 211, 252, 0.28)'
+            renderContext.fillRect(left, top, width, height)
+            if (searchHighlight.isActive) {
+              renderContext.strokeStyle = 'rgba(245, 158, 11, 0.7)'
+              renderContext.lineWidth = Math.max(1, scaleX)
+              renderContext.strokeRect(left, top, width, height)
+            }
+          }
+
+          const savedHighlights = areaHighlightsByPage.get(pageNumber) ?? []
+          for (const highlight of savedHighlights) {
+            const left = highlight.rect.x * renderViewport.width
+            const top = highlight.rect.y * renderViewport.height
+            const width = highlight.rect.width * renderViewport.width
+            const height = highlight.rect.height * renderViewport.height
+            renderContext.fillStyle = 'rgba(254, 240, 138, 0.38)'
+            renderContext.fillRect(left, top, width, height)
+            renderContext.strokeStyle = 'rgba(202, 138, 4, 0.22)'
+            renderContext.lineWidth = Math.max(1, scaleX * 0.6)
+            renderContext.strokeRect(left, top, width, height)
+          }
+
+          const noteOverlays = noteOverlaysByPage.get(pageNumber) ?? []
+          for (const note of noteOverlays) {
+            const badgeText = String(note.commentNumber)
+            const badgeHeight = Math.max(24, 24 * scaleY)
+            const badgeRadius = badgeHeight / 2
+            renderContext.font = `${Math.max(11, 11 * scaleY)}px "Segoe UI", Arial, sans-serif`
+            const textMetrics = renderContext.measureText(badgeText)
+            const badgeWidth = Math.max(badgeHeight, textMetrics.width + 12 * scaleX)
+
+            if (note.areaRect) {
+              const left = note.areaRect.x * renderViewport.width
+              const top = note.areaRect.y * renderViewport.height
+              const width = note.areaRect.width * renderViewport.width
+              const height = note.areaRect.height * renderViewport.height
+              renderContext.fillStyle = 'rgba(254, 240, 138, 0.34)'
+              renderContext.fillRect(left, top, width, height)
+              renderContext.strokeStyle = 'rgba(202, 138, 4, 0.18)'
+              renderContext.lineWidth = Math.max(1, scaleX * 0.6)
+              renderContext.strokeRect(left, top, width, height)
+
+              const badgeX = left + 6 * scaleX
+              const badgeY = top + 6 * scaleY
+              renderContext.fillStyle = '#f59e0b'
+              renderContext.beginPath()
+              renderContext.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, badgeRadius)
+              renderContext.fill()
+              renderContext.fillStyle = '#ffffff'
+              renderContext.textAlign = 'center'
+              renderContext.textBaseline = 'middle'
+              renderContext.fillText(badgeText, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2)
+              continue
+            }
+
+            const centerX = note.positionX * renderViewport.width
+            const centerY = note.positionY * renderViewport.height - badgeHeight / 2
+            renderContext.fillStyle = '#f59e0b'
+            renderContext.beginPath()
+            renderContext.roundRect(centerX - badgeWidth / 2, centerY - badgeHeight / 2, badgeWidth, badgeHeight, badgeRadius)
+            renderContext.fill()
+            renderContext.fillStyle = '#ffffff'
+            renderContext.textAlign = 'center'
+            renderContext.textBaseline = 'middle'
+            renderContext.fillText(badgeText, centerX, centerY)
+          }
+
+          const pageImage = printWindow.document.createElement('img')
+          pageImage.src = renderCanvas.toDataURL('image/png')
+          pageImage.alt = `${document.title} page ${pageNumber}`
+          pageSection.appendChild(pageImage)
+          pagesRoot.appendChild(pageSection)
+          pdfPage.cleanup?.()
+        }
+      } finally {
+        await printablePdf.destroy?.()
+      }
+
+      statusEl.remove()
+      printWindow.focus()
+      const cleanupPrintFrame = () => {
+        window.setTimeout(() => {
+          printFrame.remove()
+        }, 400)
+      }
+      printWindow.addEventListener('afterprint', cleanupPrintFrame, { once: true })
+      window.setTimeout(() => {
+        printWindow.print()
+      }, 120)
+    } catch (error) {
+      console.error('Failed to prepare printable document:', error)
+      statusEl.textContent = 'Unable to prepare document for printing.'
+      printFrame.remove()
+    } finally {
+      setIsPrinting(false)
+    }
   }
 
   const handlePageCommentSelection = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -1155,6 +1494,15 @@ export default function ReaderViewPage() {
               {searchOccurrences.length === 0 ? '0 results' : `${activeOccurrenceIndex + 1}/${searchOccurrences.length}`}
             </span>
           </div>
+          {document.filePath && (
+            <ReaderToolbarIconButton
+              label="Print document"
+              onClick={() => void handlePrintDocument()}
+              disabled={!isDesktopApp || !document.filePath || isPrinting}
+            >
+              {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            </ReaderToolbarIconButton>
+          )}
           {document.filePath && (
               <ReaderToolbarIconButton
                label="Open in window"

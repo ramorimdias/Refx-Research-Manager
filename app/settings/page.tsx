@@ -11,13 +11,23 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { open } from '@/lib/tauri/client'
+import { open, save } from '@/lib/tauri/client'
 import {
   DEFAULT_APP_SETTINGS,
   getBaseThemeMode,
@@ -60,6 +70,8 @@ export default function SettingsPage() {
   const [updateStatus, setUpdateStatus] = useState<string | null>(null)
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateSummary | null>(null)
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false)
+  const [restoreTargetPath, setRestoreTargetPath] = useState<string | null>(null)
+  const [isRestoreWarningOpen, setIsRestoreWarningOpen] = useState(false)
   const hasLoadedSettingsRef = useRef(false)
 
   useEffect(() => {
@@ -115,7 +127,7 @@ export default function SettingsPage() {
       return
     }
     const nextBackups = await repo.listBackups()
-    setBackups(nextBackups)
+    setBackups(nextBackups.filter((backup) => backup.automatic))
   }
 
   useEffect(() => {
@@ -165,30 +177,40 @@ export default function SettingsPage() {
 
   const handleCreateBackup = async (scope: repo.DbBackupScope) => {
     if (!isDesktopApp) return
+    const backupPath = await save({
+      defaultPath: `refx-${scope}-${new Date().toISOString().slice(0, 10)}.refxbackup.json`,
+      filters: [{ name: 'REFX Backup', extensions: ['json'] }],
+    })
+    if (!backupPath) return
     setIsCreatingBackup(true)
     setBackupStatus(null)
     try {
-      const backup = await repo.createBackup(scope)
-      setBackupStatus(`Created ${backup.fileName}`)
-      await loadBackups()
+      const backup = await repo.createBackup(scope, false, backupPath)
+      setBackupStatus(`Saved ${backup.fileName}`)
     } finally {
       setIsCreatingBackup(false)
     }
   }
 
-  const handleRestoreBackup = async (path: string) => {
+  const handleOpenRestoreWarning = (path: string) => {
+    setRestoreTargetPath(path)
+    setIsRestoreWarningOpen(true)
+  }
+
+  const handleRestoreBackup = async () => {
     if (!isDesktopApp) return
-    const confirmed = window.confirm('Restore this backup now? Current local data in the selected scope will be replaced.')
-    if (!confirmed) return
+    if (!restoreTargetPath) return
     setIsRestoringBackup(true)
     setBackupStatus(null)
     try {
-      await repo.restoreBackup(path)
+      const result = await repo.restoreBackup(restoreTargetPath)
       const restoredSettings = await loadAppSettings(isDesktopApp)
       setSettings(restoredSettings)
       await refreshData()
-      setBackupStatus('Backup restored.')
+      setBackupStatus(`Backup restored. Safety backup created: ${result.safetyBackup.fileName}`)
       await loadBackups()
+      setIsRestoreWarningOpen(false)
+      setRestoreTargetPath(null)
     } finally {
       setIsRestoringBackup(false)
     }
@@ -201,7 +223,7 @@ export default function SettingsPage() {
       filters: [{ name: 'REFX Backup', extensions: ['json'] }],
     })
     if (!selected || Array.isArray(selected)) return
-    await handleRestoreBackup(selected)
+    handleOpenRestoreWarning(selected)
   }
 
   const handleDeleteBackup = async (path: string) => {
@@ -549,7 +571,7 @@ export default function SettingsPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <Label className="text-sm font-medium">Automatic Backups</Label>
-                          <p className="mt-1 text-xs text-muted-foreground">Create scheduled backups on app startup when due.</p>
+                          <p className="mt-1 text-xs text-muted-foreground">App-managed backups created on startup when due.</p>
                         </div>
                         <Checkbox
                           checked={settings.autoBackupEnabled}
@@ -557,7 +579,7 @@ export default function SettingsPage() {
                         />
                       </div>
 
-                      <div className="grid gap-4 md:grid-cols-2">
+                      <div className="grid gap-4 md:grid-cols-3">
                         <div>
                           <Label className="text-sm">Backup Scope</Label>
                           <Select
@@ -576,22 +598,40 @@ export default function SettingsPage() {
                         </div>
 
                         <div>
-                          <Label className="text-sm">Interval</Label>
-                          <Select
+                          <Label className="text-sm">Frequency in days</Label>
+                          <Input
+                            className="mt-1.5"
+                            type="number"
+                            min={1}
+                            step={1}
                             value={settings.autoBackupIntervalDays}
-                            onValueChange={(value) => updateSettings('autoBackupIntervalDays', value as StoredAppSettings['autoBackupIntervalDays'])}
-                          >
-                            <SelectTrigger className="mt-1.5">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="1">Daily</SelectItem>
-                              <SelectItem value="3">Every 3 days</SelectItem>
-                              <SelectItem value="7">Weekly</SelectItem>
-                              <SelectItem value="14">Every 2 weeks</SelectItem>
-                              <SelectItem value="30">Monthly</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            onChange={(event) =>
+                              updateSettings(
+                                'autoBackupIntervalDays',
+                                String(Math.max(1, Number.parseInt(event.target.value || '1', 10) || 1)),
+                              )
+                            }
+                          />
+                        </div>
+
+                        <div>
+                          <Label className="text-sm">Keep backups</Label>
+                          <Input
+                            className="mt-1.5"
+                            type="number"
+                            min={1}
+                            max={10}
+                            step={1}
+                            value={settings.autoBackupKeepCount}
+                            onChange={(event) =>
+                              updateSettings(
+                                'autoBackupKeepCount',
+                                String(
+                                  Math.min(10, Math.max(1, Number.parseInt(event.target.value || '1', 10) || 1)),
+                                ),
+                              )
+                            }
+                          />
                         </div>
                       </div>
                     </div>
@@ -599,7 +639,7 @@ export default function SettingsPage() {
                     <Separator />
 
                     <div className="space-y-3">
-                      <Label className="text-sm font-medium">Manual Backup</Label>
+                      <Label className="text-sm font-medium">Manual Backup Export</Label>
                       <div className="flex flex-wrap gap-2">
                         <Button variant="outline" onClick={() => void handleCreateBackup('full')} disabled={isCreatingBackup}>
                           <Download className="mr-2 h-4 w-4" />
@@ -625,7 +665,7 @@ export default function SettingsPage() {
 
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <Label className="text-sm font-medium">Saved Backups</Label>
+                        <Label className="text-sm font-medium">Automatic Backups</Label>
                         <Button variant="ghost" size="sm" onClick={() => void loadBackups()}>
                           <RotateCcw className="mr-2 h-4 w-4" />
                           Refresh
@@ -634,7 +674,7 @@ export default function SettingsPage() {
 
                       {backups.length === 0 ? (
                         <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-                          No backups yet.
+                          No automatic backups yet.
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -649,7 +689,7 @@ export default function SettingsPage() {
                                   <p className="mt-1 text-xs text-muted-foreground">{new Date(backup.createdAt).toLocaleString()}</p>
                                 </div>
                                 <div className="flex gap-2">
-                                  <Button variant="outline" size="sm" onClick={() => void handleRestoreBackup(backup.path)} disabled={isRestoringBackup}>
+                                  <Button variant="outline" size="sm" onClick={() => handleOpenRestoreWarning(backup.path)} disabled={isRestoringBackup}>
                                     Restore
                                   </Button>
                                   <Button variant="ghost" size="icon-sm" onClick={() => void handleDeleteBackup(backup.path)}>
@@ -711,6 +751,45 @@ export default function SettingsPage() {
         installStatus={updateStatus}
         onInstall={() => void handleInstallUpdate()}
       />
+      <AlertDialog
+        open={isRestoreWarningOpen}
+        onOpenChange={(open) => {
+          if (!isRestoringBackup) {
+            setIsRestoreWarningOpen(open)
+            if (!open) {
+              setRestoreTargetPath(null)
+            }
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restore backup and replace current local data?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <span className="block">
+                This is destructive. REFX will wipe the current local data inside the selected restore scope before applying the backup.
+              </span>
+              <span className="block">
+                To protect you, REFX will create a full safety backup first. If the restore fails or the result is not what you expected, you can restore from that safety backup.
+              </span>
+              <span className="block font-medium text-foreground">
+                Continue only if you want to replace your current local state with the selected backup.
+              </span>
+              {restoreTargetPath ? (
+                <span className="block rounded-md border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground/80">
+                  Source: {restoreTargetPath}
+                </span>
+              ) : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRestoringBackup}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleRestoreBackup()} disabled={isRestoringBackup}>
+              {isRestoringBackup ? 'Restoring...' : 'Create safety backup and restore'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

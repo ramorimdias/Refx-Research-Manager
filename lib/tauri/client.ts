@@ -1,7 +1,7 @@
 'use client'
 
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { copyFile, exists, mkdir, readFile, readTextFile, remove, writeTextFile } from '@tauri-apps/plugin-fs'
 import { appDataDir, join } from '@tauri-apps/api/path'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -13,6 +13,7 @@ export const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS
 export {
   invoke,
   open,
+  save,
   copyFile,
   exists,
   mkdir,

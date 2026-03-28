@@ -19,6 +19,7 @@ const AUTO_BACKUP_LAST_RUN_KEY: &str = "autoBackupLastRunAt";
 pub struct CreateBackupInput {
     pub scope: String,
     pub automatic: Option<bool>,
+    pub output_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,9 +30,16 @@ pub struct RestoreBackupInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RestoreBackupResult {
+    pub safety_backup: BackupFileMetadata,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RunScheduledBackupInput {
     pub scope: String,
     pub interval_days: i64,
+    pub keep_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +145,15 @@ fn ensure_backup_directories(app: &AppHandle) -> Result<(), AppError> {
         }
     }
     Ok(())
+}
+
+fn default_backup_file_name(scope: &str, automatic: bool) -> String {
+    format!(
+        "refx-{}-{}{}.refxbackup.json",
+        scope,
+        chrono::Local::now().format("%Y%m%d-%H%M%S"),
+        if automatic { "-auto" } else { "" }
+    )
 }
 
 fn normalize_scope(scope: &str) -> Result<&str, AppError> {
@@ -282,6 +299,24 @@ fn metadata_from_archive(path: &Path, archive: &BackupArchive) -> Result<BackupF
         note_count: archive.notes.as_ref().map(|items| items.len() as i64).unwrap_or(0),
         relation_count: archive.relations.as_ref().map(|items| items.len() as i64).unwrap_or(0),
     })
+}
+
+fn prune_old_automatic_backups(app: &AppHandle, keep_count: i64) -> Result<(), AppError> {
+    let keep_count = keep_count.clamp(1, 10) as usize;
+    let mut automatic_backups = list_backups(app.clone())?
+        .into_iter()
+        .filter(|backup| backup.automatic)
+        .collect::<Vec<_>>();
+    automatic_backups.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+
+    for backup in automatic_backups.into_iter().skip(keep_count) {
+        let path = PathBuf::from(backup.path);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn backup_version_from_value(value: &Value) -> u32 {
@@ -721,13 +756,16 @@ pub fn create_backup(
         files: if files.is_empty() { None } else { Some(files) },
     };
 
-    let file_name = format!(
-        "refx-{}-{}{}.refxbackup.json",
-        scope,
-        chrono::Local::now().format("%Y%m%d-%H%M%S"),
-        if archive.automatic { "-auto" } else { "" }
-    );
-    let backup_path = backups_dir(&app)?.join(file_name);
+    let backup_path = if let Some(output_path) = input.output_path.as_deref() {
+        PathBuf::from(output_path)
+    } else {
+        backups_dir(&app)?.join(default_backup_file_name(&scope, archive.automatic))
+    };
+    if let Some(parent) = backup_path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)?;
+        }
+    }
     let payload = serde_json::to_string_pretty(&archive)
         .map_err(|error| AppError::Validation(format!("Could not serialize backup: {error}")))?;
     fs::write(&backup_path, payload)?;
@@ -775,10 +813,26 @@ pub fn delete_backup(path: String) -> Result<bool, AppError> {
 }
 
 #[tauri::command]
-pub fn restore_backup(app: AppHandle, input: RestoreBackupInput) -> Result<(), AppError> {
+pub fn restore_backup(
+    app: AppHandle,
+    input: RestoreBackupInput,
+) -> Result<RestoreBackupResult, AppError> {
     ensure_backup_directories(&app)?;
     let raw = fs::read_to_string(&input.path)?;
     let archive = parse_backup_archive(&raw)?;
+    let safety_backup_path = backups_dir(&app)?.join(format!(
+        "refx-pre-restore-{}-{}.refxbackup.json",
+        archive.scope,
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    ));
+    create_backup(
+        app.clone(),
+        CreateBackupInput {
+            scope: "full".to_string(),
+            automatic: Some(true),
+            output_path: Some(safety_backup_path.to_string_lossy().to_string()),
+        },
+    )?;
 
     let base_path = app_data_dir(&app)?;
     let mut conn = open_db(&app)?;
@@ -852,7 +906,11 @@ pub fn restore_backup(app: AppHandle, input: RestoreBackupInput) -> Result<(), A
     }
 
     tx.commit()?;
-    Ok(())
+    let safety_backup = metadata_from_archive(
+        &safety_backup_path,
+        &parse_backup_archive(&fs::read_to_string(&safety_backup_path)?)?,
+    )?;
+    Ok(RestoreBackupResult { safety_backup })
 }
 
 #[tauri::command]
@@ -864,6 +922,11 @@ pub fn run_scheduled_backup_if_due(
     if input.interval_days <= 0 {
         return Err(AppError::Validation(
             "Automatic backup interval must be at least 1 day.".to_string(),
+        ));
+    }
+    if input.keep_count <= 0 || input.keep_count > 10 {
+        return Err(AppError::Validation(
+            "Automatic backup retention must be between 1 and 10 backups.".to_string(),
         ));
     }
 
@@ -882,8 +945,10 @@ pub fn run_scheduled_backup_if_due(
         CreateBackupInput {
             scope: scope.to_string(),
             automatic: Some(true),
+            output_path: None,
         },
     )?;
     set_setting_value(&conn, AUTO_BACKUP_LAST_RUN_KEY, &now_iso())?;
+    prune_old_automatic_backups(&app, input.keep_count)?;
     Ok(Some(backup))
 }

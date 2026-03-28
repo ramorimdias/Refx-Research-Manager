@@ -1,7 +1,88 @@
 mod commands;
 mod backup;
 
-use tauri::Manager;
+use serde::{Deserialize, Serialize};
+use std::{fs, path::PathBuf};
+use tauri::{LogicalPosition, LogicalSize, Manager, Position, Size, WindowEvent};
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PersistedWindowState {
+    x: Option<f64>,
+    y: Option<f64>,
+    width: Option<f64>,
+    height: Option<f64>,
+    maximized: bool,
+    fullscreen: bool,
+}
+
+fn window_state_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    let app_data_dir = app.path().app_data_dir().ok()?;
+    if fs::create_dir_all(&app_data_dir).is_err() {
+        return None;
+    }
+
+    Some(app_data_dir.join("window-state.json"))
+}
+
+fn save_window_state<R: tauri::Runtime>(window: &tauri::Window<R>) {
+    let Some(path) = window_state_path(&window.app_handle()) else {
+        return;
+    };
+
+    let mut state = fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<PersistedWindowState>(&raw).ok())
+        .unwrap_or_default();
+
+    state.maximized = window.is_maximized().unwrap_or(false);
+    state.fullscreen = window.is_fullscreen().unwrap_or(false);
+
+    if !state.maximized && !state.fullscreen {
+        if let Ok(position) = window.outer_position() {
+            state.x = Some(position.x as f64);
+            state.y = Some(position.y as f64);
+        }
+
+        if let Ok(size) = window.outer_size() {
+            state.width = Some(size.width as f64);
+            state.height = Some(size.height as f64);
+        }
+    }
+
+    if let Ok(json) = serde_json::to_string_pretty(&state) {
+        let _ = fs::write(path, json);
+    }
+}
+
+fn restore_window_state<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
+    let Some(path) = window_state_path(&window.app_handle()) else {
+        return;
+    };
+
+    let Ok(raw) = fs::read_to_string(path) else {
+        return;
+    };
+
+    let Ok(state) = serde_json::from_str::<PersistedWindowState>(&raw) else {
+        return;
+    };
+
+    if let (Some(width), Some(height)) = (state.width, state.height) {
+        let _ = window.set_size(Size::Logical(LogicalSize::new(width, height)));
+    }
+
+    if let (Some(x), Some(y)) = (state.x, state.y) {
+        let _ = window.set_position(Position::Logical(LogicalPosition::new(x, y)));
+    }
+
+    if state.maximized {
+        let _ = window.maximize();
+    }
+
+    if state.fullscreen {
+        let _ = window.set_fullscreen(true);
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -72,6 +153,8 @@ pub fn run() {
                 if let Err(error) = window.set_icon(icon) {
                     eprintln!("Failed to apply window icon: {}", error);
                 }
+
+                restore_window_state(&window);
             }
 
             let app_handle = app.handle().clone();
@@ -84,6 +167,19 @@ pub fn run() {
                 }
             });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+
+            match event {
+                WindowEvent::Moved(_)
+                | WindowEvent::Resized(_)
+                | WindowEvent::CloseRequested { .. }
+                | WindowEvent::Destroyed => save_window_state(window),
+                _ => {}
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

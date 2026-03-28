@@ -19,7 +19,8 @@ export type StoredAppSettings = {
   autoCheckForUpdates: boolean
   autoBackupEnabled: boolean
   autoBackupScope: 'full' | 'documents' | 'settings'
-  autoBackupIntervalDays: '1' | '3' | '7' | '14' | '30'
+  autoBackupIntervalDays: string
+  autoBackupKeepCount: string
   autoOcr: boolean
   autoMetadata: boolean
   autoOnlineMetadataEnrichment: boolean
@@ -37,6 +38,7 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   autoBackupEnabled: false,
   autoBackupScope: 'full',
   autoBackupIntervalDays: '7',
+  autoBackupKeepCount: '5',
   autoOcr: true,
   autoMetadata: true,
   autoOnlineMetadataEnrichment: false,
@@ -124,6 +126,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     autoBackupEnabled: parseValue(stored.autoBackupEnabled, DEFAULT_APP_SETTINGS.autoBackupEnabled),
     autoBackupScope: parseValue(stored.autoBackupScope, DEFAULT_APP_SETTINGS.autoBackupScope),
     autoBackupIntervalDays: parseValue(stored.autoBackupIntervalDays, DEFAULT_APP_SETTINGS.autoBackupIntervalDays),
+    autoBackupKeepCount: parseValue(stored.autoBackupKeepCount, DEFAULT_APP_SETTINGS.autoBackupKeepCount),
     autoOcr: parseValue(stored.autoOcr, DEFAULT_APP_SETTINGS.autoOcr),
     autoMetadata: parseValue(stored.autoMetadata, DEFAULT_APP_SETTINGS.autoMetadata),
     autoOnlineMetadataEnrichment: parseValue(
@@ -156,6 +159,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     autoBackupEnabled: JSON.stringify(settings.autoBackupEnabled),
     autoBackupScope: JSON.stringify(settings.autoBackupScope),
     autoBackupIntervalDays: JSON.stringify(settings.autoBackupIntervalDays),
+    autoBackupKeepCount: JSON.stringify(settings.autoBackupKeepCount),
     autoOcr: JSON.stringify(settings.autoOcr),
     autoMetadata: JSON.stringify(settings.autoMetadata),
     autoOnlineMetadataEnrichment: JSON.stringify(settings.autoOnlineMetadataEnrichment),
