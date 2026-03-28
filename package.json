@@ -1,6 +1,6 @@
 {
   "name": "refx",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "dev": "pnpm ocr:assets && pnpm exec next dev --webpack -p 3001",
@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "ocr:assets": "node scripts/sync-tesseract-assets.mjs",
+    "release": "node scripts/release-version.mjs",
+    "release:build": "pnpm tauri:build",
     "tauri": "pnpm exec tauri",
     "tauri:dev": "pnpm tauri:icons && pnpm exec tauri dev",
     "tauri:build": "pnpm tauri:icons && pnpm exec tauri build",
