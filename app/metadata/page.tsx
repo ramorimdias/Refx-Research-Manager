@@ -1,0 +1,538 @@
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  Globe,
+  Loader2,
+  Save,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { Badge } from '@/components/ui/badge'
+import { EmptyState } from '@/components/refx/common'
+import {
+  buildDocumentMetadataSeed,
+  findDocumentMetadataCandidates,
+  loadOnlineMetadataEnrichmentSettings,
+  type DocumentMetadataCandidate,
+} from '@/lib/services/document-enrichment-service'
+import { useAppStore } from '@/lib/store'
+import { cn } from '@/lib/utils'
+import type { Document } from '@/lib/types'
+
+type MetadataQueueMode = 'fetch_possible' | 'missing'
+
+function hasCompleteCoreMetadata(document: Document) {
+  return document.title.trim().length > 0 && document.authors.length > 0 && typeof document.year === 'number'
+}
+
+function isFetchPossibleDocument(document: Document) {
+  return !hasCompleteCoreMetadata(document) && (document.doi ?? '').trim().length > 0
+}
+
+function isMissingMetadataDocument(document: Document) {
+  return !hasCompleteCoreMetadata(document) && (document.doi ?? '').trim().length === 0
+}
+
+function buildSavePayload(input: {
+  title: string
+  authors: string
+  year: string
+  doi: string
+  isbn: string
+  publisher: string
+  citationKey: string
+  abstract: string
+}) {
+  return {
+    title: input.title.trim(),
+    authors: input.authors
+      .split(',')
+      .map((author) => author.trim())
+      .filter(Boolean),
+    year: input.year.trim() ? Number(input.year.trim()) : undefined,
+    doi: input.doi.trim() || undefined,
+    isbn: input.isbn.trim() || undefined,
+    publisher: input.publisher.trim() || undefined,
+    citationKey: input.citationKey.trim() || '',
+    abstract: input.abstract.trim() || undefined,
+  }
+}
+
+export default function MetadataWorkspacePage() {
+  const {
+    libraries,
+    documents,
+    activeLibraryId,
+    updateDocument,
+    applyFetchedMetadataCandidate,
+    isDesktopApp,
+  } = useAppStore()
+
+  const [selectedLibraryId, setSelectedLibraryId] = useState('')
+  const [mode, setMode] = useState<MetadataQueueMode>('fetch_possible')
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [title, setTitle] = useState('')
+  const [authors, setAuthors] = useState('')
+  const [year, setYear] = useState('')
+  const [doi, setDoi] = useState('')
+  const [isbn, setIsbn] = useState('')
+  const [publisher, setPublisher] = useState('')
+  const [citationKey, setCitationKey] = useState('')
+  const [abstract, setAbstract] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [isFetchingCandidates, setIsFetchingCandidates] = useState(false)
+  const [isApplyingCandidate, setIsApplyingCandidate] = useState(false)
+  const [candidateError, setCandidateError] = useState('')
+  const [metadataCandidates, setMetadataCandidates] = useState<DocumentMetadataCandidate[]>([])
+
+  useEffect(() => {
+    if (!selectedLibraryId && libraries.length > 0) {
+      setSelectedLibraryId(activeLibraryId || libraries[0]?.id || '')
+    }
+  }, [activeLibraryId, libraries, selectedLibraryId])
+
+  const filteredDocuments = useMemo(() => {
+    if (!selectedLibraryId) return []
+    return documents
+      .filter((document) => document.libraryId === selectedLibraryId)
+      .sort((left, right) => left.title.localeCompare(right.title))
+  }, [documents, selectedLibraryId])
+
+  const queue = useMemo(() => {
+    const source = mode === 'fetch_possible' ? isFetchPossibleDocument : isMissingMetadataDocument
+    return filteredDocuments.filter(source)
+  }, [filteredDocuments, mode])
+
+  useEffect(() => {
+    setCurrentIndex((current) => {
+      if (queue.length === 0) return 0
+      return Math.min(current, queue.length - 1)
+    })
+  }, [queue.length])
+
+  const currentDocument = queue[currentIndex] ?? null
+
+  useEffect(() => {
+    if (!currentDocument) {
+      setTitle('')
+      setAuthors('')
+      setYear('')
+      setDoi('')
+      setIsbn('')
+      setPublisher('')
+      setCitationKey('')
+      setAbstract('')
+      setMetadataCandidates([])
+      setCandidateError('')
+      return
+    }
+
+    setTitle(currentDocument.title)
+    setAuthors(currentDocument.authors.join(', '))
+    setYear(currentDocument.year ? String(currentDocument.year) : '')
+    setDoi(currentDocument.doi ?? '')
+    setIsbn(currentDocument.isbn ?? '')
+    setPublisher(currentDocument.publisher ?? '')
+    setCitationKey(currentDocument.citationKey ?? '')
+    setAbstract(currentDocument.abstract ?? '')
+    setMetadataCandidates([])
+    setCandidateError('')
+  }, [currentDocument])
+
+  const savePayload = useMemo(
+    () =>
+      buildSavePayload({
+        title,
+        authors,
+        year,
+        doi,
+        isbn,
+        publisher,
+        citationKey,
+        abstract,
+      }),
+    [abstract, authors, citationKey, doi, isbn, publisher, title, year],
+  )
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (!currentDocument) return false
+    if (savePayload.title !== currentDocument.title) return true
+    if (savePayload.authors.length !== currentDocument.authors.length) return true
+    if (savePayload.authors.some((author, index) => author !== currentDocument.authors[index])) return true
+    if (savePayload.year !== currentDocument.year) return true
+    if ((savePayload.doi ?? '') !== (currentDocument.doi ?? '')) return true
+    if ((savePayload.isbn ?? '') !== (currentDocument.isbn ?? '')) return true
+    if ((savePayload.publisher ?? '') !== (currentDocument.publisher ?? '')) return true
+    if (savePayload.citationKey !== (currentDocument.citationKey ?? '')) return true
+    if ((savePayload.abstract ?? '') !== (currentDocument.abstract ?? '')) return true
+    return false
+  }, [currentDocument, savePayload])
+
+  const runDoiCandidateSearch = async (document: Document) => {
+    const trimmedDoi = (document.doi ?? '').trim()
+    if (!trimmedDoi) {
+      setMetadataCandidates([])
+      setCandidateError('This document has no DOI to search.')
+      return
+    }
+
+    setIsFetchingCandidates(true)
+    setCandidateError('')
+    setMetadataCandidates([])
+    try {
+      const settings = await loadOnlineMetadataEnrichmentSettings(isDesktopApp)
+      const candidates = await findDocumentMetadataCandidates(
+        buildDocumentMetadataSeed({
+          title: document.title,
+          authors: JSON.stringify(document.authors),
+          year: document.year,
+          doi: trimmedDoi,
+          citationKey: document.citationKey,
+        }),
+        settings,
+        { providers: ['semantic_scholar', 'openalex', 'crossref'] },
+      )
+      setMetadataCandidates(candidates)
+      if (candidates.length === 0) {
+        setCandidateError('No DOI results were found for this document.')
+      }
+    } catch (error) {
+      setCandidateError(error instanceof Error ? error.message : 'Could not fetch metadata candidates.')
+    } finally {
+      setIsFetchingCandidates(false)
+    }
+  }
+
+  useEffect(() => {
+    if (mode !== 'fetch_possible' || !currentDocument) return
+    void runDoiCandidateSearch(currentDocument)
+  }, [currentDocument, isDesktopApp, mode])
+
+  const handleSave = async () => {
+    if (!currentDocument || !hasUnsavedChanges) return
+    setIsSaving(true)
+    try {
+      await updateDocument(currentDocument.id, savePayload)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleApplyCandidate = async (
+    modeToApply: 'fill_missing' | 'replace_unlocked',
+    candidate: DocumentMetadataCandidate,
+  ) => {
+    if (!currentDocument) return
+    setIsApplyingCandidate(true)
+    try {
+      await applyFetchedMetadataCandidate(currentDocument.id, candidate.metadata, modeToApply)
+      setCurrentIndex((current) => Math.min(current, Math.max(0, queue.length - 2)))
+    } finally {
+      setIsApplyingCandidate(false)
+    }
+  }
+
+  const currentLibrary = libraries.find((library) => library.id === selectedLibraryId) ?? null
+
+  return (
+    <div className="p-6">
+      <div className="mx-auto flex max-w-7xl flex-col gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Database className="h-4 w-4" />
+              Metadata workspace
+            </div>
+            <h1 className="text-2xl font-semibold tracking-tight">Metadata</h1>
+            <p className="text-sm text-muted-foreground">Review DOI-based matches and bulk-fix incomplete documents by library.</p>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/maps">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back
+            </Link>
+          </Button>
+        </div>
+
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-3 p-4">
+            <div className="min-w-[240px] flex-1">
+              <Label className="text-sm">Library</Label>
+              <Select value={selectedLibraryId} onValueChange={(value) => {
+                setSelectedLibraryId(value)
+                setCurrentIndex(0)
+              }}>
+                <SelectTrigger className="mt-1.5">
+                  <SelectValue placeholder="Select a library" />
+                </SelectTrigger>
+                <SelectContent>
+                  {libraries.map((library) => (
+                    <SelectItem key={library.id} value={library.id}>
+                      {library.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center gap-2 self-end">
+              <Button
+                variant={mode === 'fetch_possible' ? 'default' : 'outline'}
+                onClick={() => {
+                  setMode('fetch_possible')
+                  setCurrentIndex(0)
+                }}
+              >
+                Fetch Possible
+                <Badge variant="secondary" className="ml-2">
+                  {filteredDocuments.filter(isFetchPossibleDocument).length}
+                </Badge>
+              </Button>
+              <Button
+                variant={mode === 'missing' ? 'default' : 'outline'}
+                onClick={() => {
+                  setMode('missing')
+                  setCurrentIndex(0)
+                }}
+              >
+                Missing
+                <Badge variant="secondary" className="ml-2">
+                  {filteredDocuments.filter(isMissingMetadataDocument).length}
+                </Badge>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {!currentLibrary ? (
+          <EmptyState
+            icon={Database}
+            title="No library selected"
+            description="Choose a library to start reviewing metadata."
+          />
+        ) : !currentDocument ? (
+          <EmptyState
+            icon={Database}
+            title={mode === 'fetch_possible' ? 'No DOI-based metadata queue' : 'No missing-metadata queue'}
+            description={
+              mode === 'fetch_possible'
+                ? `All DOI-backed documents in ${currentLibrary.name} already look complete.`
+                : `No documents without DOI-based fetch options are waiting in ${currentLibrary.name}.`
+            }
+          />
+        ) : (
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.95fr)]">
+            <Card>
+              <CardHeader className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base">{currentDocument.title || 'Untitled document'}</CardTitle>
+                    <CardDescription>
+                      {currentLibrary.name} · {currentIndex + 1} of {queue.length}
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setCurrentIndex((current) => Math.max(0, current - 1))}
+                      disabled={currentIndex <= 0}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setCurrentIndex((current) => Math.min(queue.length - 1, current + 1))}
+                      disabled={currentIndex >= queue.length - 1}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {hasUnsavedChanges ? (
+                    <Button onClick={() => void handleSave()} disabled={isSaving}>
+                      <Save className="mr-2 h-4 w-4" />
+                      {isSaving ? 'Saving...' : 'Save'}
+                    </Button>
+                  ) : null}
+                  <Button asChild variant="outline">
+                    <Link href={`/documents?id=${currentDocument.id}`}>Open full details</Link>
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <Label htmlFor="metadata-title">Title</Label>
+                  <Input id="metadata-title" className="mt-1.5" value={title} onChange={(event) => setTitle(event.target.value)} />
+                </div>
+
+                <div className="md:col-span-2">
+                  <Label htmlFor="metadata-authors">Authors</Label>
+                  <Input
+                    id="metadata-authors"
+                    className="mt-1.5"
+                    value={authors}
+                    onChange={(event) => setAuthors(event.target.value)}
+                    placeholder="Comma-separated author names"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="metadata-year">Year</Label>
+                  <Input id="metadata-year" className="mt-1.5" value={year} onChange={(event) => setYear(event.target.value)} />
+                </div>
+
+                <div>
+                  <Label htmlFor="metadata-doi">DOI</Label>
+                  <Input id="metadata-doi" className="mt-1.5" value={doi} onChange={(event) => setDoi(event.target.value)} />
+                </div>
+
+                <div>
+                  <Label htmlFor="metadata-isbn">ISBN</Label>
+                  <Input id="metadata-isbn" className="mt-1.5" value={isbn} onChange={(event) => setIsbn(event.target.value)} />
+                </div>
+
+                <div>
+                  <Label htmlFor="metadata-publisher">Publisher</Label>
+                  <Input id="metadata-publisher" className="mt-1.5" value={publisher} onChange={(event) => setPublisher(event.target.value)} />
+                </div>
+
+                <div className="md:col-span-2">
+                  <Label htmlFor="metadata-citation-key">Citation Key</Label>
+                  <Input
+                    id="metadata-citation-key"
+                    className="mt-1.5"
+                    value={citationKey}
+                    onChange={(event) => setCitationKey(event.target.value)}
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <Label htmlFor="metadata-abstract">Abstract</Label>
+                  <Textarea
+                    id="metadata-abstract"
+                    className="mt-1.5 min-h-40"
+                    value={abstract}
+                    onChange={(event) => setAbstract(event.target.value)}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base">
+                      {mode === 'fetch_possible' ? 'DOI Match Review' : 'Manual Review'}
+                    </CardTitle>
+                    <CardDescription>
+                      {mode === 'fetch_possible'
+                        ? 'Review DOI-based candidates and choose the best result.'
+                        : 'Use the arrows to move through documents that still need manual metadata cleanup.'}
+                    </CardDescription>
+                  </div>
+                  {mode === 'fetch_possible' ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void runDoiCandidateSearch(currentDocument)}
+                      disabled={isFetchingCandidates}
+                    >
+                      <Globe className="mr-2 h-4 w-4" />
+                      {isFetchingCandidates ? 'Searching...' : 'Refresh'}
+                    </Button>
+                  ) : null}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {mode === 'fetch_possible' ? (
+                  isFetchingCandidates ? (
+                    <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+                      Searching by DOI across Semantic Scholar, OpenAlex, and Crossref...
+                    </div>
+                  ) : metadataCandidates.length > 0 ? (
+                    metadataCandidates.map((candidate) => (
+                      <div key={candidate.id} className="rounded-lg border border-border px-4 py-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium">
+                            {candidate.source === 'semantic_scholar'
+                              ? 'Semantic Scholar'
+                              : candidate.source === 'openalex'
+                                ? 'OpenAlex'
+                                : 'Crossref'}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {candidate.matchedBy === 'doi' ? 'DOI match' : 'Title match'}
+                          </span>
+                        </div>
+                        <p className="mt-2 break-words text-sm font-medium leading-5">{candidate.title || 'Untitled result'}</p>
+                        <p className="mt-1 break-words text-xs text-muted-foreground">
+                          {candidate.authors.join(', ') || 'Unknown author'}
+                          {candidate.year ? ` • ${candidate.year}` : ''}
+                          {candidate.doi ? ` • ${candidate.doi}` : ''}
+                          {typeof candidate.citationCount === 'number' ? ` • ${candidate.citationCount} citations` : ''}
+                        </p>
+                        {candidate.suggestedTags && candidate.suggestedTags.length > 0 ? (
+                          <p className="mt-2 break-words text-xs text-muted-foreground">
+                            Topics: {candidate.suggestedTags.slice(0, 5).join(', ')}
+                          </p>
+                        ) : null}
+                        {candidate.abstract ? (
+                          <p className="mt-2 break-words text-xs leading-5 text-muted-foreground">
+                            {candidate.abstract}
+                          </p>
+                        ) : null}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleApplyCandidate('fill_missing', candidate)}
+                            disabled={isApplyingCandidate}
+                          >
+                            Fill Missing Fields
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => void handleApplyCandidate('replace_unlocked', candidate)}
+                            disabled={isApplyingCandidate}
+                          >
+                            Apply Candidate
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      {candidateError || 'No metadata candidates found for this DOI.'}
+                    </div>
+                  )
+                ) : (
+                  <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    This queue is focused on manual cleanup. Use the fields on the left, then save and move to the next document.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

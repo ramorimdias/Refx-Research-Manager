@@ -61,6 +61,7 @@ export type DbDocument = {
   lastReadPage?: number
   commentaryText?: string
   commentaryUpdatedAt?: string
+  coverImagePath?: string
   createdAt: string
   updatedAt: string
 }
@@ -105,6 +106,7 @@ export type DbCreateDocumentInput = {
   lastProcessedAt?: string
   commentaryText?: string
   commentaryUpdatedAt?: string
+  coverImagePath?: string
 }
 
 export type DbUpdateDocumentMetadataInput = {
@@ -150,6 +152,17 @@ export type DbUpdateDocumentMetadataInput = {
   lastReadPage?: number
   commentaryText?: string
   commentaryUpdatedAt?: string
+  coverImagePath?: string
+}
+
+export type DbStartBookCoverUploadSessionResult = {
+  token: string
+  url: string
+}
+
+export type DbBookCoverUploadSessionStatus = {
+  status: string
+  imagePath?: string
 }
 
 export type DbNote = {
@@ -377,6 +390,18 @@ export async function moveDocumentsToLibrary(documentIds: string[], targetLibrar
 
 export async function openDocumentFileLocation(path: string) {
   return invoke<void>('open_document_file_location', { path })
+}
+
+export async function importBookCover(sourcePath: string) {
+  return invoke<string>('import_book_cover', { sourcePath })
+}
+
+export async function startBookCoverUploadSession() {
+  return invoke<DbStartBookCoverUploadSessionResult>('start_book_cover_upload_session')
+}
+
+export async function getBookCoverUploadSessionStatus(token: string) {
+  return invoke<DbBookCoverUploadSessionStatus>('get_book_cover_upload_session_status', { token })
 }
 
 export async function addTagToDocument(documentId: string, tagName: string) {

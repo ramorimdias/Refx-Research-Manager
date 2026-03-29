@@ -128,6 +128,25 @@ function parseAreaHighlight(annotation: repo.DbAnnotation): ReaderAreaHighlight 
   }
 }
 
+function getFloatingHintStyle(
+  cursor: { x: number; y: number },
+  pageSize: { width: number; height: number },
+  hintWidth: number,
+) {
+  const halfWidth = hintWidth / 2
+  const left = Math.min(
+    Math.max(cursor.x * pageSize.width, halfWidth + 8),
+    Math.max(halfWidth + 8, pageSize.width - halfWidth - 8),
+  )
+  const top = Math.max(cursor.y * pageSize.height, 28)
+
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${hintWidth}px`,
+  }
+}
+
 function ReaderToolbarIconButton({
   label,
   children,
@@ -143,7 +162,6 @@ function ReaderToolbarIconButton({
           variant="ghost"
           size="icon"
           aria-label={label}
-          title={label}
           className={cn(
             'h-9 w-9 rounded-full border border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted/70 hover:text-foreground',
             className,
@@ -190,6 +208,8 @@ export default function ReaderViewPage() {
   const [isRunningOcr, setIsRunningOcr] = useState(false)
   const [isHighlightMode, setIsHighlightMode] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
+  const [notePlacementCursor, setNotePlacementCursor] = useState<{ x: number; y: number } | null>(null)
+  const [highlightPlacementCursor, setHighlightPlacementCursor] = useState<{ x: number; y: number } | null>(null)
   const [pdfDocument, setPdfDocument] = useState<{ numPages: number; getPage: (pageNumber: number) => Promise<unknown>; destroy?: () => Promise<void> } | null>(null)
   const [embeddedPdfUrl, setEmbeddedPdfUrl] = useState<string | null>(null)
   const [viewerMode, setViewerMode] = useState<'pdfjs' | 'native' | 'unavailable'>('pdfjs')
@@ -518,9 +538,11 @@ export default function ReaderViewPage() {
     setIsNoteEditorOpen(false)
     setCommentDraftAreaRect(null)
     notePlacementStartRef.current = null
+    setNotePlacementCursor(null)
     setIsHighlightMode(false)
     setIsTextSelectionGestureActive(false)
     setDraftHighlightRect(null)
+    setHighlightPlacementCursor(null)
     highlightDragStartRef.current = null
   }, [page])
 
@@ -555,6 +577,14 @@ export default function ReaderViewPage() {
   }, [isNoteEditorOpen])
 
   const isTextSelectionLayerVisible = isTextSelectionMode || isTextSelectionGestureActive
+  const hasNativeTextLayer = document?.hasExtractedText && document.textExtractionStatus === 'complete'
+
+  const deactivateTextSelectionMode = () => {
+    window.getSelection?.()?.removeAllRanges()
+    skipNextTransientTextDismissRef.current = false
+    setIsTextSelectionGestureActive(false)
+    setIsTextSelectionMode(false)
+  }
 
   const handleTextSelectionGestureStart = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!canUsePreciseViewer || isHighlightMode || isSelectingCommentPosition) return
@@ -1165,15 +1195,50 @@ export default function ReaderViewPage() {
     setIsNoteEditorOpen(true)
   }
 
+  const handlePlacementCursorMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((!isSelectingCommentPosition && !isHighlightMode) || renderedPageSize.width <= 0 || renderedPageSize.height <= 0) {
+      return
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return
+
+    const nextCursor = {
+      x: clamp01((event.clientX - bounds.left) / bounds.width),
+      y: clamp01((event.clientY - bounds.top) / bounds.height),
+    }
+
+    if (isSelectingCommentPosition) {
+      setNotePlacementCursor(nextCursor)
+    }
+
+    if (isHighlightMode) {
+      setHighlightPlacementCursor(nextCursor)
+    }
+  }
+
+  const handlePlacementCursorLeave = () => {
+    if (isSelectingCommentPosition && !notePlacementStartRef.current) {
+      setNotePlacementCursor(null)
+    }
+
+    if (isHighlightMode && !highlightDragStartRef.current) {
+      setHighlightPlacementCursor(null)
+    }
+  }
+
   const updateDraftNoteRect = (event: React.PointerEvent<HTMLDivElement>) => {
     const start = notePlacementStartRef.current
-    if (!start) return
 
     const bounds = event.currentTarget.getBoundingClientRect()
     if (bounds.width <= 0 || bounds.height <= 0) return
 
     const currentX = clamp01((event.clientX - bounds.left) / bounds.width)
     const currentY = clamp01((event.clientY - bounds.top) / bounds.height)
+
+    setNotePlacementCursor({ x: currentX, y: currentY })
+
+    if (!start) return
 
     setCommentDraftAreaRect({
       x: Math.min(start.x, currentX),
@@ -1199,6 +1264,7 @@ export default function ReaderViewPage() {
     }
 
     notePlacementStartRef.current = start
+    setNotePlacementCursor(start)
     setCommentDraftPosition(start)
     setCommentDraftAreaRect({
       x: start.x,
@@ -1235,6 +1301,7 @@ export default function ReaderViewPage() {
     }
 
     notePlacementStartRef.current = null
+    setNotePlacementCursor(null)
 
     if (nextRect.width >= 0.01 && nextRect.height >= 0.01) {
       setCommentDraftPosition({ x: nextRect.x, y: nextRect.y })
@@ -1250,13 +1317,16 @@ export default function ReaderViewPage() {
 
   const updateDraftHighlightRect = (event: React.PointerEvent<HTMLDivElement>) => {
     const start = highlightDragStartRef.current
-    if (!start) return
 
     const bounds = event.currentTarget.getBoundingClientRect()
     if (bounds.width <= 0 || bounds.height <= 0) return
 
     const currentX = clamp01((event.clientX - bounds.left) / bounds.width)
     const currentY = clamp01((event.clientY - bounds.top) / bounds.height)
+
+    setHighlightPlacementCursor({ x: currentX, y: currentY })
+
+    if (!start) return
 
     setDraftHighlightRect({
       x: Math.min(start.x, currentX),
@@ -1282,6 +1352,7 @@ export default function ReaderViewPage() {
     }
 
     highlightDragStartRef.current = start
+    setHighlightPlacementCursor(start)
     setDraftHighlightRect({
       x: start.x,
       y: start.y,
@@ -1318,6 +1389,7 @@ export default function ReaderViewPage() {
       }
 
     highlightDragStartRef.current = null
+    setHighlightPlacementCursor(null)
     setDraftHighlightRect(null)
 
     if (!id || !isDesktopApp) return
@@ -1334,6 +1406,7 @@ export default function ReaderViewPage() {
     })
     await refreshData()
     setIsHighlightMode(false)
+    setHighlightPlacementCursor(null)
   }
 
   const handleDeleteAreaHighlight = async (highlightId: string) => {
@@ -1343,12 +1416,17 @@ export default function ReaderViewPage() {
   }
 
   const handleStartNewComment = () => {
+    deactivateTextSelectionMode()
+    setIsHighlightMode(false)
+    setDraftHighlightRect(null)
+    highlightDragStartRef.current = null
     setSelectedCommentId(null)
     setCommentDraftContent('')
     setCommentDraftPosition(null)
     setCommentDraftAreaRect(null)
     setIsNoteEditorOpen(false)
     setIsSelectingCommentPosition(true)
+    setNotePlacementCursor({ x: 0.5, y: 0.12 })
   }
 
   const handleSelectComment = (commentId: string, options?: { scrollIntoView?: boolean }) => {
@@ -1383,6 +1461,7 @@ export default function ReaderViewPage() {
 
     setIsSelectingCommentPosition(false)
     setIsNoteEditorOpen(false)
+    setNotePlacementCursor(null)
   }
 
   const handleSaveComment = async () => {
@@ -1509,14 +1588,16 @@ export default function ReaderViewPage() {
           >
             <ZoomIn className="h-4 w-4" />
           </ReaderToolbarIconButton>
+          <div className="mx-1 h-5 w-px bg-border/80" aria-hidden="true" />
           <ReaderToolbarIconButton
             label={isHighlightMode ? 'Exit highlight mode' : 'Highlight mode'}
             onClick={() => {
-              setIsTextSelectionMode(false)
+              deactivateTextSelectionMode()
               setIsSelectingCommentPosition(false)
               setIsNoteEditorOpen(false)
               setIsHighlightMode((current) => !current)
               setDraftHighlightRect(null)
+              setHighlightPlacementCursor(null)
               highlightDragStartRef.current = null
             }}
             disabled={!canUsePreciseViewer}
@@ -1526,17 +1607,30 @@ export default function ReaderViewPage() {
             <Highlighter className="h-4 w-4" />
           </ReaderToolbarIconButton>
           <ReaderToolbarIconButton
+            label={isSelectingCommentPosition ? 'Cancel note placement' : 'New note'}
+            onClick={() => {
+              if (isSelectingCommentPosition) {
+                handleCancelCommentEditor()
+              } else {
+                handleStartNewComment()
+              }
+            }}
+            disabled={!canUsePreciseViewer}
+            aria-pressed={isSelectingCommentPosition}
+            className={cn(isSelectingCommentPosition && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
+          >
+            <StickyNote className="h-4 w-4" />
+          </ReaderToolbarIconButton>
+          <ReaderToolbarIconButton
             label={isTextSelectionLayerVisible ? 'Exit text selection' : 'Select text'}
             onClick={() => {
               setIsHighlightMode(false)
               setDraftHighlightRect(null)
+              setHighlightPlacementCursor(null)
               highlightDragStartRef.current = null
               setIsSelectingCommentPosition(false)
               if (isTextSelectionLayerVisible) {
-                window.getSelection?.()?.removeAllRanges()
-                skipNextTransientTextDismissRef.current = false
-                setIsTextSelectionGestureActive(false)
-                setIsTextSelectionMode(false)
+                deactivateTextSelectionMode()
               } else {
                 setIsTextSelectionMode(true)
               }
@@ -1547,52 +1641,36 @@ export default function ReaderViewPage() {
           >
             <Type className="h-4 w-4" />
           </ReaderToolbarIconButton>
-          <div className="ml-2 flex min-w-[280px] flex-1 items-center gap-2 rounded-lg border border-border/80 bg-background px-2 py-1">
-            <Search className="h-4 w-4 text-muted-foreground" />
-            <Input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              aria-label="Search inside this document"
-                placeholder="Search document"
-                className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-              />
-            <ReaderToolbarIconButton
-              label="Previous match"
-              onClick={() => rotateOccurrence('prev')}
-              disabled={searchOccurrences.length === 0}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-            <ReaderToolbarIconButton
-              label="Next match"
-              onClick={() => rotateOccurrence('next')}
-              disabled={searchOccurrences.length === 0}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-            <span className="min-w-[3.5rem] text-right text-xs text-muted-foreground">
-              {searchOccurrences.length === 0 ? '0 results' : `${activeOccurrenceIndex + 1}/${searchOccurrences.length}`}
-            </span>
-          </div>
-          {document.filePath && (
-            <ReaderToolbarIconButton
-              label="Print document"
-              onClick={() => void handlePrintDocument()}
-              disabled={!isDesktopApp || !document.filePath || isPrinting}
-            >
-              {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-            </ReaderToolbarIconButton>
-          )}
-          {document.filePath && (
+          <div className="ml-auto flex items-center gap-2">
+            {document.filePath && (
               <ReaderToolbarIconButton
-               label="Open in window"
+                label="Print document"
+                onClick={() => void handlePrintDocument()}
+                disabled={!isDesktopApp || !document.filePath || isPrinting}
+              >
+                {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              </ReaderToolbarIconButton>
+            )}
+            {document.filePath && (
+              <ReaderToolbarIconButton
+                label="Open in window"
                 onClick={() => void detachReaderWindow()}
                 disabled={!isDesktopApp || !document.filePath}
               >
-              <SquareArrowOutUpRight className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-          )}
-          {document.filePath && (
+                <SquareArrowOutUpRight className="h-4 w-4" />
+              </ReaderToolbarIconButton>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-border/80"
+              onClick={() => router.push(`/documents?id=${document.id}`)}
+            >
+              <FilePenLine className="mr-2 h-4 w-4" />
+              Edit Details
+            </Button>
+          </div>
+          {document.filePath && !hasNativeTextLayer && (
             <Button
               variant="outline"
               size="sm"
@@ -1615,30 +1693,11 @@ export default function ReaderViewPage() {
                   : 'Run OCR'}
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-border/80"
-            onClick={() => router.push(`/documents?id=${document.id}`)}
-          >
-            <FilePenLine className="mr-2 h-4 w-4" />
-            Edit Details
-          </Button>
         </div>
         <div ref={readerViewportRef} className="flex-1 overflow-auto bg-muted/30 p-4">
           {searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && viewerMode === 'pdfjs' && (
                 <div className="mx-auto mb-3 max-w-5xl rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                  Showing page-level matches for this page.
-                </div>
-              )}
-              {isHighlightMode && canUsePreciseViewer && (
-                <div className="mx-auto mb-3 max-w-5xl rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
-                 Drag a box on the page to create one highlight. Right-click an existing highlight to remove it.
-                </div>
-              )}
-              {isSelectingCommentPosition && canUsePreciseViewer && (
-                <div className="mx-auto mb-3 max-w-5xl rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-foreground">
-                 Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} belongs on the page.
                 </div>
               )}
             {canUsePreciseViewer ? (
@@ -1654,6 +1713,8 @@ export default function ReaderViewPage() {
                     handleTransientTextSelectionDismiss()
                   }
                 }}
+                onPointerMoveCapture={handlePlacementCursorMove}
+                onPointerLeave={handlePlacementCursorLeave}
                 onPointerDownCapture={handleTextSelectionGestureStart}
                 onPointerUpCapture={handleTextSelectionGestureEnd}
                 onPointerCancel={handleTextSelectionGestureEnd}
@@ -1833,9 +1894,23 @@ export default function ReaderViewPage() {
                       onPointerUp={handleNotePlacementPointerEnd}
                       onPointerCancel={() => {
                         notePlacementStartRef.current = null
+                        setNotePlacementCursor(null)
                         setCommentDraftAreaRect(null)
                       }}
+                      onPointerLeave={() => {
+                        if (!notePlacementStartRef.current) {
+                          setNotePlacementCursor(null)
+                        }
+                      }}
                     >
+                      {isSelectingCommentPosition && notePlacementCursor && !notePlacementStartRef.current ? (
+                        <div
+                          className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] whitespace-nowrap rounded-full border border-primary/25 bg-background/75 px-3 py-1.5 text-center text-xs font-medium text-foreground/85 shadow-md"
+                          style={getFloatingHintStyle(notePlacementCursor, renderedPageSize, 232)}
+                        >
+                          Click or draw a box to place a note
+                        </div>
+                      ) : null}
                       {isSelectingCommentPosition && commentDraftAreaRect ? (
                         <div
                           className="pointer-events-none absolute rounded-sm bg-yellow-200/35"
@@ -1864,9 +1939,23 @@ export default function ReaderViewPage() {
                       }}
                       onPointerCancel={() => {
                         highlightDragStartRef.current = null
+                        setHighlightPlacementCursor(null)
                         setDraftHighlightRect(null)
                       }}
+                      onPointerLeave={() => {
+                        if (!highlightDragStartRef.current) {
+                          setHighlightPlacementCursor(null)
+                        }
+                      }}
                     >
+                      {isHighlightMode && highlightPlacementCursor && !highlightDragStartRef.current ? (
+                        <div
+                          className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] whitespace-nowrap rounded-full border border-primary/25 bg-background/75 px-3 py-1.5 text-center text-xs font-medium text-foreground/85 shadow-md"
+                          style={getFloatingHintStyle(highlightPlacementCursor, renderedPageSize, 168)}
+                        >
+                          Draw a box to highlight
+                        </div>
+                      ) : null}
                       {currentPageAreaHighlights.map((highlight) => (
                         <button
                           key={highlight.id}
@@ -1947,14 +2036,16 @@ export default function ReaderViewPage() {
                   <Button size="sm" onClick={() => void importPdfForDocument()}>
                     Import PDF...
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void runOcrForDocument()}
-                    disabled={!document.filePath || isRunningOcr || document.ocrStatus === 'processing'}
-                  >
-                    {isRunningOcr || document.ocrStatus === 'processing' ? 'Running OCR...' : 'Run OCR'}
-                  </Button>
+                  {!hasNativeTextLayer ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void runOcrForDocument()}
+                      disabled={!document.filePath || isRunningOcr || document.ocrStatus === 'processing'}
+                    >
+                      {isRunningOcr || document.ocrStatus === 'processing' ? 'Running OCR...' : 'Run OCR'}
+                    </Button>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -1966,17 +2057,43 @@ export default function ReaderViewPage() {
       <ResizablePanel defaultSize={26} minSize={18} maxSize={45}>
         <div className="flex h-full flex-col border-l">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-            <div className="space-y-2 rounded-lg border p-3">
+          <div className="space-y-2 rounded-lg border p-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Search className="h-4 w-4" />
              Search
             </div>
           <div className="space-y-2">
             <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Keyword or phrase" />
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{searchOccurrences.length} occurrence{searchOccurrences.length === 1 ? '' : 's'}</span>
-              {searchOccurrences.length > 0 && <span>Selected {activeOccurrenceIndex + 1}</span>}
-            </div>
+            {searchQuery.trim() ? (
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{searchOccurrences.length} occurrence{searchOccurrences.length === 1 ? '' : 's'}</span>
+                {searchOccurrences.length > 0 && <span>Selected {activeOccurrenceIndex + 1}</span>}
+              </div>
+            ) : null}
+            {searchQuery.trim() ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => rotateOccurrence('prev')}
+                  disabled={searchOccurrences.length === 0}
+                >
+                  <ChevronLeft className="mr-2 h-4 w-4" />
+                  Previous
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => rotateOccurrence('next')}
+                  disabled={searchOccurrences.length === 0}
+                >
+                  Next
+                  <ChevronRight className="ml-2 h-4 w-4" />
+                </Button>
+              </div>
+            ) : null}
             {searchOccurrences.length > 0 ? (
               <div className="max-h-72 space-y-2 overflow-auto pr-1">
                 {searchOccurrences.map((occurrence, index) => (
@@ -2014,11 +2131,7 @@ export default function ReaderViewPage() {
               <div className="rounded-md bg-muted/50 p-2 text-sm text-muted-foreground">
                 No matches found for this keyword.
               </div>
-            ) : (
-              <div className="rounded-md bg-muted/50 p-2 text-sm text-muted-foreground">
-                {extractSearchPreview(document, document.title, 80)}
-              </div>
-            )}
+            ) : null}
           </div>
           </div>
 
@@ -2039,12 +2152,6 @@ export default function ReaderViewPage() {
               ) : null
               }
             </div>
-
-              {isSelectingCommentPosition ? (
-                <div className="rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-sm text-foreground">
-                 Select where {selectedComment ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) : buildDocumentCommentTitle(nextCommentNumber)} belongs on the page.
-                </div>
-              ) : null}
 
             {isNoteEditorOpen ? (
               <div className="rounded-lg border p-3">

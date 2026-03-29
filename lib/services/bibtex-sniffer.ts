@@ -1,6 +1,7 @@
 'use client'
 
 import { readFile } from '@tauri-apps/plugin-fs'
+import type { SuggestedTag } from '@/lib/types'
 
 export type SniffedPdfMetadata = {
   title?: string
@@ -9,14 +10,17 @@ export type SniffedPdfMetadata = {
   doi?: string
   citationKey?: string
   bibtex?: string
-  source?: 'offline' | 'crossref' | 'semantic_scholar'
+  abstract?: string
+  suggestedTags?: SuggestedTag[]
+  citationCount?: number
+  source?: 'offline' | 'crossref' | 'semantic_scholar' | 'openalex'
 }
 
 export type OnlineMetadataMatchStrategy = 'doi' | 'title'
 
 export type OnlineMetadataMatch = SniffedPdfMetadata & {
   matchedBy: OnlineMetadataMatchStrategy
-  source: 'crossref' | 'semantic_scholar'
+  source: 'crossref' | 'semantic_scholar' | 'openalex'
 }
 
 export type CrossrefLookupConfig = {
@@ -49,9 +53,37 @@ type SemanticScholarPaper = {
   title?: string
   year?: number
   authors?: SemanticScholarAuthor[]
+  abstract?: string
+  citationCount?: number
+  fieldsOfStudy?: string[]
   externalIds?: {
     DOI?: string
   }
+  tldr?: {
+    text?: string
+  }
+}
+
+type OpenAlexAuthor = {
+  author?: {
+    display_name?: string
+  }
+}
+
+type OpenAlexWork = {
+  title?: string
+  publication_year?: number
+  authorships?: OpenAlexAuthor[]
+  doi?: string
+  abstract_inverted_index?: Record<string, number[]>
+  cited_by_count?: number
+  keywords?: Array<{ display_name?: string; score?: number }>
+  topics?: Array<{ display_name?: string; score?: number }>
+  concepts?: Array<{ display_name?: string; score?: number }>
+}
+
+type OpenAlexWorksResponse = {
+  results?: OpenAlexWork[]
 }
 
 function cleanPdfField(value: string) {
@@ -128,6 +160,83 @@ function parseSemanticScholarAuthors(paper: SemanticScholarPaper) {
     .filter(Boolean)
 }
 
+function parseOpenAlexAuthors(work: OpenAlexWork) {
+  return (work.authorships ?? [])
+    .map((entry) => entry.author?.display_name?.trim() ?? '')
+    .filter(Boolean)
+}
+
+function normalizeSuggestedTagName(input?: string) {
+  if (!input) return ''
+  return input
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function uniqueSuggestedTags(tags: SuggestedTag[]) {
+  const seen = new Set<string>()
+  return tags.filter((tag) => {
+    const normalized = normalizeSuggestedTagName(tag.name)
+    if (!normalized || seen.has(normalized)) return false
+    seen.add(normalized)
+    return true
+  })
+}
+
+function parseSemanticScholarSuggestedTags(paper: SemanticScholarPaper): SuggestedTag[] {
+  const fields = (paper.fieldsOfStudy ?? [])
+    .map((entry) => normalizeSuggestedTagName(entry))
+    .filter(Boolean)
+
+  return uniqueSuggestedTags(
+    fields.slice(0, 8).map((name) => ({
+      name,
+      confidence: 0.7,
+    })),
+  )
+}
+
+function reconstructOpenAlexAbstract(work: OpenAlexWork) {
+  const index = work.abstract_inverted_index
+  if (!index) return undefined
+
+  const positionedWords: string[] = []
+  for (const [word, positions] of Object.entries(index)) {
+    for (const position of positions) {
+      positionedWords[position] = word
+    }
+  }
+
+  const abstract = positionedWords.filter(Boolean).join(' ').trim()
+  return abstract || undefined
+}
+
+function parseOpenAlexSuggestedTags(work: OpenAlexWork): SuggestedTag[] {
+  const fromKeywords = (work.keywords ?? []).map((entry) => ({
+    name: normalizeSuggestedTagName(entry.display_name),
+    confidence: typeof entry.score === 'number' ? Math.max(0.4, Math.min(0.95, entry.score)) : 0.75,
+  }))
+
+  const fromTopics = (work.topics ?? []).map((entry) => ({
+    name: normalizeSuggestedTagName(entry.display_name),
+    confidence: typeof entry.score === 'number' ? Math.max(0.45, Math.min(0.95, entry.score)) : 0.8,
+  }))
+
+  const fromConcepts = (work.concepts ?? []).map((entry) => ({
+    name: normalizeSuggestedTagName(entry.display_name),
+    confidence: typeof entry.score === 'number' ? Math.max(0.35, Math.min(0.9, entry.score)) : 0.65,
+  }))
+
+  return uniqueSuggestedTags(
+    [...fromKeywords, ...fromTopics, ...fromConcepts]
+      .filter((entry) => entry.name.length >= 3)
+      .slice(0, 8),
+  )
+}
+
 async function fetchJsonWithTimeout(
   url: string,
   options?: {
@@ -195,7 +304,7 @@ async function fetchSemanticScholarByDoi(
   doi: string,
   config?: SemanticScholarLookupConfig,
 ): Promise<SemanticScholarPaper | null> {
-  const fields = encodeURIComponent('title,authors,year,externalIds')
+  const fields = encodeURIComponent('title,authors,year,abstract,citationCount,fieldsOfStudy,tldr,externalIds')
   const encoded = encodeURIComponent(`DOI:${doi}`)
   return fetchJsonWithTimeout(
     `https://api.semanticscholar.org/graph/v1/paper/${encoded}?fields=${fields}`,
@@ -206,15 +315,68 @@ async function fetchSemanticScholarByDoi(
 async function fetchSemanticScholarByQuery(
   title: string,
   config?: SemanticScholarLookupConfig,
-): Promise<SemanticScholarPaper | null> {
+): Promise<SemanticScholarPaper[]> {
   const query = encodeURIComponent(title)
-  const fields = encodeURIComponent('title,authors,year,externalIds')
+  const fields = encodeURIComponent('title,authors,year,abstract,citationCount,fieldsOfStudy,tldr,externalIds')
   const result = await fetchJsonWithTimeout(
-    `https://api.semanticscholar.org/graph/v1/paper/search?query=${query}&limit=1&fields=${fields}`,
+    `https://api.semanticscholar.org/graph/v1/paper/search?query=${query}&limit=4&fields=${fields}`,
     { headers: semanticScholarHeaders(config) },
   ) as { data?: SemanticScholarPaper[] } | null
 
-  return result?.data?.[0] ?? null
+  return result?.data?.slice(0, 4) ?? []
+}
+
+async function fetchOpenAlexByDoi(doi: string): Promise<OpenAlexWork | null> {
+  const rawDoi = doi.replace(/^doi:\s*/i, '').trim()
+  const doiVariants = [
+    rawDoi,
+    rawDoi.toLowerCase(),
+    `https://doi.org/${rawDoi}`,
+    `http://doi.org/${rawDoi}`,
+  ]
+
+  for (const variant of doiVariants) {
+    const filter = encodeURIComponent(`doi:${variant}`)
+    const result = await fetchJsonWithTimeout(
+      `https://api.openalex.org/works?filter=${filter}&per-page=1`,
+    ) as OpenAlexWorksResponse | null
+
+    const work = result?.results?.[0] ?? null
+    if (work) return work
+  }
+
+  return null
+}
+
+async function fetchOpenAlexByQuery(title: string, author?: string): Promise<OpenAlexWork[]> {
+  const cleanTitle = title.trim()
+  if (!cleanTitle) return []
+
+  const titleSearch = encodeURIComponent(`title.search:${cleanTitle}`)
+  const titleOnlyResult = await fetchJsonWithTimeout(
+    `https://api.openalex.org/works?filter=${titleSearch}&per-page=4`,
+  ) as OpenAlexWorksResponse | null
+
+  const lowerAuthor = author?.trim().toLowerCase()
+  const titleOnlyMatches = (titleOnlyResult?.results ?? []).filter((work) => {
+    if (!lowerAuthor) return true
+    return parseOpenAlexAuthors(work).some((name) => name.toLowerCase().includes(lowerAuthor))
+  })
+
+  if (titleOnlyMatches.length > 0) return titleOnlyMatches.slice(0, 4)
+
+  const broadQuery = [cleanTitle, author?.trim()].filter(Boolean).join(' ')
+  const search = encodeURIComponent(broadQuery)
+  const result = await fetchJsonWithTimeout(
+    `https://api.openalex.org/works?search=${search}&per-page=4`,
+  ) as OpenAlexWorksResponse | null
+
+  const broadMatches = (result?.results ?? []).filter((work) => {
+    if (!lowerAuthor) return true
+    return parseOpenAlexAuthors(work).some((name) => name.toLowerCase().includes(lowerAuthor))
+  })
+
+  return (broadMatches.length > 0 ? broadMatches : (result?.results ?? [])).slice(0, 4)
 }
 
 function normalizeMetadata(metadata: SniffedPdfMetadata): SniffedPdfMetadata {
@@ -235,18 +397,10 @@ export async function lookupCrossrefMetadata(
   config?: CrossrefLookupConfig,
 ): Promise<OnlineMetadataMatch | null> {
   const base = normalizeMetadata(metadata)
-  let work: CrossrefWork | null = null
-  let matchedBy: OnlineMetadataMatchStrategy | null = null
+  if (!base.doi) return null
 
-  if (base.doi) {
-    work = await fetchCrossrefByDoi(base.doi, config)
-    if (work) matchedBy = 'doi'
-  }
-
-  if (!work && base.title) {
-    work = await fetchCrossrefByQuery(base.title, base.authors?.[0], config)
-    if (work) matchedBy = 'title'
-  }
+  const work = await fetchCrossrefByDoi(base.doi, config)
+  const matchedBy: OnlineMetadataMatchStrategy | null = work ? 'doi' : null
 
   if (!work || !matchedBy) return null
 
@@ -273,37 +427,122 @@ export async function lookupSemanticScholarMetadata(
   metadata: SniffedPdfMetadata,
   config?: SemanticScholarLookupConfig,
 ): Promise<OnlineMetadataMatch | null> {
+  const matches = await lookupSemanticScholarMetadataCandidates(metadata, config)
+  return matches[0] ?? null
+}
+
+export async function lookupSemanticScholarMetadataCandidates(
+  metadata: SniffedPdfMetadata,
+  config?: SemanticScholarLookupConfig,
+): Promise<OnlineMetadataMatch[]> {
   const base = normalizeMetadata(metadata)
-  let paper: SemanticScholarPaper | null = null
-  let matchedBy: OnlineMetadataMatchStrategy | null = null
+  const matches: OnlineMetadataMatch[] = []
 
   if (base.doi) {
-    paper = await fetchSemanticScholarByDoi(base.doi, config)
-    if (paper) matchedBy = 'doi'
+    const paper = await fetchSemanticScholarByDoi(base.doi, config)
+    if (paper) {
+      const authors = parseSemanticScholarAuthors(paper)
+      matches.push({
+        ...normalizeMetadata({
+          ...base,
+          title: paper.title?.trim() || base.title,
+          authors: authors.length ? authors : base.authors,
+          year: paper.year ?? base.year,
+          doi: paper.externalIds?.DOI || base.doi,
+          abstract: paper.abstract?.trim() || paper.tldr?.text?.trim() || base.abstract,
+          suggestedTags: parseSemanticScholarSuggestedTags(paper),
+          citationCount: paper.citationCount,
+          source: 'semantic_scholar',
+        }),
+        matchedBy: 'doi',
+        source: 'semantic_scholar',
+      })
+    }
   }
 
-  if (!paper && base.title) {
-    paper = await fetchSemanticScholarByQuery(base.title, config)
-    if (paper) matchedBy = 'title'
+  if (matches.length === 0 && base.title) {
+    const papers = await fetchSemanticScholarByQuery(base.title, config)
+    for (const paper of papers.slice(0, 4)) {
+      const authors = parseSemanticScholarAuthors(paper)
+      matches.push({
+        ...normalizeMetadata({
+          ...base,
+          title: paper.title?.trim() || base.title,
+          authors: authors.length ? authors : base.authors,
+          year: paper.year ?? base.year,
+          doi: paper.externalIds?.DOI || base.doi,
+          abstract: paper.abstract?.trim() || paper.tldr?.text?.trim() || base.abstract,
+          suggestedTags: parseSemanticScholarSuggestedTags(paper),
+          citationCount: paper.citationCount,
+          source: 'semantic_scholar',
+        }),
+        matchedBy: 'title',
+        source: 'semantic_scholar',
+      })
+    }
   }
 
-  if (!paper || !matchedBy) return null
+  return matches
+}
 
-  const authors = parseSemanticScholarAuthors(paper)
-  const doi = paper.externalIds?.DOI || base.doi
+export async function lookupOpenAlexMetadata(
+  metadata: SniffedPdfMetadata,
+): Promise<OnlineMetadataMatch | null> {
+  const matches = await lookupOpenAlexMetadataCandidates(metadata)
+  return matches[0] ?? null
+}
 
-  return {
-    ...normalizeMetadata({
-      ...base,
-      title: paper.title?.trim() || base.title,
-      authors: authors.length ? authors : base.authors,
-      year: paper.year ?? base.year,
-      doi,
-      source: 'semantic_scholar',
-    }),
-    matchedBy,
-    source: 'semantic_scholar',
+export async function lookupOpenAlexMetadataCandidates(
+  metadata: SniffedPdfMetadata,
+): Promise<OnlineMetadataMatch[]> {
+  const base = normalizeMetadata(metadata)
+  const matches: OnlineMetadataMatch[] = []
+
+  if (base.doi) {
+    const work = await fetchOpenAlexByDoi(base.doi)
+    if (work) {
+      const authors = parseOpenAlexAuthors(work)
+      matches.push({
+        ...normalizeMetadata({
+          ...base,
+          title: work.title?.trim() || base.title,
+          authors: authors.length ? authors : base.authors,
+          year: work.publication_year ?? base.year,
+          doi: work.doi || base.doi,
+          abstract: reconstructOpenAlexAbstract(work) || base.abstract,
+          suggestedTags: parseOpenAlexSuggestedTags(work),
+          citationCount: work.cited_by_count,
+          source: 'openalex',
+        }),
+        matchedBy: 'doi',
+        source: 'openalex',
+      })
+    }
   }
+
+  if (matches.length === 0 && base.title) {
+    const works = await fetchOpenAlexByQuery(base.title, base.authors?.[0])
+    for (const work of works.slice(0, 4)) {
+      const authors = parseOpenAlexAuthors(work)
+      matches.push({
+        ...normalizeMetadata({
+          ...base,
+          title: work.title?.trim() || base.title,
+          authors: authors.length ? authors : base.authors,
+          year: work.publication_year ?? base.year,
+          doi: work.doi || base.doi,
+          abstract: reconstructOpenAlexAbstract(work) || base.abstract,
+          suggestedTags: parseOpenAlexSuggestedTags(work),
+          citationCount: work.cited_by_count,
+          source: 'openalex',
+        }),
+        matchedBy: 'title',
+        source: 'openalex',
+      })
+    }
+  }
+
+  return matches
 }
 
 export async function enrichWithCrossrefMetadata(

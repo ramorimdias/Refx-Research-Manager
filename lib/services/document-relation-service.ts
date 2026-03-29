@@ -18,6 +18,8 @@ export type DocumentGraphNodeData = {
   isSearchMatch?: boolean
   isSelected?: boolean
   isDimmed?: boolean
+  isConnectedToSelectedDocument?: boolean
+  connectionDirection?: 'incoming' | 'outgoing' | null
 }
 
 const GRID_COLUMNS = 4
@@ -90,6 +92,11 @@ export function buildDocumentGraphEdges(
     const isRejected = relation.relationStatus === 'rejected'
     const isConnectedToSelectedDocument = selectedDocumentId != null
       && (relation.sourceDocumentId === selectedDocumentId || relation.targetDocumentId === selectedDocumentId)
+    const connectionDirection = !isConnectedToSelectedDocument
+      ? null
+      : relation.sourceDocumentId === selectedDocumentId
+        ? 'outgoing'
+        : 'incoming'
     const isSelected = relation.id === selectedRelationId
     const isHovered = relation.id === hoveredRelationId
     const semanticColor = relation.linkType === 'supports'
@@ -113,13 +120,14 @@ export function buildDocumentGraphEdges(
             ? '#94a3b8'
             : '#0f766e'
     const selectedColor = '#f59e0b'
-    const connectedNodeColor = '#f59e0b'
-    const hoveredColor = '#0ea5e9'
+    const connectedNodeColor = connectionDirection === 'outgoing'
+      ? '#2563eb'
+      : connectionDirection === 'incoming'
+        ? '#dc2626'
+        : '#f59e0b'
     const strokeColor = isSelected
       ? selectedColor
-      : isHovered
-        ? hoveredColor
-        : isConnectedToSelectedDocument
+      : isConnectedToSelectedDocument
         ? connectedNodeColor
         : baseColor
 
@@ -131,27 +139,22 @@ export function buildDocumentGraphEdges(
       targetHandle: 'center-target',
       type: 'relationship',
       animated: false,
-      markerStart: isSelected ? {
-        type: MarkerType.Arrow,
-        width: 14,
-        height: 14,
-        color: strokeColor,
-      } : undefined,
-      markerEnd: {
+      markerStart: {
         type: MarkerType.ArrowClosed,
-        width: isSelected ? 28 : isConnectedToSelectedDocument ? 22 : 18,
-        height: isSelected ? 28 : isConnectedToSelectedDocument ? 22 : 18,
+        width: isSelected ? 30 : isConnectedToSelectedDocument ? 24 : 18,
+        height: isSelected ? 30 : isConnectedToSelectedDocument ? 24 : 18,
         color: strokeColor,
       },
+      markerEnd: undefined,
       label: relation.linkType !== 'manual'
         ? relation.label ?? relation.linkType.replace('_', ' ')
         : relation.label,
       style: {
         stroke: strokeColor,
         strokeWidth: isSelected
-          ? 4.5
-          : isHovered || isConnectedToSelectedDocument
-            ? 3.2
+          ? 6
+          : isConnectedToSelectedDocument
+            ? 5.8
             : isProposed
               ? 2.6
               : isCitation
@@ -169,19 +172,21 @@ export function buildDocumentGraphEdges(
                 ? '6 4'
                 : undefined,
         filter: isSelected || isConnectedToSelectedDocument
-          ? `drop-shadow(0 0 8px ${
+          ? `drop-shadow(0 0 10px ${
             isConnectedToSelectedDocument && !isSelected
-              ? 'rgba(245, 158, 11, 0.35)'
+              ? connectionDirection === 'outgoing'
+                ? 'rgba(37, 99, 235, 0.48)'
+                : connectionDirection === 'incoming'
+                  ? 'rgba(220, 38, 38, 0.44)'
+                  : 'rgba(245, 158, 11, 0.35)'
               : isProposed
               ? 'rgba(217, 119, 6, 0.32)'
               : isCitation
                 ? 'rgba(109, 40, 217, 0.32)'
                 : 'rgba(15, 118, 110, 0.35)'
           })`
-          : isHovered
-            ? 'drop-shadow(0 0 8px rgba(14, 165, 233, 0.32))'
           : undefined,
-        opacity: isConnectedToSelectedDocument && !isSelected && !isHovered ? 0.95 : 1,
+        opacity: isConnectedToSelectedDocument && !isSelected ? 0.95 : 1,
       },
       labelStyle: {
         fill: isSelected ? '#0f172a' : '#334155',
@@ -198,13 +203,16 @@ export function buildDocumentGraphEdges(
         ...relation,
         isHovered,
         isConnectedToSelectedDocument,
+        connectionDirection,
       },
     }
   })
 }
 
 export function getDocumentOpenHref(document: Document) {
-  return document.documentType === 'physical_book'
+  return document.documentType === 'my_work'
+    ? `/documents?id=${document.id}`
+    : document.documentType === 'physical_book'
     ? `/books/notes?id=${document.id}`
     : `/reader/view?id=${document.id}`
 }

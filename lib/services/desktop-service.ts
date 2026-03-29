@@ -5,6 +5,17 @@ import { loadAppSettings } from '@/lib/app-settings'
 import * as repo from '@/lib/repositories/local-db'
 import { ingestImportedPdfDocument } from '@/lib/services/document-ingestion-service'
 import { normalizeErrorMessage } from '@/lib/utils/error'
+import type { DocumentProcessingStageState } from '@/lib/types'
+
+export type ImportProgressUpdate = {
+  current: number
+  total: number
+  currentFile: string
+  stage?: DocumentProcessingStageState['stage']
+  status?: DocumentProcessingStageState['status']
+  detail?: string
+  error?: string
+}
 
 export async function bootstrapDesktop() {
   await repo.initializeDatabase()
@@ -12,7 +23,11 @@ export async function bootstrapDesktop() {
   return libraries
 }
 
-export async function importPdfs(libraryId: string, sourcePaths?: string[]) {
+export async function importPdfs(
+  libraryId: string,
+  sourcePaths?: string[],
+  onProgress?: (update: ImportProgressUpdate) => void,
+) {
   const selected =
     sourcePaths && sourcePaths.length > 0
       ? sourcePaths
@@ -27,7 +42,14 @@ export async function importPdfs(libraryId: string, sourcePaths?: string[]) {
   const settings = await loadAppSettings(true)
 
   const imported: repo.DbDocument[] = []
-  for (const src of files) {
+  for (const [index, src] of files.entries()) {
+    onProgress?.({
+      current: index + 1,
+      total: files.length,
+      currentFile: src,
+      detail: 'Starting import...',
+    })
+
     const result = await ingestImportedPdfDocument(
       { libraryId, sourcePath: src },
       {
@@ -35,6 +57,17 @@ export async function importPdfs(libraryId: string, sourcePaths?: string[]) {
         enableOnlineMetadataEnrichment: settings.autoOnlineMetadataEnrichment,
         enableSemanticClassification: settings.advancedClassificationMode !== 'off',
         semanticClassificationMode: settings.advancedClassificationMode,
+        onStageUpdate: (stage) => {
+          onProgress?.({
+            current: index + 1,
+            total: files.length,
+            currentFile: src,
+            stage: stage.stage,
+            status: stage.status,
+            detail: stage.detail,
+            error: stage.error,
+          })
+        },
       },
     ).catch((error) => ({
       document: null,
@@ -56,6 +89,15 @@ export async function importPdfs(libraryId: string, sourcePaths?: string[]) {
     if (result.document) {
       imported.push(result.document)
     }
+
+    onProgress?.({
+      current: index + 1,
+      total: files.length,
+      currentFile: src,
+      detail: result.success ? 'Import complete.' : importError ?? 'Import failed.',
+      status: result.success ? 'completed' : 'failed',
+      error: result.success ? undefined : importError,
+    })
   }
 
   return imported

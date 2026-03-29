@@ -11,6 +11,7 @@ import {
   FileText,
   StickyNote,
   GitBranch,
+  CloudDownload,
   BarChart3,
   ChevronLeft,
   ChevronRight,
@@ -41,6 +42,7 @@ const mainNavItems = [
   { href: '/references', label: 'References', icon: FileText },
   { href: '/notes', label: 'Notes', icon: StickyNote },
   { href: '/maps', label: 'Maps', icon: GitBranch },
+  { href: '/metadata', label: 'Metadata', icon: CloudDownload },
   { href: '/reports', label: 'Reports', icon: BarChart3 },
 ]
 

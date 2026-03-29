@@ -278,12 +278,18 @@ export default function NotesPage() {
                 <Button asChild variant="outline">
                   <Link
                     href={
-                      selectedDocument.documentType === 'physical_book'
+                      selectedDocument.documentType === 'my_work'
+                        ? `/documents?id=${selectedDocument.id}`
+                        : selectedDocument.documentType === 'physical_book'
                         ? `/books/notes?id=${selectedDocument.id}`
                         : `/reader/view?id=${selectedDocument.id}&page=${selectedNote.pageNumber}`
                     }
                   >
-                    {selectedDocument.documentType === 'physical_book' ? 'Open Book Notes' : 'Open In Reader'}
+                    {selectedDocument.documentType === 'physical_book'
+                      ? 'Open Book Notes'
+                      : selectedDocument.documentType === 'my_work'
+                        ? 'Open Details'
+                        : 'Open In Reader'}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>

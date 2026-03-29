@@ -2,6 +2,8 @@
 
 import * as repo from '@/lib/repositories/local-db'
 
+const ENV_SEMANTIC_SCHOLAR_API_KEY = process.env.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY ?? ''
+
 export type StoredAppSettings = {
   userName: string
   skipNamePrompt: boolean
@@ -44,7 +46,7 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   autoOnlineMetadataEnrichment: false,
   advancedClassificationMode: 'off',
   crossrefContactEmail: '',
-  semanticScholarApiKey: '',
+  semanticScholarApiKey: ENV_SEMANTIC_SCHOLAR_API_KEY,
 }
 
 export function getBaseThemeMode(theme: StoredAppSettings['theme']): 'light' | 'dark' | 'system' {
@@ -105,14 +107,21 @@ function parseValue<T>(value: string | undefined, fallback: T): T {
   }
 }
 
+function resolveSemanticScholarApiKey(value: string | undefined): string {
+  const parsed = parseValue(value, '').trim()
+  return parsed || ENV_SEMANTIC_SCHOLAR_API_KEY
+}
+
 export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppSettings> {
   if (!isDesktopApp) {
     if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
     if (!raw) return DEFAULT_APP_SETTINGS
+    const parsed = parseValue<Partial<StoredAppSettings>>(raw, {})
     return {
       ...DEFAULT_APP_SETTINGS,
-      ...parseValue<Partial<StoredAppSettings>>(raw, {}),
+      ...parsed,
+      semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() || ENV_SEMANTIC_SCHOLAR_API_KEY,
     }
   }
 
@@ -138,7 +147,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       DEFAULT_APP_SETTINGS.advancedClassificationMode,
     ),
     crossrefContactEmail: parseValue(stored.crossrefContactEmail, DEFAULT_APP_SETTINGS.crossrefContactEmail),
-    semanticScholarApiKey: parseValue(stored.semanticScholarApiKey, DEFAULT_APP_SETTINGS.semanticScholarApiKey),
+    semanticScholarApiKey: resolveSemanticScholarApiKey(stored.semanticScholarApiKey),
   }
 }
 

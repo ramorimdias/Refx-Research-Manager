@@ -1,8 +1,9 @@
 'use client'
 
 import { readFile } from '@tauri-apps/plugin-fs'
+import { extractPdfPageLines } from '@/lib/services/document-processing'
 import type { DbDocument, DbUpdateDocumentMetadataInput } from '@/lib/repositories/local-db'
-import { extractPdfPageWords } from '@/lib/services/document-processing'
+import { getDocumentSuggestedTags, serializeSuggestedTags } from '@/lib/services/document-tag-suggestion-service'
 import type {
   DocumentMetadataProvenance,
   DocumentMetadataProvenanceEntry,
@@ -10,6 +11,7 @@ import type {
   EditableMetadataField,
   MetadataFieldSource,
   MetadataStatus,
+  SuggestedTag,
 } from '@/lib/types'
 
 export type LocalPdfMetadata = {
@@ -19,8 +21,13 @@ export type LocalPdfMetadata = {
   doi?: string
   pageCount?: number
   citationKey?: string
+  abstract?: string
+  suggestedTags?: SuggestedTag[]
+  citationCount?: number
   provenance: DocumentMetadataProvenance
 }
+
+type MetadataMergeMode = 'fill_missing' | 'replace_unlocked'
 
 type RawPdfMetadataSignals = {
   rawText: string
@@ -30,19 +37,12 @@ type RawPdfMetadataSignals = {
   doi?: string
 }
 
-const TITLE_STOP_WORDS = new Set([
-  'abstract',
-  'introduction',
-  'keywords',
-  'contents',
-  'appendix',
-  'references',
-  'arxiv',
-  'preprint',
-  'proceedings',
-])
-
-const COMMON_UPPERCASE_WORDS = new Set(['and', 'for', 'the', 'with', 'from', 'into', 'using', 'via', 'toward', 'towards'])
+type FirstPageMetadataSignals = {
+  title?: string
+  authors?: string[]
+  doi?: string
+  pageCount?: number
+}
 
 function normalizeWhitespace(input: string) {
   return input.replace(/\s+/g, ' ').trim()
@@ -93,98 +93,87 @@ function citationKeyFor(title: string, authors: string[], year?: number) {
   return `${firstAuthorToken}${year ?? 'nd'}${titleToken}`
 }
 
-function authorLooksValid(name: string) {
-  if (!name) return false
-  if (/\d/.test(name)) return false
-  const words = name.split(/\s+/).filter(Boolean)
-  if (words.length < 2 || words.length > 5) return false
-  return words.every((word) => /^[A-Z][A-Za-z.'-]+$/.test(word) || /^[A-Z]\.$/.test(word))
-}
-
-function parseAuthorLine(line: string) {
-  const cleaned = normalizeWhitespace(
-    line
-      .replace(/\b(authors?|by)\b[:\s-]*/gi, '')
-      .replace(/\b(and|&)\b/g, ','),
-  )
-  const authors = cleaned
-    .split(',')
-    .map((part) => normalizeWhitespace(part))
-    .filter(authorLooksValid)
-
-  return authors.length > 0 ? authors : []
-}
-
-function titleCaseUpperLine(line: string) {
-  const words = line.split(/\s+/).filter(Boolean)
-  if (words.length === 0) return line
-  return words
-    .map((word) => {
-      if (COMMON_UPPERCASE_WORDS.has(word.toLowerCase())) return word.toLowerCase()
-      if (/^[A-Z0-9-]{2,}$/.test(word)) {
-        return word.charAt(0) + word.slice(1).toLowerCase()
-      }
-      return word
-    })
-    .join(' ')
-}
-
-function scoreTitleCandidate(line: string, index: number) {
-  const normalized = normalizeWhitespace(line)
-  if (!normalized) return Number.NEGATIVE_INFINITY
-  const lowered = normalized.toLowerCase()
-  if (TITLE_STOP_WORDS.has(lowered)) return Number.NEGATIVE_INFINITY
-  if (lowered.startsWith('doi')) return Number.NEGATIVE_INFINITY
-  if (normalized.length < 12 || normalized.length > 220) return Number.NEGATIVE_INFINITY
-
-  const words = normalized.split(/\s+/).filter(Boolean)
-  if (words.length < 3 || words.length > 24) return Number.NEGATIVE_INFINITY
-
-  let score = 120 - index * 8
-  if (!/[.?!:]$/.test(normalized)) score += 8
-  if (!/\d{4}/.test(normalized)) score += 4
-  if (!/@/.test(normalized)) score += 4
-  if (/^[A-Z0-9\s\-:]+$/.test(normalized)) score -= 6
-  if (words.some((word) => word.length > 28)) score -= 12
-  if (words.filter((word) => /^[A-Z]/.test(word)).length >= Math.max(2, Math.floor(words.length / 3))) score += 10
-  if (/^(a|an|the)\b/i.test(normalized)) score += 3
-  return score
-}
-
 function normalizeExtractedTitle(title?: string) {
   if (!title) return undefined
   const cleaned = normalizeWhitespace(title.replace(/^title[:\s-]*/i, ''))
   if (!cleaned) return undefined
-  return /^[A-Z0-9\s\-:]+$/.test(cleaned) ? titleCaseUpperLine(cleaned) : cleaned
+  return cleaned
 }
 
-function groupPageLines(words: Awaited<ReturnType<typeof extractPdfPageWords>>[number]['words']) {
-  const sorted = [...words]
-    .filter((word) => normalizeWhitespace(word.text))
-    .sort((left, right) => {
-      const topDiff = left.top - right.top
-      if (Math.abs(topDiff) > 4) return topDiff
-      return left.left - right.left
-    })
+function looksLikeStopLine(line: string) {
+  return /\b(abstract|summary|keywords|index terms|introduction|resumo|sum[aá]rio)\b/i.test(line)
+}
 
-  const lines: Array<{ top: number; text: string }> = []
-  for (const word of sorted) {
-    const text = normalizeWhitespace(word.text)
-    if (!text) continue
+function looksLikeAuthorToken(token: string) {
+  const normalized = token.trim()
+  if (!normalized || normalized.length < 3 || /\d/.test(normalized)) return false
+  if (/@|https?:\/\//i.test(normalized)) return false
+  const words = normalized.split(/\s+/).filter(Boolean)
+  if (words.length < 2 || words.length > 5) return false
+  return words.every((word) => /^[A-ZÀ-ÖØ-Ý][a-zà-öø-ÿ.'-]*$|^[A-ZÀ-ÖØ-Ý]\.?$/u.test(word))
+}
 
-    const current = lines[lines.length - 1]
-    if (!current || Math.abs(current.top - word.top) > 5) {
-      lines.push({ top: word.top, text })
-      continue
-    }
+function parseAuthorsFromLine(line: string) {
+  const cleaned = line
+    .replace(/\b(and|e)\b/gi, ',')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
 
-    const separator = /[-/]/.test(current.text.slice(-1)) ? '' : ' '
-    current.text = `${current.text}${separator}${text}`.trim()
+  const candidates = cleaned
+    .split(/,|;|•/)
+    .map((entry) => normalizeWhitespace(entry.replace(/\d+/g, '').replace(/[*†‡]/g, '')))
+    .filter(Boolean)
+
+  if (candidates.length === 0 || candidates.length > 8) return []
+  if (!candidates.every(looksLikeAuthorToken)) return []
+  return candidates
+}
+
+function extractFirstPageMetadata(lines: string[], pageText: string): FirstPageMetadataSignals {
+  const cleanedLines = lines
+    .map((line) => normalizeWhitespace(line))
+    .filter((line) => line.length >= 3)
+    .slice(0, 14)
+
+  const visibleLines: string[] = []
+  for (const line of cleanedLines) {
+    if (looksLikeStopLine(line)) break
+    visibleLines.push(line)
   }
 
-  return lines
-    .map((line) => normalizeWhitespace(line.text))
-    .filter((line) => line.length > 0)
+  let title: string | undefined
+  let authors: string[] = []
+
+  for (let index = 0; index < visibleLines.length; index += 1) {
+    const line = visibleLines[index]
+    if (!line || /^doi\b/i.test(line) || /@/.test(line)) continue
+    const parsedAuthors = parseAuthorsFromLine(line)
+    if (parsedAuthors.length > 0) {
+      authors = parsedAuthors
+      break
+    }
+
+    if (!title && line.length >= 20 && line.length <= 240 && !/\b(university|journal|vol\.|issue|issn)\b/i.test(line)) {
+      const nextLine = visibleLines[index + 1]
+      const nextIsAuthorLine = nextLine ? parseAuthorsFromLine(nextLine).length > 0 : false
+      title = nextIsAuthorLine && nextLine && line.length < 160
+        ? normalizeExtractedTitle(`${line} ${nextLine}`.replace(/\s+/g, ' '))
+        : normalizeExtractedTitle(line)
+    }
+  }
+
+  if (!authors.length) {
+    const authorLine = visibleLines.find((line) => parseAuthorsFromLine(line).length > 0)
+    if (authorLine) {
+      authors = parseAuthorsFromLine(authorLine)
+    }
+  }
+
+  return {
+    title,
+    authors,
+    doi: parseDoi(pageText),
+  }
 }
 
 async function readRawPdfMetadata(filePath: string): Promise<RawPdfMetadataSignals> {
@@ -202,40 +191,6 @@ async function readRawPdfMetadata(filePath: string): Promise<RawPdfMetadataSigna
     authors: splitAuthors(rawAuthor ? cleanPdfField(rawAuthor) : undefined),
     year: parseYear(rawCreationDate ? cleanPdfField(rawCreationDate) : text),
     doi: parseDoi(text),
-  }
-}
-
-async function extractFirstPageSignals(filePath: string) {
-  const pages = await extractPdfPageWords(filePath)
-  const firstPage = pages[0]
-  const firstPageText = firstPage?.text ?? ''
-  const firstPageLines = firstPage ? groupPageLines(firstPage.words).slice(0, 14) : []
-
-  let title: string | undefined
-  let authors: string[] = []
-
-  const scoredTitle = firstPageLines
-    .map((line, index) => ({ line, index, score: scoreTitleCandidate(line, index) }))
-    .sort((left, right) => right.score - left.score)[0]
-
-  if (scoredTitle && Number.isFinite(scoredTitle.score) && scoredTitle.score > 30) {
-    title = normalizeExtractedTitle(scoredTitle.line)
-    const authorWindow = firstPageLines.slice(scoredTitle.index + 1, scoredTitle.index + 5)
-    for (const line of authorWindow) {
-      const parsed = parseAuthorLine(line)
-      if (parsed.length > 0) {
-        authors = parsed
-        break
-      }
-    }
-  }
-
-  return {
-    authors,
-    doi: parseDoi(firstPageText),
-    pageCount: pages.length,
-    title,
-    year: parseYear(firstPageText),
   }
 }
 
@@ -321,54 +276,67 @@ export function deriveMetadataStatus(input: {
 }
 
 export async function extractLocalPdfMetadata(filePath: string): Promise<LocalPdfMetadata> {
-  const [rawMetadata, firstPageSignals] = await Promise.all([
-    readRawPdfMetadata(filePath),
-    extractFirstPageSignals(filePath),
-  ])
+  const rawMetadata = await readRawPdfMetadata(filePath)
+  let firstPageMetadata: FirstPageMetadataSignals = {}
+
+  try {
+    const pages = await extractPdfPageLines(filePath)
+    const firstPage = pages[0]
+    firstPageMetadata = {
+      ...extractFirstPageMetadata(firstPage?.lines ?? [], firstPage?.text ?? ''),
+      pageCount: pages.length,
+    }
+  } catch (error) {
+    console.info('First-page metadata extraction skipped:', error)
+  }
 
   const fileNameTitle = titleFromFilePath(filePath)
   const provenance: DocumentMetadataProvenance = {}
 
   const title = normalizeExtractedTitle(rawMetadata.title)
-    ?? normalizeExtractedTitle(firstPageSignals.title)
+    ?? firstPageMetadata.title
     ?? fileNameTitle
 
   if (normalizeExtractedTitle(rawMetadata.title)) {
     provenance.title = provenanceEntry('embedded_pdf_metadata', 'Embedded PDF title metadata.', 0.95)
-  } else if (normalizeExtractedTitle(firstPageSignals.title)) {
-    provenance.title = provenanceEntry('first_page_heuristic', 'First-page heading heuristic.', 0.72)
+  } else if (firstPageMetadata.title) {
+    provenance.title = provenanceEntry('first_page_heuristic', 'First-page title heuristic.', 0.82)
   } else if (fileNameTitle) {
     provenance.title = provenanceEntry('filename_fallback', 'Filename fallback.', 0.25)
   }
 
   const authors = rawMetadata.authors && rawMetadata.authors.length > 0
     ? rawMetadata.authors
-    : firstPageSignals.authors
+    : (firstPageMetadata.authors ?? [])
 
   if (authors.length > 0) {
     provenance.authors = provenanceEntry(
       rawMetadata.authors && rawMetadata.authors.length > 0 ? 'embedded_pdf_metadata' : 'first_page_heuristic',
-      rawMetadata.authors && rawMetadata.authors.length > 0 ? 'Embedded PDF author metadata.' : 'First-page author line heuristic.',
-      rawMetadata.authors && rawMetadata.authors.length > 0 ? 0.9 : 0.68,
+      rawMetadata.authors && rawMetadata.authors.length > 0 ? 'Embedded PDF author metadata.' : 'First-page author heuristic.',
+      rawMetadata.authors && rawMetadata.authors.length > 0 ? 0.9 : 0.8,
     )
   }
 
-  const year = rawMetadata.year ?? firstPageSignals.year
+  const year = rawMetadata.year
   if (year) {
     provenance.year = provenanceEntry(
-      rawMetadata.year ? 'embedded_pdf_metadata' : 'first_page_heuristic',
-      rawMetadata.year ? 'Embedded PDF date metadata.' : 'First-page year detection.',
-      rawMetadata.year ? 0.7 : 0.55,
+      'embedded_pdf_metadata',
+      'Embedded PDF date metadata.',
+      0.7,
     )
   }
 
-  const doi = rawMetadata.doi ?? firstPageSignals.doi
+  const doi = rawMetadata.doi ?? firstPageMetadata.doi
   if (doi) {
-    provenance.doi = provenanceEntry('doi_regex', rawMetadata.doi ? 'DOI regex over PDF byte sample.' : 'DOI regex over first-page text.', rawMetadata.doi ? 0.92 : 0.78)
+    provenance.doi = provenanceEntry(
+      'doi_regex',
+      rawMetadata.doi ? 'DOI regex over PDF byte sample.' : 'DOI regex over first-page text.',
+      rawMetadata.doi ? 0.92 : 0.88,
+    )
   }
 
-  if (firstPageSignals.pageCount && firstPageSignals.pageCount > 0) {
-    provenance.pageCount = provenanceEntry('embedded_pdf_metadata', 'Derived from local PDF page enumeration.', 1)
+  if (firstPageMetadata.pageCount) {
+    provenance.pageCount = provenanceEntry('first_page_heuristic', 'Page count derived from PDF page scan.', 1)
   }
 
   const normalizedTitle = title || undefined
@@ -377,50 +345,87 @@ export async function extractLocalPdfMetadata(filePath: string): Promise<LocalPd
     authors,
     year,
     doi,
-    pageCount: firstPageSignals.pageCount,
+    pageCount: firstPageMetadata.pageCount,
     citationKey: normalizedTitle ? citationKeyFor(normalizedTitle, authors, year) : undefined,
     provenance,
   }
 }
 
 export function mergeExtractedMetadataIntoDocument(
-  document: Pick<DbDocument, 'title' | 'authors' | 'year' | 'doi' | 'pageCount' | 'metadataProvenance' | 'metadataUserEditedFields'>,
+  document: Pick<DbDocument, 'title' | 'authors' | 'year' | 'doi' | 'citationKey' | 'pageCount' | 'abstractText' | 'tagSuggestions' | 'metadataProvenance' | 'metadataUserEditedFields'>,
   metadata: LocalPdfMetadata,
+  mode: MetadataMergeMode = 'replace_unlocked',
 ) {
   const userEdited = parseMetadataUserEditedFields(document.metadataUserEditedFields)
   const provenance = parseMetadataProvenance(document.metadataProvenance)
   const currentAuthors = parseAuthorsValue(document.authors)
   const updates: DbUpdateDocumentMetadataInput = {}
 
-  const canWriteField = (field: EditableMetadataField) => !userEdited[field]
+  const canWriteField = (field: EditableMetadataField) => {
+    if (mode === 'replace_unlocked') return true
+    return !userEdited[field]
+  }
+  const canReplaceFieldValue = (field: EditableMetadataField, currentValue: unknown) => {
+    if (!canWriteField(field)) return false
+    if (mode === 'replace_unlocked') return true
+    if (Array.isArray(currentValue)) return currentValue.length === 0
+    if (typeof currentValue === 'string') return currentValue.trim().length === 0
+    return currentValue === undefined || currentValue === null
+  }
 
-  if (metadata.title && canWriteField('title')) {
+  if (metadata.title && canReplaceFieldValue('title', document.title)) {
     updates.title = metadata.title
     if (metadata.provenance.title) provenance.title = metadata.provenance.title
   }
 
-  if (metadata.authors && metadata.authors.length > 0 && canWriteField('authors')) {
+  if (metadata.authors && metadata.authors.length > 0 && canReplaceFieldValue('authors', currentAuthors)) {
     updates.authors = JSON.stringify(metadata.authors)
     if (metadata.provenance.authors) provenance.authors = metadata.provenance.authors
   }
 
-  if (metadata.year && canWriteField('year')) {
+  if (metadata.year && canReplaceFieldValue('year', document.year)) {
     updates.year = metadata.year
     if (metadata.provenance.year) provenance.year = metadata.provenance.year
   }
 
-  if (metadata.doi && canWriteField('doi')) {
+  if (metadata.doi && canReplaceFieldValue('doi', document.doi)) {
     updates.doi = metadata.doi
     if (metadata.provenance.doi) provenance.doi = metadata.provenance.doi
   }
 
-  if (metadata.pageCount && metadata.pageCount > 0) {
+  if (metadata.pageCount && metadata.pageCount > 0 && (mode === 'replace_unlocked' || !document.pageCount)) {
     updates.pageCount = metadata.pageCount
     if (metadata.provenance.pageCount) provenance.pageCount = metadata.provenance.pageCount
   }
 
-  if (metadata.citationKey && canWriteField('title') && canWriteField('authors') && canWriteField('year')) {
+  if (
+    metadata.citationKey
+    && canWriteField('title')
+    && canWriteField('authors')
+    && canWriteField('year')
+    && (mode === 'replace_unlocked' || !document.citationKey)
+  ) {
     updates.citationKey = metadata.citationKey
+  }
+
+  if (metadata.abstract && canReplaceFieldValue('abstract', document.abstractText)) {
+    updates.abstractText = metadata.abstract
+  }
+
+  if (metadata.suggestedTags && metadata.suggestedTags.length > 0) {
+    const existingSuggestedTags = getDocumentSuggestedTags({
+      tagSuggestions: document.tagSuggestions,
+    })
+    const mergedSuggestedTags: SuggestedTag[] = [...existingSuggestedTags]
+
+    for (const tag of metadata.suggestedTags) {
+      if (mergedSuggestedTags.some((entry) => entry.name === tag.name)) continue
+      mergedSuggestedTags.push(tag)
+    }
+
+    if (mergedSuggestedTags.length > 0) {
+      updates.tagSuggestions = serializeSuggestedTags(mergedSuggestedTags.slice(0, 12))
+    }
   }
 
   const effectiveTitle = updates.title ?? document.title

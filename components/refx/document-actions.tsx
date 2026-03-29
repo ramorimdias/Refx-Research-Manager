@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
-import { BookMarked, BookOpen, Copy, Edit, ExternalLink, FolderOpen, MessageSquare, Trash2 } from 'lucide-react'
+import { BookMarked, BookOpen, Copy, Edit, ExternalLink, FileText, FolderOpen, MessageSquare, Trash2 } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -141,13 +141,28 @@ function DocumentActionMenuItems({
 }) {
   const Item = variant === 'dropdown' ? DropdownMenuItem : ContextMenuItem
   const Separator = variant === 'dropdown' ? DropdownMenuSeparator : ContextMenuSeparator
+  const openHref = document.documentType === 'my_work'
+    ? `/documents?id=${document.id}`
+    : document.documentType === 'physical_book'
+      ? `/books/notes?id=${document.id}`
+      : `/reader/view?id=${document.id}`
+  const OpenIcon = document.documentType === 'physical_book'
+    ? BookMarked
+    : document.documentType === 'my_work'
+      ? FileText
+      : BookOpen
+  const openLabel = document.documentType === 'physical_book'
+    ? 'Open Notes'
+    : document.documentType === 'my_work'
+      ? 'Open Details'
+      : 'Open in Reader'
 
   return (
     <>
       <Item asChild>
-        <Link href={document.documentType === 'physical_book' ? `/books/notes?id=${document.id}` : `/reader/view?id=${document.id}`}>
-          {document.documentType === 'physical_book' ? <BookMarked className="mr-2 h-4 w-4" /> : <BookOpen className="mr-2 h-4 w-4" />}
-          {document.documentType === 'physical_book' ? 'Open Notes' : 'Open in Reader'}
+        <Link href={openHref}>
+          <OpenIcon className="mr-2 h-4 w-4" />
+          {openLabel}
         </Link>
       </Item>
       <Item asChild>

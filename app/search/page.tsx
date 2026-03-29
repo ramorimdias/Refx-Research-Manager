@@ -11,15 +11,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState, MetadataStatusBadge, ReadingStageBadge } from '@/components/refx/common'
-import { useDebouncedValue } from '@/lib/hooks/use-debounced-value'
 import { useAppStore } from '@/lib/store'
 import type { KeywordGroup, MetadataStatus, ReadingStage } from '@/lib/types'
-import { searchDocuments, type DocumentSearchPageHit, type DocumentSearchQuery } from '@/lib/services/document-search-service'
+import { searchDocuments, type DocumentSearchPageHit, type DocumentSearchQuery, type SearchProgressUpdate } from '@/lib/services/document-search-service'
 
 type SearchResult = {
   document: ReturnType<typeof useAppStore.getState>['documents'][number]
   matchedQueryTerms: string[] 
   matchedTerms: string[]
+  occurrenceCounts: Record<string, number>
   pageHits: DocumentSearchPageHit[]
   preview: string
   score: number
@@ -37,6 +37,13 @@ function createKeywordGroup(operator: KeywordGroup['operator'] = 'AND', keywords
 
 function normalizeKeywords(keywords: string[]) {
   return Array.from(new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean)))
+}
+
+function parseSimpleSearchTerms(query: string) {
+  const matches = Array.from(query.matchAll(/"([^"]+)"|(\S+)/g))
+  return normalizeKeywords(
+    matches.map((match) => (match[1] ?? match[2] ?? '').trim()),
+  )
 }
 
 function normalizeGroups(groups: KeywordGroup[]) {
@@ -127,6 +134,16 @@ function buildSearchQuery(groups: KeywordGroup[], groupJoinOperator: GroupJoinOp
   }
 }
 
+function buildSimpleSearchQuery(query: string): DocumentSearchQuery | null {
+  const terms = parseSimpleSearchTerms(query)
+  if (terms.length === 0) return null
+  if (terms.length === 1) return terms[0] ?? null
+  return {
+    combineWith: 'AND',
+    queries: terms,
+  }
+}
+
 function highlightText(text: string, keywords: string[]) {
   const normalized = normalizeKeywords(keywords)
   if (normalized.length === 0) return text
@@ -179,8 +196,8 @@ export default function SearchPage() {
   const [isSearching, setIsSearching] = useState(false)
   const [searchedCount, setSearchedCount] = useState(0)
   const [totalToSearch, setTotalToSearch] = useState(0)
+  const [searchStatus, setSearchStatus] = useState('')
   const searchRunId = useRef(0)
-  const debouncedSimpleQuery = useDebouncedValue(simpleQueryInput.trim(), 300)
 
   const selectedLibraryId = persistentSearch.selectedLibraryId
   const readingStage = persistentSearch.readingStage
@@ -190,11 +207,12 @@ export default function SearchPage() {
   const executedGroups = useMemo(() => normalizeGroups(initialGroups), [initialGroups])
   const executedGroupJoinOperator = useMemo(() => initialGroupJoinOperator, [initialGroupJoinOperator])
   const executedSimpleQuery = useMemo(() => initialSimpleQuery.trim(), [initialSimpleQuery])
+  const executedSimpleTerms = useMemo(() => parseSimpleSearchTerms(executedSimpleQuery), [executedSimpleQuery])
   const executedKeywords = useMemo(
     () => queryMode === 'simple'
-      ? normalizeKeywords(executedSimpleQuery.split(/\s+/))
+      ? executedSimpleTerms
       : flattenKeywords(executedGroups),
-    [executedGroups, executedSimpleQuery, queryMode],
+    [executedGroups, executedSimpleTerms, queryMode],
   )
   const executedQueryLabel = useMemo(
     () => queryMode === 'simple' ? executedSimpleQuery : querySummary(executedGroups, executedGroupJoinOperator),
@@ -211,7 +229,7 @@ export default function SearchPage() {
     setGlobalSearchQuery(persistedQuery)
     setPersistentSearch({
       query: persistedQuery,
-      keywords: initialMode === 'simple' ? normalizeKeywords(initialSimpleQuery.split(/\s+/)) : flattenKeywords(initialGroups),
+      keywords: initialMode === 'simple' ? parseSimpleSearchTerms(initialSimpleQuery) : flattenKeywords(initialGroups),
       keywordGroups: initialMode === 'simple' ? [] : normalizeGroups(initialGroups),
       groupJoinOperator: initialMode === 'simple' ? 'AND' : initialGroupJoinOperator,
     })
@@ -230,7 +248,7 @@ export default function SearchPage() {
   const searchableDocumentsById = useMemo(() => new Map(filteredDocuments.map((document) => [document.id, document])), [filteredDocuments])
   const executedSearchQuery = useMemo(() => {
     if (queryMode === 'simple') {
-      return executedSimpleQuery || null
+      return buildSimpleSearchQuery(executedSimpleQuery)
     }
 
     return buildSearchQuery(executedGroups, executedGroupJoinOperator)
@@ -247,7 +265,7 @@ export default function SearchPage() {
     setGlobalSearchQuery(trimmedQuery)
     setPersistentSearch({
       query: trimmedQuery,
-      keywords: normalizeKeywords(trimmedQuery.split(/\s+/)),
+      keywords: parseSimpleSearchTerms(trimmedQuery),
       keywordGroups: [],
       groupJoinOperator: 'AND',
     })
@@ -262,12 +280,6 @@ export default function SearchPage() {
   }
 
   useEffect(() => {
-    if (queryMode !== 'simple') return
-    if (debouncedSimpleQuery === executedSimpleQuery) return
-    applySimpleSearch(debouncedSimpleQuery, 'replace')
-  }, [debouncedSimpleQuery, executedSimpleQuery, queryMode])
-
-  useEffect(() => {
     const runId = ++searchRunId.current
 
     if (!executedSearchQuery) {
@@ -275,6 +287,7 @@ export default function SearchPage() {
       setIsSearching(false)
       setSearchedCount(0)
       setTotalToSearch(0)
+      setSearchStatus('')
       return
     }
 
@@ -285,10 +298,17 @@ export default function SearchPage() {
       setResults([])
       setSearchedCount(0)
       setTotalToSearch(filteredDocuments.length)
+      setSearchStatus('Preparing the local search index…')
       const nextResults = await searchDocuments(executedSearchQuery, {
         documentIds: searchableDocumentIds,
         flexibility,
         limit: Math.max(filteredDocuments.length, 100),
+        onProgress: (progress: SearchProgressUpdate) => {
+          if (cancelled || searchRunId.current !== runId) return
+          setSearchedCount(progress.processed)
+          setTotalToSearch(progress.total)
+          setSearchStatus(progress.detail ?? '')
+        },
       })
 
       if (cancelled || searchRunId.current !== runId) return
@@ -296,11 +316,14 @@ export default function SearchPage() {
       const mappedResults = nextResults.flatMap((result) => {
         const document = searchableDocumentsById.get(result.documentId)
         if (!document) return []
+        const hasOccurrences = Object.values(result.occurrenceCounts ?? {}).some((count) => count > 0)
+        if (!hasOccurrences && result.pageHits.length === 0) return []
 
         return [{
           document,
           matchedQueryTerms: result.matchedQueryTerms,
           matchedTerms: result.matchedTerms,
+          occurrenceCounts: result.occurrenceCounts,
           pageHits: result.pageHits,
           preview: result.snippet ?? '',
           score: result.score,
@@ -309,6 +332,7 @@ export default function SearchPage() {
 
       setResults(mappedResults)
       setSearchedCount(filteredDocuments.length)
+      setSearchStatus(`${mappedResults.length} result${mappedResults.length === 1 ? '' : 's'} ready`)
       setIsSearching(false)
     }
 
@@ -318,6 +342,7 @@ export default function SearchPage() {
       cancelled = true
       if (searchRunId.current === runId) {
         setIsSearching(false)
+        setSearchStatus('')
       }
     }
   }, [executedSearchQuery, filteredDocuments.length, flexibility, searchableDocumentIds, searchableDocumentsById])
@@ -494,23 +519,28 @@ export default function SearchPage() {
                   {queryMode === 'simple' ? (
                     <div className="space-y-3 rounded-xl border p-3">
                       <label className="text-sm font-medium">Quick search</label>
-                      <div className="relative">
-                        <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input
-                          value={simpleQueryInput}
-                          onChange={(event) => setSimpleQueryInput(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault()
-                              submitSearch()
-                            }
-                          }}
-                          className="pl-9"
-                          placeholder="Search the local full-text index"
-                        />
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            value={simpleQueryInput}
+                            onChange={(event) => setSimpleQueryInput(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault()
+                                submitSearch()
+                              }
+                            }}
+                            className="pl-9"
+                            placeholder="Search the local full-text index"
+                          />
+                        </div>
+                        <Button type="button" onClick={submitSearch} disabled={simpleQueryInput.trim().length === 0}>
+                          Search
+                        </Button>
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        Results update automatically after a short pause and come from the local MiniSearch index.
+                        Press Enter or Search to run. Use quotes for exact phrases, like "historia cronicas".
                       </p>
                     </div>
                   ) : null}
@@ -579,7 +609,7 @@ export default function SearchPage() {
                           ))
                         ) : (
                           <p className="text-sm text-muted-foreground">
-                            {`Add one or more keywords. This group matches when ${group.operator === 'AND' ? 'every keyword is found.' : 'any keyword is found.'}`}
+                            {`Add one or more keywords. Each keyword is treated as one phrase, and this group matches when ${group.operator === 'AND' ? 'every keyword phrase is found.' : 'any keyword phrase is found.'}`}
                           </p>
                         )}
                       </div>
@@ -682,6 +712,9 @@ export default function SearchPage() {
                       ? `Searching ${searchedCount}/${totalToSearch || filteredDocuments.length} documents for ${executedQueryLabel}`
                       : `${results.length} result${results.length === 1 ? '' : 's'} for ${executedQueryLabel}`}
                   </p>
+                  {searchStatus ? (
+                    <p className="mt-1 text-sm text-muted-foreground">{searchStatus}</p>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2">
                   {isSearching && (
@@ -707,7 +740,7 @@ export default function SearchPage() {
               <Card>
                 <CardContent className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  Querying the local MiniSearch index and resolving snippets from stored extracted text.
+                  {searchStatus || 'Querying the local MiniSearch index and resolving snippets from stored extracted text.'}
                 </CardContent>
               </Card>
             )}
@@ -720,10 +753,13 @@ export default function SearchPage() {
               />
             )}
 
-            {results.map(({ document, matchedTerms, pageHits, preview, score }) => {
+            {results.map(({ document, matchedTerms, occurrenceCounts, pageHits, preview }) => {
               const library = libraries.find((item) => item.id === document.libraryId)
               const readerKeyword = executedKeywords[0] ?? ''
               const primaryPageHit = pageHits[0]
+              const occurrenceEntries = executedKeywords
+                .map((term) => [term, occurrenceCounts[term] ?? 0] as const)
+                .filter(([, count]) => count > 0)
               const readerHref = `/reader/view?id=${document.id}&query=${encodeURIComponent(readerKeyword)}${
                 primaryPageHit ? `&page=${primaryPageHit.pageNumber}&matchText=${encodeURIComponent(primaryPageHit.matchedText)}&matchStart=${primaryPageHit.positions[0]?.start ?? 0}` : ''
               }&returnTo=search`
@@ -745,9 +781,6 @@ export default function SearchPage() {
                           {library ? ` • ${library.name}` : ''}
                         </p>
                       </div>
-                      <Badge variant="outline" className="shrink-0">
-                        Relevance {score}%
-                      </Badge>
                     </div>
 
                     <div className="flex flex-wrap gap-2">
@@ -763,6 +796,11 @@ export default function SearchPage() {
                           {term}
                         </Badge>
                       ))}
+                      {occurrenceEntries.map(([term, count]) => (
+                        <Badge key={`${document.id}-${term}-count`} variant="outline">
+                          {`${term}: ${count}`}
+                        </Badge>
+                      ))}
                       {primaryPageHit && (
                         <Badge variant="outline">
                           Page {primaryPageHit.pageNumber}
@@ -770,7 +808,9 @@ export default function SearchPage() {
                       )}
                     </div>
 
-                    <p className="text-sm leading-6 text-muted-foreground">{highlightText(preview, executedKeywords)}</p>
+                    {occurrenceEntries.length > 0 && preview.trim().length > 0 ? (
+                      <p className="text-sm leading-6 text-muted-foreground">{highlightText(preview, executedKeywords)}</p>
+                    ) : null}
 
                     <div className="flex flex-wrap items-center gap-2">
                       <Button asChild>

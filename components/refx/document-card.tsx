@@ -20,6 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { convertFileSrc, isTauri } from '@/lib/tauri/client'
 import { cn } from '@/lib/utils'
 import type { Document, DocumentEphemeralUiFlags, ReadingStage } from '@/lib/types'
 import { NewBadge, OcrStatusBadge, ReadingStageBadge, StarRating } from './common'
@@ -73,8 +74,15 @@ function ReadingStageMenu({
 
 export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }: DocumentCardProps) {
   const { toggleFavorite, updateDocument } = useAppStore()
-  const openHref = doc.documentType === 'physical_book' ? `/books/notes?id=${doc.id}` : `/reader/view?id=${doc.id}`
+  const openHref = doc.documentType === 'my_work'
+    ? `/documents?id=${doc.id}`
+    : doc.documentType === 'physical_book'
+      ? `/books/notes?id=${doc.id}`
+      : `/reader/view?id=${doc.id}`
   const Icon = doc.documentType === 'physical_book' ? BookMarked : FileText
+  const coverImageUrl = doc.documentType === 'physical_book' && doc.coverImagePath
+    ? (isTauri() ? convertFileSrc(doc.coverImagePath) : doc.coverImagePath)
+    : ''
 
   if (variant === 'list') {
     return (
@@ -97,9 +105,15 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
             </Button>
 
             <Link href={openHref} className="flex min-w-0 flex-1 items-center gap-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <Icon className="h-5 w-5 text-primary" />
-              </div>
+              {coverImageUrl ? (
+                <div className="h-12 w-10 shrink-0 overflow-hidden rounded-lg border border-border/70 bg-muted">
+                  <img src={coverImageUrl} alt="" className="h-full w-full object-cover" />
+                </div>
+              ) : (
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Icon className="h-5 w-5 text-primary" />
+                </div>
+              )}
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-start gap-2">
@@ -155,9 +169,15 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
       <Card className={cn('group transition-colors hover:border-primary/40 hover:shadow-[0_14px_34px_rgba(15,23,42,0.06)]', ephemeralFlags?.isNewlyAdded && 'border-emerald-300/60 bg-emerald-500/[0.04]')}>
         <CardContent className="p-4">
           <div className="mb-3 flex items-start justify-between">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
-              <Icon className="h-6 w-6 text-primary" />
-            </div>
+            {coverImageUrl ? (
+              <div className="h-16 w-12 overflow-hidden rounded-2xl border border-border/70 bg-muted">
+                <img src={coverImageUrl} alt="" className="h-full w-full object-cover" />
+              </div>
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10">
+                <Icon className="h-6 w-6 text-primary" />
+              </div>
+            )}
             <div className="flex items-center gap-1">
               <Button
                 type="button"

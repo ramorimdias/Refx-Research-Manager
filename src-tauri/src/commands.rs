@@ -1,8 +1,13 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream, UdpSocket};
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Manager};
+use base64::Engine;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -84,6 +89,7 @@ pub struct Document {
     pub last_read_page: Option<i64>,
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
+    pub cover_image_path: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -233,6 +239,7 @@ pub struct CreateDocumentInput {
     pub last_processed_at: Option<String>,
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
+    pub cover_image_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -280,7 +287,42 @@ pub struct UpdateDocumentInput {
     pub last_read_page: Option<i64>,
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
+    pub cover_image_path: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartBookCoverUploadSessionResult {
+    pub token: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BookCoverUploadSessionStatus {
+    pub status: String,
+    pub image_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BookCoverUploadSession {
+    status: String,
+    image_path: Option<String>,
+    expires_at_unix: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PhoneCoverUploadPayload {
+    file_name: String,
+    mime_type: Option<String>,
+    data_base64: String,
+}
+
+static BOOK_COVER_UPLOAD_SESSIONS: OnceLock<Mutex<HashMap<String, BookCoverUploadSession>>> =
+    OnceLock::new();
+static BOOK_COVER_UPLOAD_SERVER: OnceLock<()> = OnceLock::new();
+const BOOK_COVER_UPLOAD_PORT: u16 = 38473;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -423,6 +465,279 @@ fn now_iso() -> String {
 fn db_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
     let base = app.path().app_data_dir().map_err(|_| AppError::PathError)?;
     Ok(base.join("refx.db"))
+}
+
+fn book_cover_upload_sessions(
+) -> &'static Mutex<HashMap<String, BookCoverUploadSession>> {
+    BOOK_COVER_UPLOAD_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn book_covers_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let base = app.path().app_data_dir().map_err(|_| AppError::PathError)?;
+    let path = base.join("thumbnails").join("book-covers");
+    std::fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
+fn normalize_image_extension(file_name: &str, mime_type: Option<&str>) -> &'static str {
+    let lower_name = file_name.to_lowercase();
+    let lower_mime = mime_type.unwrap_or_default().to_lowercase();
+
+    if lower_name.ends_with(".png") || lower_mime == "image/png" {
+        "png"
+    } else if lower_name.ends_with(".webp") || lower_mime == "image/webp" {
+        "webp"
+    } else {
+        "jpg"
+    }
+}
+
+fn detect_local_ip_address() -> Result<String, AppError> {
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    socket.connect("8.8.8.8:80")?;
+    Ok(socket.local_addr()?.ip().to_string())
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status_line: &str,
+    content_type: &str,
+    body: &[u8],
+) -> Result<(), AppError> {
+    let header = format!(
+        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(header.as_bytes())?;
+    stream.write_all(body)?;
+    Ok(())
+}
+
+fn build_phone_cover_upload_page(token: &str) -> String {
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Upload Book Cover</title>
+  <style>
+    body {{ font-family: system-ui, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }}
+    main {{ max-width: 28rem; margin: 0 auto; padding: 2rem 1rem; }}
+    .card {{ background: white; border: 1px solid #e2e8f0; border-radius: 1rem; padding: 1.25rem; box-shadow: 0 10px 30px rgba(15,23,42,.08); }}
+    h1 {{ font-size: 1.1rem; margin: 0 0 .5rem; }}
+    p {{ color: #475569; line-height: 1.5; }}
+    input, button {{ width: 100%; box-sizing: border-box; border-radius: .8rem; font: inherit; }}
+    input {{ padding: .9rem; border: 1px solid #cbd5e1; background: #fff; }}
+    button {{ margin-top: .85rem; padding: .9rem; border: 0; background: #0f766e; color: white; font-weight: 600; }}
+    button[disabled] {{ opacity: .6; }}
+    .status {{ margin-top: .9rem; font-size: .95rem; min-height: 1.4rem; }}
+  </style>
+</head>
+<body>
+  <main>
+    <div class="card">
+      <h1>Upload book cover</h1>
+      <p>Take a photo or choose one from your phone. It will upload directly to your desktop app on this local network.</p>
+      <input id="file" type="file" accept="image/*" capture="environment" />
+      <button id="submit">Upload cover</button>
+      <div class="status" id="status"></div>
+    </div>
+  </main>
+  <script>
+    const fileInput = document.getElementById('file');
+    const button = document.getElementById('submit');
+    const status = document.getElementById('status');
+
+    button.addEventListener('click', async () => {{
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {{
+        status.textContent = 'Choose a photo first.';
+        return;
+      }}
+
+      button.disabled = true;
+      status.textContent = 'Uploading...';
+
+      try {{
+        const dataUrl = await new Promise((resolve, reject) => {{
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error || new Error('Could not read the image.'));
+          reader.readAsDataURL(file);
+        }});
+
+        const base64 = String(dataUrl).split(',')[1] || '';
+        const response = await fetch('/cover-upload/{token}', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{
+            fileName: file.name || 'cover.jpg',
+            mimeType: file.type || 'image/jpeg',
+            dataBase64: base64,
+          }}),
+        }});
+
+        if (!response.ok) {{
+          throw new Error(await response.text() || 'Upload failed.');
+        }}
+
+        status.textContent = 'Cover uploaded. You can go back to the desktop app.';
+      }} catch (error) {{
+        status.textContent = error instanceof Error ? error.message : 'Upload failed.';
+      }} finally {{
+        button.disabled = false;
+      }}
+    }});
+  </script>
+</body>
+</html>"#
+    )
+}
+
+fn handle_book_cover_upload_request(
+    app: &AppHandle,
+    stream: &mut TcpStream,
+    method: &str,
+    path: &str,
+    body: &[u8],
+) -> Result<(), AppError> {
+    let token = path.trim_start_matches("/cover-upload/").trim();
+    if token.is_empty() {
+        return write_http_response(stream, "404 Not Found", "text/plain; charset=utf-8", b"Not found");
+    }
+
+    {
+        let sessions = book_cover_upload_sessions()
+            .lock()
+            .map_err(|_| AppError::Validation("Cover upload session lock failed.".into()))?;
+        let Some(session) = sessions.get(token) else {
+            return write_http_response(stream, "404 Not Found", "text/plain; charset=utf-8", b"Upload session not found.");
+        };
+        if session.expires_at_unix < chrono::Utc::now().timestamp() {
+            return write_http_response(stream, "410 Gone", "text/plain; charset=utf-8", b"Upload session expired.");
+        }
+    }
+
+    match method {
+        "GET" => {
+            let html = build_phone_cover_upload_page(token);
+            write_http_response(stream, "200 OK", "text/html; charset=utf-8", html.as_bytes())
+        }
+        "POST" => {
+            let payload: PhoneCoverUploadPayload = serde_json::from_slice(body)
+                .map_err(|error| AppError::Validation(format!("Invalid upload payload: {error}")))?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(payload.data_base64.as_bytes())
+                .map_err(|error| AppError::Validation(format!("Could not decode uploaded image: {error}")))?;
+            let extension = normalize_image_extension(&payload.file_name, payload.mime_type.as_deref());
+            let cover_path = book_covers_dir(app)?.join(format!("upload-{token}.{extension}"));
+            std::fs::write(&cover_path, bytes)?;
+
+            let mut sessions = book_cover_upload_sessions()
+                .lock()
+                .map_err(|_| AppError::Validation("Cover upload session lock failed.".into()))?;
+            if let Some(session) = sessions.get_mut(token) {
+                session.status = "completed".into();
+                session.image_path = Some(cover_path.to_string_lossy().to_string());
+            }
+
+            write_http_response(stream, "200 OK", "text/plain; charset=utf-8", b"Uploaded")
+        }
+        _ => write_http_response(
+            stream,
+            "405 Method Not Allowed",
+            "text/plain; charset=utf-8",
+            b"Method not allowed",
+        ),
+    }
+}
+
+fn process_book_cover_upload_connection(
+    app: &AppHandle,
+    mut stream: TcpStream,
+) -> Result<(), AppError> {
+    let mut buffer = Vec::new();
+    stream.read_to_end(&mut buffer)?;
+
+    let header_end = buffer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4)
+        .ok_or_else(|| AppError::Validation("Malformed HTTP request.".into()))?;
+
+    let header_text = String::from_utf8_lossy(&buffer[..header_end]);
+    let mut lines = header_text.lines();
+    let request_line = lines
+        .next()
+        .ok_or_else(|| AppError::Validation("Missing HTTP request line.".into()))?;
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .ok_or_else(|| AppError::Validation("Missing HTTP method.".into()))?;
+    let path = request_parts
+        .next()
+        .ok_or_else(|| AppError::Validation("Missing HTTP path.".into()))?;
+    let body = &buffer[header_end..];
+
+    if path == "/" {
+        return write_http_response(
+            &mut stream,
+            "302 Found",
+            "text/plain; charset=utf-8",
+            b"Redirecting",
+        );
+    }
+
+    if path.starts_with("/cover-upload/") {
+        return handle_book_cover_upload_request(app, &mut stream, method, path, body);
+    }
+
+    write_http_response(&mut stream, "404 Not Found", "text/plain; charset=utf-8", b"Not found")
+}
+
+fn ensure_book_cover_upload_server(app: &AppHandle) {
+    let app_handle = app.clone();
+    BOOK_COVER_UPLOAD_SERVER.get_or_init(|| {
+        std::thread::spawn(move || {
+            let listener = match TcpListener::bind(("0.0.0.0", BOOK_COVER_UPLOAD_PORT)) {
+                Ok(listener) => listener,
+                Err(error) => {
+                    eprintln!("Failed to start local book cover upload server: {}", error);
+                    return;
+                }
+            };
+
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(stream) => {
+                        if let Err(error) = process_book_cover_upload_connection(&app_handle, stream) {
+                            eprintln!("Book cover upload request failed: {}", error);
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Book cover upload connection failed: {}", error);
+                    }
+                }
+            }
+        });
+    });
+}
+
+fn import_book_cover_file(app: &AppHandle, source_path: &str) -> Result<String, AppError> {
+    let source = PathBuf::from(source_path);
+    if !source.exists() {
+        return Err(AppError::Validation("Selected image file was not found.".into()));
+    }
+
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_else(|| "jpg".into());
+    let target_path = book_covers_dir(app)?.join(format!("cover-{}.{}", uuid::Uuid::new_v4(), extension));
+    std::fs::copy(source, &target_path)?;
+    Ok(target_path.to_string_lossy().to_string())
 }
 
 fn open_db(app: &AppHandle) -> Result<Connection, AppError> {
@@ -618,6 +933,7 @@ CREATE TABLE IF NOT EXISTS documents (
   last_read_page INTEGER,
   commentary_text TEXT,
   commentary_updated_at TEXT,
+  cover_image_path TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (library_id) REFERENCES libraries(id) ON DELETE CASCADE
@@ -758,6 +1074,7 @@ CREATE INDEX IF NOT EXISTS idx_graph_view_node_layouts_graph_view_id ON graph_vi
     ensure_column(&conn, "documents", "publisher", "TEXT")?;
     ensure_column(&conn, "documents", "commentary_text", "TEXT")?;
     ensure_column(&conn, "documents", "commentary_updated_at", "TEXT")?;
+    ensure_column(&conn, "documents", "cover_image_path", "TEXT")?;
     ensure_column(&conn, "document_relations", "match_method", "TEXT")?;
     ensure_column(&conn, "document_relations", "raw_reference_text", "TEXT")?;
     ensure_column(&conn, "document_relations", "relation_status", "TEXT DEFAULT 'confirmed'")?;
@@ -937,12 +1254,72 @@ pub fn open_document_file_location(path: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+pub fn import_book_cover(app: AppHandle, source_path: String) -> Result<String, AppError> {
+    import_book_cover_file(&app, &source_path)
+}
+
+#[tauri::command]
+pub fn start_book_cover_upload_session(
+    app: AppHandle,
+) -> Result<StartBookCoverUploadSessionResult, AppError> {
+    ensure_book_cover_upload_server(&app);
+    let token = format!("cover-{}", uuid::Uuid::new_v4());
+    let expires_at_unix = chrono::Utc::now().timestamp() + (15 * 60);
+    let local_ip = detect_local_ip_address()?;
+    let url = format!("http://{local_ip}:{BOOK_COVER_UPLOAD_PORT}/cover-upload/{token}");
+
+    let mut sessions = book_cover_upload_sessions()
+        .lock()
+        .map_err(|_| AppError::Validation("Cover upload session lock failed.".into()))?;
+    sessions.insert(
+        token.clone(),
+        BookCoverUploadSession {
+            status: "pending".into(),
+            image_path: None,
+            expires_at_unix,
+        },
+    );
+
+    Ok(StartBookCoverUploadSessionResult { token, url })
+}
+
+#[tauri::command]
+pub fn get_book_cover_upload_session_status(
+    token: String,
+) -> Result<BookCoverUploadSessionStatus, AppError> {
+    let mut sessions = book_cover_upload_sessions()
+        .lock()
+        .map_err(|_| AppError::Validation("Cover upload session lock failed.".into()))?;
+    let now = chrono::Utc::now().timestamp();
+
+    if let Some(session) = sessions.get(&token) {
+        if session.expires_at_unix < now {
+            sessions.remove(&token);
+            return Ok(BookCoverUploadSessionStatus {
+                status: "expired".into(),
+                image_path: None,
+            });
+        }
+
+        return Ok(BookCoverUploadSessionStatus {
+            status: session.status.clone(),
+            image_path: session.image_path.clone(),
+        });
+    }
+
+    Ok(BookCoverUploadSessionStatus {
+        status: "missing".into(),
+        image_path: None,
+    })
+}
+
+#[tauri::command]
 pub fn list_documents_by_library(
     app: AppHandle,
     library_id: String,
 ) -> Result<Vec<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, created_at, updated_at FROM documents WHERE library_id = ?1 ORDER BY updated_at DESC"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at FROM documents WHERE library_id = ?1 ORDER BY updated_at DESC"#)?;
     let rows = stmt.query_map(params![library_id], map_document_row)?;
     let mut documents = Vec::new();
     for row in rows {
@@ -956,7 +1333,7 @@ pub fn list_documents_by_library(
 #[tauri::command]
 pub fn list_all_documents(app: AppHandle) -> Result<Vec<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, created_at, updated_at FROM documents ORDER BY updated_at DESC"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at FROM documents ORDER BY updated_at DESC"#)?;
     let rows = stmt.query_map([], map_document_row)?;
     let mut documents = Vec::new();
     for row in rows {
@@ -970,7 +1347,7 @@ pub fn list_all_documents(app: AppHandle) -> Result<Vec<Document>, AppError> {
 #[tauri::command]
 pub fn get_document_by_id(app: AppHandle, id: String) -> Result<Option<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, created_at, updated_at FROM documents WHERE id = ?1"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at FROM documents WHERE id = ?1"#)?;
     let doc = stmt.query_row(params![id], map_document_row).optional()?;
     match doc {
         Some(mut document) => {
@@ -1028,8 +1405,9 @@ fn map_document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
         last_read_page: row.get(41)?,
         commentary_text: row.get(42)?,
         commentary_updated_at: row.get(43)?,
-        created_at: row.get(44)?,
-        updated_at: row.get(45)?,
+        cover_image_path: row.get(44)?,
+        created_at: row.get(45)?,
+        updated_at: row.get(46)?,
     })
 }
 
@@ -1220,8 +1598,8 @@ pub fn create_document(app: AppHandle, input: CreateDocumentInput) -> Result<Doc
     let tag_suggestion_status = input.tag_suggestion_status.unwrap_or("pending".into());
     let classification_status = input.classification_status.unwrap_or("pending".into());
     conn.execute(
-        r#"INSERT INTO documents (id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, commentary_text, commentary_updated_at, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, 'unread', 0, 0, ?38, ?39, ?40, ?40)"#,
+        r#"INSERT INTO documents (id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, 'unread', 0, 0, ?38, ?39, ?40, ?41, ?41)"#,
         params![
             id,
             input.library_id,
@@ -1262,6 +1640,7 @@ pub fn create_document(app: AppHandle, input: CreateDocumentInput) -> Result<Doc
             input.last_processed_at,
             input.commentary_text,
             input.commentary_updated_at,
+            input.cover_image_path,
             now
         ],
     )?;
@@ -1320,8 +1699,9 @@ pub fn update_document_metadata(
           last_read_page = COALESCE(?40, last_read_page),
           commentary_text = COALESCE(?41, commentary_text),
           commentary_updated_at = COALESCE(?42, commentary_updated_at),
-          updated_at = ?43
-          WHERE id = ?44"#,
+          cover_image_path = COALESCE(?43, cover_image_path),
+          updated_at = ?44
+          WHERE id = ?45"#,
         params![
             input.title,
             input.document_type,
@@ -1365,6 +1745,7 @@ pub fn update_document_metadata(
             input.last_read_page,
             input.commentary_text,
             input.commentary_updated_at,
+            input.cover_image_path,
             now,
             id
         ],
@@ -1375,14 +1756,14 @@ pub fn update_document_metadata(
 #[tauri::command]
 pub fn delete_document(app: AppHandle, id: String) -> Result<bool, AppError> {
     let conn = open_db(&app)?;
-    let (imported_file_path, extracted_text_path): (Option<String>, Option<String>) = conn
+    let (imported_file_path, extracted_text_path, cover_image_path): (Option<String>, Option<String>, Option<String>) = conn
         .query_row(
-            "SELECT imported_file_path, extracted_text_path FROM documents WHERE id = ?1",
+            "SELECT imported_file_path, extracted_text_path, cover_image_path FROM documents WHERE id = ?1",
             params![id.clone()],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?
-        .unwrap_or((None, None));
+        .unwrap_or((None, None, None));
     let rows = conn.execute("DELETE FROM documents WHERE id = ?1", params![id])?;
     if rows > 0 {
         if let Some(path) = imported_file_path {
@@ -1395,6 +1776,12 @@ pub fn delete_document(app: AppHandle, id: String) -> Result<bool, AppError> {
             let extracted_text_file = std::path::PathBuf::from(path);
             if extracted_text_file.exists() {
                 std::fs::remove_file(extracted_text_file)?;
+            }
+        }
+        if let Some(path) = cover_image_path {
+            let cover_file = std::path::PathBuf::from(path);
+            if cover_file.exists() {
+                std::fs::remove_file(cover_file)?;
             }
         }
     }

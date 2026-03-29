@@ -2,8 +2,9 @@
 
 import { create } from 'zustand'
 import { isTauri } from '@/lib/tauri/client'
-import { bootstrapDesktop, importPdfs } from '@/lib/services/desktop-service'
+import { bootstrapDesktop, importPdfs, type ImportProgressUpdate } from '@/lib/services/desktop-service'
 import { deriveMetadataStatus, markMetadataFieldProvenanceAsUser, markMetadataFieldsAsUserEdited, parseMetadataProvenance, parseMetadataUserEditedFields } from '@/lib/services/document-metadata-service'
+import { mergeExtractedMetadataIntoDocument, type LocalPdfMetadata } from '@/lib/services/document-metadata-service'
 import { normalizeReadingStage } from '@/lib/services/document-reading-stage'
 import { parseDocumentClassification } from '@/lib/services/document-classification-service'
 import { resumeDocumentIngestion } from '@/lib/services/document-ingestion-service'
@@ -89,8 +90,18 @@ interface AppState {
   toggleSidebar: () => void
   toggleCommandPalette: (force?: boolean) => void
   loadLibraryDocuments: (_libraryId?: string | null) => Promise<void>
-  importDocuments: (paths?: string[]) => Promise<number>
+  importDocuments: (paths?: string[], onProgress?: (update: ImportProgressUpdate) => void) => Promise<number>
   createLibrary: (input: { name: string; description?: string; color?: string }) => Promise<void>
+  createDocumentRecord: (input: {
+    libraryId: string
+    title: string
+    documentType?: Document['documentType']
+    authors?: string[]
+    year?: number
+    abstract?: string
+    doi?: string
+    citationKey?: string
+  }) => Promise<Document | null>
   updateLibrary: (id: string, updates: { name?: string; description?: string; color?: string }) => Promise<void>
   deleteLibrary: (id: string) => Promise<boolean>
   deleteDocument: (id: string) => Promise<boolean>
@@ -192,6 +203,7 @@ interface AppState {
         | 'publisher'
         | 'documentType'
         | 'citationKey'
+        | 'coverImagePath'
         | 'readingStage'
         | 'rating'
         | 'favorite'
@@ -200,6 +212,12 @@ interface AppState {
         | 'ocrStatus'
       >
     >,
+  ) => Promise<void>
+  fetchOnlineMetadataForDocument: (documentId: string) => Promise<void>
+  applyFetchedMetadataCandidate: (
+    documentId: string,
+    metadata: LocalPdfMetadata,
+    mode?: 'fill_missing' | 'replace_unlocked',
   ) => Promise<void>
   scanDocumentsOcr: (documentIds?: string[]) => Promise<void>
   refreshTagSuggestionsForDocuments: (documentIds: string[]) => Promise<void>
@@ -244,7 +262,11 @@ function toUiDocument(
   return {
     id: d.id,
     libraryId: d.libraryId,
-    documentType: d.documentType === 'physical_book' ? 'physical_book' : 'pdf',
+    documentType: d.documentType === 'physical_book'
+      ? 'physical_book'
+      : d.documentType === 'my_work'
+        ? 'my_work'
+        : 'pdf',
     title: d.title,
     abstract: d.abstractText,
     authors: authorsParsed,
@@ -288,6 +310,7 @@ function toUiDocument(
     notesCount: counts?.notesCount ?? 0,
     commentaryText: d.commentaryText,
     commentaryUpdatedAt: d.commentaryUpdatedAt ? new Date(d.commentaryUpdatedAt) : undefined,
+    coverImagePath: d.coverImagePath,
     addedAt: d.createdAt ? new Date(d.createdAt) : new Date(),
     createdAt: d.createdAt ? new Date(d.createdAt) : new Date(),
     updatedAt: d.updatedAt ? new Date(d.updatedAt) : new Date(),
@@ -607,12 +630,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().refreshData()
   },
 
-  importDocuments: async (paths) => {
+  importDocuments: async (paths, onProgress) => {
     const { isDesktopApp, activeLibraryId, libraries } = get()
     const targetLibraryId = activeLibraryId ?? libraries[0]?.id ?? null
     if (!isDesktopApp || !targetLibraryId) return 0
 
-    const imported = await importPdfs(targetLibraryId, paths)
+    const imported = await importPdfs(targetLibraryId, paths, onProgress)
     await get().refreshData()
     return imported.length
   },
@@ -649,6 +672,47 @@ export const useAppStore = create<AppState>((set, get) => ({
       graphViews,
       activeLibraryId: created.id,
     })
+  },
+
+  createDocumentRecord: async (input) => {
+    if (!get().isDesktopApp) return null
+
+    const created = await repo.createDocument({
+      libraryId: input.libraryId,
+      documentType: input.documentType,
+      title: input.title,
+      authors: JSON.stringify(input.authors ?? []),
+      year: input.year,
+      abstractText: input.abstract,
+      doi: input.doi,
+      citationKey: input.citationKey,
+      searchText: input.title,
+      textExtractionStatus: input.documentType === 'my_work' ? 'skipped' : 'pending',
+      indexingStatus: input.documentType === 'my_work' ? 'skipped' : 'pending',
+      tagSuggestionStatus: input.documentType === 'my_work' ? 'skipped' : 'pending',
+      classificationStatus: input.documentType === 'my_work' ? 'skipped' : 'pending',
+      ocrStatus: input.documentType === 'my_work' ? 'not_needed' : 'pending',
+      hasExtractedText: false,
+      hasOcr: false,
+      hasOcrText: false,
+      metadataStatus: deriveMetadataStatus({
+        title: input.title,
+        authors: input.authors ?? [],
+        year: input.year,
+        doi: input.doi,
+      }),
+    })
+
+    const nextDocument = toUiDocument(created, { commentCount: 0, notesCount: 0 })
+    set((state) => ({
+      documents: [nextDocument, ...state.documents],
+      libraries: state.libraries.map((library) =>
+        library.id === nextDocument.libraryId
+          ? { ...library, documentCount: library.documentCount + 1 }
+          : library),
+    }))
+
+    return nextDocument
   },
 
   updateLibrary: async (id, updates) => {
@@ -1248,6 +1312,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       abstractText: updates.abstract,
       doi: updates.doi,
       citationKey: updates.citationKey,
+      coverImagePath: updates.coverImagePath,
       searchText: updates.searchText,
       readingStage: updates.readingStage,
       rating: updates.rating,
@@ -1282,6 +1347,47 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if ('searchText' in updates) {
       await indexDocument(id)
+    }
+  },
+
+  fetchOnlineMetadataForDocument: async (documentId) => {
+    const document = get().documents.find((entry) => entry.id === documentId)
+    if (!document || !get().isDesktopApp) return
+
+    await resumeDocumentIngestion(documentId, {
+      enableOnlineMetadataEnrichment: true,
+      forceStages: ['online_metadata_enrichment'],
+    })
+
+    const refreshed = await repo.getDocumentById(documentId)
+    if (refreshed) {
+      set((state) => ({
+        documents: updateLocalDocument(
+          state.documents,
+          documentId,
+          toUiDocumentWithExistingCounts(refreshed, state.documents.find((entry) => entry.id === documentId)),
+        ),
+      }))
+    }
+  },
+
+  applyFetchedMetadataCandidate: async (documentId, metadata, mode = 'replace_unlocked') => {
+    const document = await repo.getDocumentById(documentId)
+    if (!document || !get().isDesktopApp) return
+
+    const saved = await repo.updateDocumentMetadata(
+      documentId,
+      mergeExtractedMetadataIntoDocument(document, metadata, mode),
+    )
+
+    if (saved) {
+      set((state) => ({
+        documents: updateLocalDocument(
+          state.documents,
+          documentId,
+          toUiDocumentWithExistingCounts(saved, state.documents.find((entry) => entry.id === documentId)),
+        ),
+      }))
     }
   },
 

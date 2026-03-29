@@ -18,7 +18,7 @@ export type ReadingStage = 'unread' | 'reading' | 'finished'
 export type ProcessingStatus = 'pending' | 'queued' | 'processing' | 'complete' | 'failed' | 'skipped'
 export type OcrStatus = 'pending' | 'processing' | 'complete' | 'failed' | 'not_needed'
 export type MetadataStatus = 'missing' | 'partial' | 'complete'
-export type DocumentType = 'pdf' | 'physical_book'
+export type DocumentType = 'pdf' | 'physical_book' | 'my_work'
 export type TextExtractionStatus = ProcessingStatus
 export type IndexingStatus = ProcessingStatus
 export type TagSuggestionStatus = ProcessingStatus
@@ -34,6 +34,7 @@ export type MetadataFieldSource =
   | 'filename_fallback'
   | 'crossref'
   | 'semantic_scholar'
+  | 'openalex'
   | 'user'
 export type DocumentProcessingStage =
   | 'import_pdf'
@@ -138,6 +139,7 @@ export interface Document {
   notesCount: number
   commentaryText?: string
   commentaryUpdatedAt?: Date
+  coverImagePath?: string
   addedAt: Date
   lastOpenedAt?: Date
   lastReadPage?: number

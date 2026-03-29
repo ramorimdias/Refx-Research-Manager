@@ -482,13 +482,15 @@ export default function SettingsPage() {
 
                     <div>
                       <Label className="text-sm font-medium">Semantic Scholar API Key</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">Optional secondary enrichment source.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Leave blank to use the bundled default key. Add your own if you want a less busy quota for this device.
+                      </p>
                       <Input
                         type="password"
                         value={settings.semanticScholarApiKey}
                         onChange={(event) => updateSettings('semanticScholarApiKey', event.target.value)}
                         className="mt-2"
-                        placeholder="Enter your Semantic Scholar API key"
+                        placeholder="Leave blank to use the bundled default key"
                       />
                     </div>
                   </CardContent>

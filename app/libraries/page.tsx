@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Search,
   Grid3X3,
@@ -16,7 +16,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   BookMarked,
+  Smartphone,
+  ImagePlus,
 } from 'lucide-react'
+import * as QRCode from 'qrcode'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -66,6 +69,8 @@ import type { SortField, ViewMode } from '@/lib/types'
 import { Spinner } from '@/components/ui/spinner'
 import { cn } from '@/lib/utils'
 import * as repo from '@/lib/repositories/local-db'
+import type { ImportProgressUpdate } from '@/lib/services/desktop-service'
+import { convertFileSrc, open as openFileDialog } from '@/lib/tauri/client'
 
 type LibraryFormState = {
   name: string
@@ -80,6 +85,7 @@ type PhysicalBookFormState = {
   publisher: string
   isbn: string
   description: string
+  coverImagePath?: string
 }
 
 const LIBRARY_COLOR_OPTIONS = [
@@ -108,6 +114,13 @@ const DEFAULT_PHYSICAL_BOOK_FORM: PhysicalBookFormState = {
   publisher: '',
   isbn: '',
   description: '',
+  coverImagePath: undefined,
+}
+
+type BookCoverPhoneSession = {
+  token: string
+  url: string
+  qrDataUrl: string
 }
 
 const DOCUMENTS_PER_PAGE = 20
@@ -118,24 +131,20 @@ function buildPaginationItems(currentPage: number, totalPages: number) {
     return Array.from({ length: totalPages }, (_, index) => index + 1)
   }
 
-  const items: Array<number | 'ellipsis'> = [1]
-  const start = Math.max(2, currentPage - 1)
-  const end = Math.min(totalPages - 1, currentPage + 1)
-
-  if (start > 2) {
-    items.push('ellipsis')
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, 'ellipsis', totalPages]
   }
 
-  for (let page = start; page <= end; page += 1) {
-    items.push(page)
+  if (currentPage >= totalPages - 3) {
+    return [1, 'ellipsis', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages]
   }
 
-  if (end < totalPages - 1) {
-    items.push('ellipsis')
-  }
+  return [1, 'ellipsis', currentPage - 1, currentPage, currentPage + 1, 'ellipsis', totalPages]
+}
 
-  items.push(totalPages)
-  return items
+function fileNameFromPath(path?: string) {
+  if (!path) return ''
+  return path.split(/[\\/]/).pop() ?? path
 }
 
 export default function LibrariesPage() {
@@ -171,6 +180,11 @@ export default function LibrariesPage() {
   const [physicalBookForm, setPhysicalBookForm] = useState<PhysicalBookFormState>(DEFAULT_PHYSICAL_BOOK_FORM)
   const [deleteLibraryConfirmation, setDeleteLibraryConfirmation] = useState('')
   const [pendingImportCount, setPendingImportCount] = useState<number | null>(null)
+  const [importProgress, setImportProgress] = useState<ImportProgressUpdate | null>(null)
+  const [bookCoverPhoneSession, setBookCoverPhoneSession] = useState<BookCoverPhoneSession | null>(null)
+  const [isPreparingBookCoverPhoneUpload, setIsPreparingBookCoverPhoneUpload] = useState(false)
+  const [bookCoverPhoneStatus, setBookCoverPhoneStatus] = useState<string>('')
+  const bookCoverQrSectionRef = useRef<HTMLDivElement | null>(null)
 
   const activeLibrary = libraries.find((lib) => lib.id === activeLibraryId)
   const paginationSessionKey = JSON.stringify({
@@ -254,11 +268,15 @@ export default function LibrariesPage() {
     if (!isDesktopApp || isImporting) return
     setIsImporting(true)
     setPendingImportCount(paths?.length ?? null)
+    setImportProgress(null)
     try {
-      await importDocuments(paths)
+      await importDocuments(paths, (update) => {
+        setImportProgress(update)
+      })
     } finally {
       setIsImporting(false)
       setPendingImportCount(null)
+      setImportProgress(null)
     }
   }
 
@@ -268,6 +286,8 @@ export default function LibrariesPage() {
 
   const resetPhysicalBookForm = () => {
     setPhysicalBookForm(DEFAULT_PHYSICAL_BOOK_FORM)
+    setBookCoverPhoneSession(null)
+    setBookCoverPhoneStatus('')
   }
 
   const openCreateDialog = () => {
@@ -385,6 +405,7 @@ export default function LibrariesPage() {
           isbn: Boolean(isbn),
           abstract: Boolean(abstractText),
         }),
+        coverImagePath: physicalBookForm.coverImagePath,
         textExtractionStatus: 'skipped',
         ocrStatus: 'not_needed',
         indexingStatus: 'skipped',
@@ -398,6 +419,89 @@ export default function LibrariesPage() {
       setIsSavingLibrary(false)
     }
   }
+
+  const handleSelectBookCoverFromComputer = async () => {
+    if (!isDesktopApp) return
+
+    const selected = await openFileDialog({
+      multiple: false,
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      title: 'Choose a book cover image',
+    })
+
+    if (!selected || Array.isArray(selected)) return
+
+    const importedCoverPath = await repo.importBookCover(selected)
+    setPhysicalBookForm((state) => ({ ...state, coverImagePath: importedCoverPath }))
+    setBookCoverPhoneStatus('Cover selected from this computer.')
+  }
+
+  const handlePreparePhoneCoverUpload = async () => {
+    if (!isDesktopApp) return
+
+    setIsPreparingBookCoverPhoneUpload(true)
+    setBookCoverPhoneStatus('')
+    try {
+      const session = await repo.startBookCoverUploadSession()
+      const qrDataUrl = await QRCode.toDataURL(session.url, {
+        margin: 1,
+        width: 220,
+      })
+      setBookCoverPhoneSession({
+        token: session.token,
+        url: session.url,
+        qrDataUrl,
+      })
+      setBookCoverPhoneStatus('Scan with your phone on the same local network.')
+    } finally {
+      setIsPreparingBookCoverPhoneUpload(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isPhysicalBookDialogOpen || !bookCoverPhoneSession?.token) return
+
+    const interval = window.setInterval(() => {
+      void repo.getBookCoverUploadSessionStatus(bookCoverPhoneSession.token).then((status) => {
+        if (status.status === 'completed' && status.imagePath) {
+          setPhysicalBookForm((state) => ({ ...state, coverImagePath: status.imagePath }))
+          setBookCoverPhoneStatus('Cover uploaded from your phone.')
+          setBookCoverPhoneSession(null)
+          return
+        }
+
+        if (status.status === 'expired') {
+          setBookCoverPhoneStatus('Phone upload expired. Start a new QR session if needed.')
+          setBookCoverPhoneSession(null)
+        }
+      }).catch((error) => {
+        console.error('Failed to poll book cover upload status:', error)
+      })
+    }, 1200)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [bookCoverPhoneSession?.token, isPhysicalBookDialogOpen])
+
+  useEffect(() => {
+    if (!isPhysicalBookDialogOpen || !bookCoverPhoneSession) return
+
+    const timeoutId = window.setTimeout(() => {
+      bookCoverQrSectionRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      })
+    }, 80)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [bookCoverPhoneSession, isPhysicalBookDialogOpen])
+
+  const physicalBookCoverPreviewUrl = physicalBookForm.coverImagePath
+    ? isDesktopApp
+      ? convertFileSrc(physicalBookForm.coverImagePath)
+      : physicalBookForm.coverImagePath
+    : ''
 
   return (
     <>
@@ -531,59 +635,89 @@ export default function LibrariesPage() {
 
           <div
             className={cn(
-              'relative flex-1 overflow-auto p-5 transition-colors',
+              'relative flex-1 overflow-x-auto overflow-y-scroll px-5 pb-0 pt-5 transition-colors',
               isImporting && 'bg-muted/20',
             )}
+            style={{ scrollbarGutter: 'stable' }}
           >
             {isImporting && (
               <div className="absolute inset-x-5 top-5 z-10 flex items-start justify-center">
-                <div className="flex items-center gap-3 rounded-full border border-border/80 bg-background/96 px-4 py-2 shadow-lg">
-                  <Spinner className="size-4" />
-                  <div className="text-sm">
-                    <span className="font-medium">Importing</span>
-                    <span className="text-muted-foreground">{pendingImportCount ? ` ${pendingImportCount} file${pendingImportCount === 1 ? '' : 's'}` : ' files'}</span>
+                <div className="w-full max-w-xl rounded-2xl border border-border/80 bg-background/96 px-4 py-3 shadow-lg backdrop-blur">
+                  <div className="flex items-center gap-3">
+                    <Spinner className="size-4" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-medium">Importing documents</span>
+                        <span className="text-muted-foreground">
+                          {importProgress?.current ?? 0}/{importProgress?.total ?? pendingImportCount ?? 0}
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{
+                            width: `${Math.max(
+                              8,
+                              Math.round(
+                                (((importProgress?.current ?? 0) / Math.max(importProgress?.total ?? pendingImportCount ?? 1, 1)) * 100),
+                              ),
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <p className="mt-2 truncate text-sm text-foreground/85">
+                        {fileNameFromPath(importProgress?.currentFile) || 'Preparing import...'}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {importProgress?.error ?? importProgress?.detail ?? 'Preparing document import...'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
             )}
-            {documents.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/70">
-                  <FolderOpen className="h-8 w-8 text-muted-foreground" />
-                </div>
-                <h3 className="mb-2 text-lg font-semibold">No documents found</h3>
-                <p className="mb-6 max-w-sm text-sm text-muted-foreground">
-                  {filters.search || Object.keys(filters).length > 1
-                    ? 'Try adjusting your filters or search query.'
-                    : 'Import PDFs or register a book to get started.'}
-                </p>
-                <div className="flex gap-2">
-                  <Button onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    {isImporting ? 'Importing PDFs...' : 'Import PDFs'}
-                  </Button>
-                </div>
+            <div className="flex min-h-full flex-col">
+              <div className="flex-1">
+                {documents.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/70">
+                      <FolderOpen className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <h3 className="mb-2 text-lg font-semibold">No documents found</h3>
+                    <p className="mb-6 max-w-sm text-sm text-muted-foreground">
+                      {filters.search || Object.keys(filters).length > 1
+                        ? 'Try adjusting your filters or search query.'
+                        : 'Import PDFs or register a book to get started.'}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
+                        <Upload className="mr-2 h-4 w-4" />
+                        {isImporting ? 'Importing PDFs...' : 'Import PDFs'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : viewMode === 'table' ? (
+                  <div className={cn('transition-opacity', isImporting && 'opacity-60')}>
+                    <DocumentTable documents={paginatedDocuments} ephemeralFlagsById={documentFlagsById} />
+                  </div>
+                ) : viewMode === 'grid' ? (
+                  <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', isImporting && 'opacity-60')}>
+                    {paginatedDocuments.map((doc) => (
+                      <DocumentCard key={doc.id} document={doc} ephemeralFlags={documentFlagsById[doc.id]} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className={cn('space-y-2', isImporting && 'opacity-60')}>
+                    {paginatedDocuments.map((doc) => (
+                      <DocumentCard key={doc.id} document={doc} ephemeralFlags={documentFlagsById[doc.id]} variant="list" />
+                    ))}
+                  </div>
+                )}
               </div>
-            ) : viewMode === 'table' ? (
-              <div className={cn('transition-opacity', isImporting && 'opacity-60')}>
-                <DocumentTable documents={paginatedDocuments} ephemeralFlagsById={documentFlagsById} />
-              </div>
-            ) : viewMode === 'grid' ? (
-              <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', isImporting && 'opacity-60')}>
-                {paginatedDocuments.map((doc) => (
-                  <DocumentCard key={doc.id} document={doc} ephemeralFlags={documentFlagsById[doc.id]} />
-                ))}
-              </div>
-            ) : (
-              <div className={cn('space-y-2', isImporting && 'opacity-60')}>
-                {paginatedDocuments.map((doc) => (
-                  <DocumentCard key={doc.id} document={doc} ephemeralFlags={documentFlagsById[doc.id]} variant="list" />
-                ))}
-              </div>
-            )}
 
-            {documents.length > 0 && totalPages > 1 && (
-              <div className="mt-6 flex flex-col gap-3 border-t border-border/80 pt-4">
+              {documents.length > 0 && totalPages > 1 && (
+                <div className="sticky bottom-0 mt-6 -mx-5 border-t border-border/80 bg-background px-5 py-4">
+                <div className="flex flex-col gap-3">
                 <div className="text-sm text-muted-foreground">
                   Showing {(currentPage - 1) * DOCUMENTS_PER_PAGE + 1}-{Math.min(currentPage * DOCUMENTS_PER_PAGE, documents.length)} of {documents.length}
                 </div>
@@ -613,7 +747,7 @@ export default function LibrariesPage() {
                             isActive={item === currentPage}
                             onClick={(event) => {
                               event.preventDefault()
-                              setCurrentPage(item)
+                              setCurrentPage(item as number)
                             }}
                           >
                             {item}
@@ -635,8 +769,10 @@ export default function LibrariesPage() {
                     </PaginationItem>
                   </PaginationContent>
                 </Pagination>
-              </div>
-            )}
+                </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -705,6 +841,75 @@ export default function LibrariesPage() {
                 onChange={(event) => setPhysicalBookForm((state) => ({ ...state, description: event.target.value }))}
                 placeholder="Optional notes or summary"
               />
+            </div>
+            <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+              <div className="space-y-1">
+                <Label>Book photo</Label>
+                <p className="text-sm text-muted-foreground">
+                  Optional. Add a cover photo from this computer or scan a QR code to upload it from your phone.
+                </p>
+              </div>
+
+              {physicalBookCoverPreviewUrl ? (
+                <div className="overflow-hidden rounded-xl border border-border/70 bg-background">
+                  <img
+                    src={physicalBookCoverPreviewUrl}
+                    alt="Book cover preview"
+                    className="h-48 w-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/70 bg-background text-sm text-muted-foreground">
+                  No photo selected yet
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => void handleSelectBookCoverFromComputer()}>
+                  <ImagePlus className="mr-2 h-4 w-4" />
+                  Upload from PC
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handlePreparePhoneCoverUpload()}
+                  disabled={isPreparingBookCoverPhoneUpload}
+                >
+                  <Smartphone className="mr-2 h-4 w-4" />
+                  {isPreparingBookCoverPhoneUpload ? 'Preparing QR...' : 'Add from phone'}
+                </Button>
+                {physicalBookForm.coverImagePath ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setPhysicalBookForm((state) => ({ ...state, coverImagePath: undefined }))
+                      setBookCoverPhoneStatus('')
+                    }}
+                  >
+                    Remove photo
+                  </Button>
+                ) : null}
+              </div>
+
+              {bookCoverPhoneStatus ? (
+                <p className="text-sm text-muted-foreground">{bookCoverPhoneStatus}</p>
+              ) : null}
+
+              {bookCoverPhoneSession ? (
+                <div ref={bookCoverQrSectionRef} className="grid gap-4 rounded-xl border border-border/70 bg-background p-4 md:grid-cols-[220px_minmax(0,1fr)]">
+                  <div className="overflow-hidden rounded-lg border border-border/70 bg-white p-2">
+                    <img src={bookCoverPhoneSession.qrDataUrl} alt="QR code for phone cover upload" className="h-auto w-full" />
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Scan with your phone</p>
+                    <p className="text-sm text-muted-foreground">
+                      Keep the desktop app open. Your phone and computer need to be on the same local network.
+                    </p>
+                    <Input readOnly value={bookCoverPhoneSession.url} className="text-xs" />
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
           <DialogFooter>

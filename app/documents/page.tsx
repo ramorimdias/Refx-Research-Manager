@@ -1,20 +1,29 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   BookOpen,
   Check,
   ChevronDown,
   ChevronsUpDown,
+  Globe,
   Link2,
+  Loader2,
+  Minus,
+  Plus,
   Save,
+  Smartphone,
   Star,
   Tag,
   Trash2,
+  ImagePlus,
 } from 'lucide-react'
+import * as QRCode from 'qrcode'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -29,6 +38,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -38,9 +48,20 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { EmptyState, StarRating, TagChip } from '@/components/refx/common'
+import {
+  buildDocumentMetadataSeed,
+  createMetadataCandidateFromBibtex,
+  findDocumentMetadataCandidates,
+  loadOnlineMetadataEnrichmentSettings,
+  type MetadataCandidateProvider,
+  type DocumentMetadataCandidate,
+} from '@/lib/services/document-enrichment-service'
+import { loadPdfJsModule } from '@/lib/services/document-processing'
 import { useAppStore } from '@/lib/store'
-import type { DocumentRelationLinkType, ReadingStage } from '@/lib/types'
+import { convertFileSrc, isTauri, open as openFileDialog, readFile } from '@/lib/tauri/client'
+import type { Document as RefxDocument, ReadingStage } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import * as repo from '@/lib/repositories/local-db'
 
 const readingStages: Array<{ value: ReadingStage; label: string }> = [
   { value: 'unread', label: 'Unread' },
@@ -53,9 +74,274 @@ type RelationListItem = {
   relatedDocumentId: string
 }
 
+type BookCoverPhoneSession = {
+  token: string
+  url: string
+  qrDataUrl: string
+}
+
+type PreviewPdfDocument = {
+  numPages: number
+  getPage: (pageNumber: number) => Promise<{
+    getViewport: (args: { scale: number }) => { width: number; height: number }
+    render: (args: {
+      canvasContext: CanvasRenderingContext2D
+      viewport: { width: number; height: number }
+      transform?: number[]
+    }) => { promise: Promise<void>; cancel?: () => void }
+    cleanup?: () => void
+  }>
+  destroy?: () => Promise<void>
+}
+
+function DocumentPdfPreview({ document }: { document: RefxDocument }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const dragStateRef = useRef<{
+    pointerId: number
+    startScrollLeft: number
+    startScrollTop: number
+    startX: number
+    startY: number
+  } | null>(null)
+  const [pdfDocument, setPdfDocument] = useState<PreviewPdfDocument | null>(null)
+  const [page, setPage] = useState(1)
+  const [zoom, setZoom] = useState(100)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isRendering, setIsRendering] = useState(false)
+  const [error, setError] = useState('')
+  const [renderedPageSize, setRenderedPageSize] = useState({ width: 0, height: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+
+  useEffect(() => {
+    setPage(1)
+    setZoom(100)
+  }, [document.id])
+
+  useEffect(() => {
+    dragStateRef.current = null
+    setIsPanning(false)
+  }, [page, zoom])
+
+  useEffect(() => {
+    let cancelled = false
+    let loadedPdf: PreviewPdfDocument | null = null
+
+    const loadDocument = async () => {
+      if (!document.filePath || !isTauri()) return
+      setIsLoading(true)
+      setError('')
+
+      try {
+        const pdfjs = await loadPdfJsModule()
+        const bytes = await readFile(document.filePath)
+        const task = pdfjs.getDocument({
+          data: new Uint8Array(bytes),
+          useWorkerFetch: false,
+          isEvalSupported: false,
+          stopAtErrors: false,
+        })
+
+        const pdf = await task.promise as PreviewPdfDocument
+        if (cancelled) {
+          await pdf.destroy?.()
+          return
+        }
+
+        loadedPdf = pdf
+        setPdfDocument(pdf)
+        setPage((current) => Math.min(Math.max(1, current), pdf.numPages))
+      } catch (loadError) {
+        if (!cancelled) {
+          console.error('Failed to load PDF preview:', loadError)
+          setError('Preview unavailable for this document.')
+          setPdfDocument(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    void loadDocument()
+
+    return () => {
+      cancelled = true
+      setPdfDocument(null)
+      void loadedPdf?.destroy?.()
+    }
+  }, [document.filePath])
+
+  useEffect(() => {
+    let cancelled = false
+    let renderTask: { promise?: Promise<void>; cancel?: () => void } | null = null
+
+    const renderCurrentPage = async () => {
+      if (!pdfDocument || !canvasRef.current) return
+      setIsRendering(true)
+
+      try {
+        const pdfPage = await pdfDocument.getPage(page)
+        if (cancelled) return
+
+        const viewport = pdfPage.getViewport({ scale: zoom / 100 })
+        const canvas = canvasRef.current
+        const context = canvas.getContext('2d')
+        if (!context) return
+
+        const devicePixelRatio = window.devicePixelRatio || 1
+        canvas.width = Math.ceil(viewport.width * devicePixelRatio)
+        canvas.height = Math.ceil(viewport.height * devicePixelRatio)
+        canvas.style.width = `${viewport.width}px`
+        canvas.style.height = `${viewport.height}px`
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.clearRect(0, 0, canvas.width, canvas.height)
+
+        renderTask = pdfPage.render({
+          canvasContext: context,
+          viewport,
+          transform: devicePixelRatio === 1 ? undefined : [devicePixelRatio, 0, 0, devicePixelRatio, 0, 0],
+        })
+        await renderTask.promise
+
+        if (!cancelled) {
+          setRenderedPageSize({ width: viewport.width, height: viewport.height })
+        }
+
+        pdfPage.cleanup?.()
+      } catch (renderError) {
+        if (!cancelled) {
+          console.error('Failed to render PDF preview page:', renderError)
+          setError('Preview unavailable for this page.')
+        }
+      } finally {
+        if (!cancelled) {
+          setIsRendering(false)
+        }
+      }
+    }
+
+    void renderCurrentPage()
+
+    return () => {
+      cancelled = true
+      renderTask?.cancel?.()
+    }
+  }, [page, pdfDocument, zoom])
+
+  const handleViewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current
+    if (!viewport || !pdfDocument || event.button !== 0) return
+
+    const canPanHorizontally = viewport.scrollWidth > viewport.clientWidth
+    const canPanVertically = viewport.scrollHeight > viewport.clientHeight
+    if (!canPanHorizontally && !canPanVertically) return
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startScrollLeft: viewport.scrollLeft,
+      startScrollTop: viewport.scrollTop,
+      startX: event.clientX,
+      startY: event.clientY,
+    }
+    setIsPanning(true)
+    viewport.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+
+  const handleViewportPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current
+    const dragState = dragStateRef.current
+    if (!viewport || !dragState || dragState.pointerId !== event.pointerId) return
+
+    viewport.scrollLeft = dragState.startScrollLeft - (event.clientX - dragState.startX)
+    viewport.scrollTop = dragState.startScrollTop - (event.clientY - dragState.startY)
+  }
+
+  const endViewportPan = (pointerId?: number) => {
+    if (pointerId !== undefined && dragStateRef.current?.pointerId !== pointerId) return
+    dragStateRef.current = null
+    setIsPanning(false)
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle>Document Preview</CardTitle>
+          <span className="text-xs text-muted-foreground">
+            {page} / {pdfDocument?.numPages ?? document.pageCount ?? 'â€”'}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={!pdfDocument || page <= 1}>
+            <ChevronLeft className="mr-1 h-4 w-4" />
+            Prev
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => setPage((current) => Math.min(pdfDocument?.numPages ?? current, current + 1))} disabled={!pdfDocument || page >= (pdfDocument?.numPages ?? 1)}>
+            Next
+            <ChevronRight className="ml-1 h-4 w-4" />
+          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button type="button" variant="outline" size="icon" onClick={() => setZoom((current) => Math.max(50, current - 10))} disabled={!pdfDocument}>
+              <Minus className="h-4 w-4" />
+            </Button>
+            <span className="w-14 text-center text-sm text-muted-foreground">{zoom}%</span>
+            <Button type="button" variant="outline" size="icon" onClick={() => setZoom((current) => Math.min(200, current + 10))} disabled={!pdfDocument}>
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div
+          ref={viewportRef}
+          className={cn(
+            'max-h-[72vh] min-h-[420px] overflow-auto rounded-lg border bg-muted/20 p-4',
+            pdfDocument ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : undefined,
+          )}
+          onPointerDown={handleViewportPointerDown}
+          onPointerMove={handleViewportPointerMove}
+          onPointerUp={(event) => endViewportPan(event.pointerId)}
+          onPointerCancel={(event) => endViewportPan(event.pointerId)}
+          onPointerLeave={() => {
+            if (!isPanning) return
+          }}
+        >
+          {error ? (
+            <p className="text-sm text-muted-foreground">{error}</p>
+          ) : isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading previewâ€¦</p>
+          ) : (
+            <div className="flex min-h-full min-w-full items-start justify-start">
+              <div
+                className="relative"
+                style={{
+                  minHeight: renderedPageSize.height || 420,
+                  minWidth: renderedPageSize.width || 280,
+                }}
+              >
+                <canvas ref={canvasRef} className="block bg-white shadow-sm" />
+                {isRendering ? (
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/60 text-sm text-muted-foreground">
+                    Renderingâ€¦
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function DocumentDetailPage() {
   const params = useSearchParams()
   const id = params.get('id')
+  const metadataMode = params.get('metadata')
+  const autoSearchMetadata = params.get('autoSearchMetadata') === '1'
   const {
     documents,
     libraries,
@@ -66,9 +352,11 @@ export default function DocumentDetailPage() {
     acceptSuggestedTag,
     rejectSuggestedTag,
     updateDocument,
+    applyFetchedMetadataCandidate,
     createRelation,
     deleteRelation,
     setActiveDocument,
+    isDesktopApp,
   } = useAppStore()
 
   const document = useMemo(() => documents.find((entry) => entry.id === id) ?? null, [documents, id])
@@ -83,23 +371,44 @@ export default function DocumentDetailPage() {
   const [publisher, setPublisher] = useState('')
   const [citationKey, setCitationKey] = useState('')
   const [abstract, setAbstract] = useState('')
+  const [coverImagePath, setCoverImagePath] = useState('')
   const [readingStage, setReadingStage] = useState<ReadingStage>('unread')
   const [rating, setRating] = useState(0)
   const [favorite, setFavorite] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [isFetchingOnlineMetadata, setIsFetchingOnlineMetadata] = useState(false)
+  const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false)
+  const [metadataCandidates, setMetadataCandidates] = useState<DocumentMetadataCandidate[]>([])
+  const [metadataDialogError, setMetadataDialogError] = useState('')
+  const [selectedMetadataCandidateId, setSelectedMetadataCandidateId] = useState('')
+  const [isApplyingMetadataCandidate, setIsApplyingMetadataCandidate] = useState(false)
+  const [metadataSearchField, setMetadataSearchField] = useState<'title' | 'doi' | 'title_author'>('title_author')
+  const [metadataSearchValue, setMetadataSearchValue] = useState('')
+  const [metadataSearchAuthorValue, setMetadataSearchAuthorValue] = useState('')
+  const [bibtexInput, setBibtexInput] = useState('')
+  const [metadataProviders, setMetadataProviders] = useState<MetadataCandidateProvider[]>([
+    'semantic_scholar',
+    'openalex',
+    'crossref',
+  ])
+  const [bookCoverPhoneSession, setBookCoverPhoneSession] = useState<BookCoverPhoneSession | null>(null)
+  const [isPreparingBookCoverPhoneUpload, setIsPreparingBookCoverPhoneUpload] = useState(false)
+  const [bookCoverPhoneStatus, setBookCoverPhoneStatus] = useState('')
+  const bookCoverQrSectionRef = useRef<HTMLDivElement | null>(null)
 
-  const [relationDirection, setRelationDirection] = useState<'outbound' | 'inbound'>('outbound')
-  const [relationTargetId, setRelationTargetId] = useState('')
-  const [relationType, setRelationType] = useState<DocumentRelationLinkType>('manual')
-  const [relationLabel, setRelationLabel] = useState('')
-  const [relationNotes, setRelationNotes] = useState('')
+  const [outgoingRelationTargetId, setOutgoingRelationTargetId] = useState('')
+  const [incomingRelationTargetId, setIncomingRelationTargetId] = useState('')
   const [isCreatingRelation, setIsCreatingRelation] = useState(false)
-  const [isRelationTargetPickerOpen, setIsRelationTargetPickerOpen] = useState(false)
+  const [isOutgoingRelationPickerOpen, setIsOutgoingRelationPickerOpen] = useState(false)
+  const [isIncomingRelationPickerOpen, setIsIncomingRelationPickerOpen] = useState(false)
 
   const [detailsExpanded, setDetailsExpanded] = useState(true)
   const [tagsExpanded, setTagsExpanded] = useState(true)
   const [linksExpanded, setLinksExpanded] = useState(true)
+  const [bibtexExpanded, setBibtexExpanded] = useState(false)
+  const metadataAutoOpenHandledRef = useRef<string | null>(null)
+  const metadataAutoSearchPendingRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!document) return
@@ -112,15 +421,54 @@ export default function DocumentDetailPage() {
     setPublisher(document.publisher ?? '')
     setCitationKey(document.citationKey ?? '')
     setAbstract(document.abstract ?? '')
+    setCoverImagePath(document.coverImagePath ?? '')
     setReadingStage(document.readingStage)
     setRating(document.rating)
     setFavorite(document.favorite)
-    setRelationTargetId('')
-    setRelationLabel('')
-    setRelationNotes('')
-    setRelationType('manual')
-    setRelationDirection('outbound')
+    setOutgoingRelationTargetId('')
+    setIncomingRelationTargetId('')
+    setIsOutgoingRelationPickerOpen(false)
+    setIsIncomingRelationPickerOpen(false)
+    setMetadataSearchField('title_author')
+    setMetadataSearchValue(document.title || '')
+    setMetadataSearchAuthorValue(document.authors[0] ?? '')
+    setBibtexInput('')
+    setBibtexExpanded(false)
+    setBookCoverPhoneSession(null)
+    setBookCoverPhoneStatus('')
+    metadataAutoOpenHandledRef.current = null
+    metadataAutoSearchPendingRef.current = null
   }, [document, setActiveDocument])
+
+  useEffect(() => {
+    if (!document || !autoSearchMetadata) return
+    if (metadataAutoOpenHandledRef.current === document.id) return
+
+    const nextMode = metadataMode === 'doi' ? 'doi' : 'title_author'
+    setMetadataProviders(['semantic_scholar', 'openalex', 'crossref'])
+    setMetadataSearchField(nextMode)
+    setMetadataSearchValue(nextMode === 'doi' ? (document.doi ?? '') : document.title)
+    setMetadataSearchAuthorValue(document.authors[0] ?? '')
+    setMetadataDialogError('')
+    setMetadataCandidates([])
+    setSelectedMetadataCandidateId('')
+    setIsMetadataDialogOpen(true)
+    metadataAutoOpenHandledRef.current = document.id
+    metadataAutoSearchPendingRef.current = document.id
+  }, [autoSearchMetadata, document, metadataMode])
+
+  useEffect(() => {
+    if (!document || !isMetadataDialogOpen || !autoSearchMetadata) return
+    if (metadataAutoSearchPendingRef.current !== document.id) return
+
+    metadataAutoSearchPendingRef.current = null
+    const timeoutId = window.setTimeout(() => {
+      void runMetadataCandidateSearch()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [document, isMetadataDialogOpen, autoSearchMetadata])
 
   const relationItems = useMemo(() => {
     if (!document) {
@@ -151,6 +499,70 @@ export default function DocumentDetailPage() {
       .sort((left, right) => left.title.localeCompare(right.title))
   }, [document, documents])
 
+  const normalizedAuthors = useMemo(
+    () =>
+      authors
+        .split(',')
+        .map((author) => author.trim())
+        .filter(Boolean),
+    [authors],
+  )
+
+  const normalizedYear = useMemo(() => {
+    const trimmedYear = year.trim()
+    return trimmedYear ? Number(trimmedYear) : undefined
+  }, [year])
+
+  const savePayload = useMemo(
+    () => ({
+      title: title.trim() || document?.title || '',
+      authors: normalizedAuthors,
+      year: normalizedYear,
+      doi: doi.trim() || undefined,
+      isbn: isbn.trim() || undefined,
+      publisher: publisher.trim() || undefined,
+      citationKey: citationKey.trim() || '',
+      abstract: abstract.trim() || undefined,
+      coverImagePath: coverImagePath.trim() || undefined,
+      readingStage,
+      rating,
+      favorite,
+    }),
+    [
+      abstract,
+      citationKey,
+      coverImagePath,
+      document?.title,
+      doi,
+      favorite,
+      isbn,
+      normalizedAuthors,
+      normalizedYear,
+      publisher,
+      rating,
+      readingStage,
+      title,
+    ],
+  )
+
+  const hasUnsavedChanges = useMemo(() => {
+    if (!document) return false
+    if (savePayload.title !== document.title) return true
+    if (savePayload.authors.length !== document.authors.length) return true
+    if (savePayload.authors.some((author, index) => author !== document.authors[index])) return true
+    if (savePayload.year !== document.year) return true
+    if ((savePayload.doi ?? '') !== (document.doi ?? '')) return true
+    if ((savePayload.isbn ?? '') !== (document.isbn ?? '')) return true
+    if ((savePayload.publisher ?? '') !== (document.publisher ?? '')) return true
+    if (savePayload.citationKey !== (document.citationKey ?? '')) return true
+    if ((savePayload.abstract ?? '') !== (document.abstract ?? '')) return true
+    if ((savePayload.coverImagePath ?? '') !== (document.coverImagePath ?? '')) return true
+    if (savePayload.readingStage !== document.readingStage) return true
+    if (savePayload.rating !== document.rating) return true
+    if (savePayload.favorite !== document.favorite) return true
+    return false
+  }, [document, savePayload])
+
   if (!id) {
     return <div className="p-6">Missing document id.</div>
   }
@@ -174,28 +586,91 @@ export default function DocumentDetailPage() {
   }
 
   const handleSave = async () => {
+    if (!document || !hasUnsavedChanges) return
     setIsSaving(true)
     try {
-      await updateDocument(document.id, {
-        title: title.trim() || document.title,
-        authors: authors
-          .split(',')
-          .map((author) => author.trim())
-          .filter(Boolean),
-        year: year ? Number(year) : undefined,
-        doi: doi.trim() || undefined,
-        isbn: isbn.trim() || undefined,
-        publisher: publisher.trim() || undefined,
-        citationKey: citationKey.trim() || '',
-        abstract: abstract.trim() || undefined,
-        readingStage,
-        rating,
-        favorite,
-      })
+      await updateDocument(document.id, savePayload)
     } finally {
       setIsSaving(false)
     }
   }
+
+  const handleSelectBookCoverFromComputer = async () => {
+    if (!isDesktopApp) return
+
+    const selected = await openFileDialog({
+      multiple: false,
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+      title: 'Choose a book cover image',
+    })
+
+    if (!selected || Array.isArray(selected)) return
+
+    const importedCoverPath = await repo.importBookCover(selected)
+    setCoverImagePath(importedCoverPath)
+    setBookCoverPhoneStatus('Cover selected from this computer.')
+  }
+
+  const handlePreparePhoneCoverUpload = async () => {
+    if (!isDesktopApp) return
+
+    setIsPreparingBookCoverPhoneUpload(true)
+    setBookCoverPhoneStatus('')
+    try {
+      const session = await repo.startBookCoverUploadSession()
+      const qrDataUrl = await QRCode.toDataURL(session.url, {
+        margin: 1,
+        width: 220,
+      })
+      setBookCoverPhoneSession({
+        token: session.token,
+        url: session.url,
+        qrDataUrl,
+      })
+      setBookCoverPhoneStatus('Scan with your phone on the same local network.')
+    } finally {
+      setIsPreparingBookCoverPhoneUpload(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!bookCoverPhoneSession?.token) return
+
+    const interval = window.setInterval(() => {
+      void repo.getBookCoverUploadSessionStatus(bookCoverPhoneSession.token).then((status) => {
+        if (status.status === 'completed' && status.imagePath) {
+          setCoverImagePath(status.imagePath)
+          setBookCoverPhoneStatus('Cover uploaded from your phone.')
+          setBookCoverPhoneSession(null)
+          return
+        }
+
+        if (status.status === 'expired') {
+          setBookCoverPhoneStatus('Phone upload expired. Start a new QR session if needed.')
+          setBookCoverPhoneSession(null)
+        }
+      }).catch((error) => {
+        console.error('Failed to poll book cover upload status:', error)
+      })
+    }, 1200)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [bookCoverPhoneSession?.token])
+
+  useEffect(() => {
+    if (!bookCoverPhoneSession) return
+
+    const timeoutId = window.setTimeout(() => {
+      bookCoverQrSectionRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      })
+    }, 80)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [bookCoverPhoneSession])
 
   const handleAddTag = async () => {
     if (!document || !tagInput.trim()) return
@@ -203,18 +678,116 @@ export default function DocumentDetailPage() {
     setTagInput('')
   }
 
-  const handleCreateRelation = async () => {
-    if (!document || !relationTargetId) return
+  const runMetadataCandidateSearch = async () => {
+    if (!document) return
+    setIsFetchingOnlineMetadata(true)
+    setMetadataDialogError('')
+    setMetadataCandidates([])
+    setSelectedMetadataCandidateId('')
+    try {
+      const settings = await loadOnlineMetadataEnrichmentSettings(isDesktopApp)
+      const trimmedSearchValue = metadataSearchValue.trim()
+      const trimmedAuthorSearchValue = metadataSearchAuthorValue.trim()
+      const candidates = await findDocumentMetadataCandidates(
+        buildDocumentMetadataSeed({
+          authors: JSON.stringify(
+            metadataSearchField === 'title_author'
+              ? (trimmedAuthorSearchValue ? [trimmedAuthorSearchValue] : [])
+              : document.authors,
+          ),
+          citationKey: document.citationKey,
+          doi: metadataSearchField === 'doi' ? (trimmedSearchValue || document.doi) : undefined,
+          title: metadataSearchField === 'doi'
+            ? ''
+            : (trimmedSearchValue || document.title),
+          year: document.year,
+        }),
+        settings,
+        { providers: metadataProviders },
+      )
+      setMetadataCandidates(candidates)
+      setSelectedMetadataCandidateId(candidates[0]?.id ?? '')
+      if (candidates.length === 0) {
+        setMetadataDialogError('No metadata candidates were found for this document.')
+      }
+    } catch (error) {
+      setMetadataDialogError(error instanceof Error ? error.message : 'Could not fetch metadata candidates.')
+    } finally {
+      setIsFetchingOnlineMetadata(false)
+    }
+  }
 
-    const sourceDocumentId = relationDirection === 'outbound' ? document.id : relationTargetId
-    const targetDocumentId = relationDirection === 'outbound' ? relationTargetId : document.id
+  const handleFetchOnlineMetadata = async () => {
+    if (!document) return
+    const hasDoi = doi.trim().length > 0
+    setMetadataSearchField(hasDoi ? 'doi' : 'title_author')
+    setMetadataSearchValue(hasDoi ? doi.trim() : title.trim())
+    setMetadataSearchAuthorValue(authors.split(',').map((entry) => entry.trim()).filter(Boolean)[0] ?? '')
+    setMetadataDialogError('')
+    setMetadataCandidates([])
+    setSelectedMetadataCandidateId('')
+    setIsMetadataDialogOpen(true)
+  }
+
+  const selectedMetadataCandidate = metadataCandidates.find((candidate) => candidate.id === selectedMetadataCandidateId) ?? metadataCandidates[0] ?? null
+
+  const handleApplyMetadataCandidate = async (
+    mode: 'fill_missing' | 'replace_unlocked',
+    candidateOverride?: DocumentMetadataCandidate | null,
+  ) => {
+    const candidate = candidateOverride ?? selectedMetadataCandidate
+    if (!document || !candidate) return
+    setIsApplyingMetadataCandidate(true)
+    try {
+      await applyFetchedMetadataCandidate(document.id, candidate.metadata, mode)
+      setIsMetadataDialogOpen(false)
+    } finally {
+      setIsApplyingMetadataCandidate(false)
+    }
+  }
+
+  const handleImportBibtexCandidate = () => {
+    const candidate = createMetadataCandidateFromBibtex(bibtexInput)
+    if (!candidate) {
+      setMetadataDialogError('Could not parse a usable BibTeX entry.')
+      return
+    }
+
+    setMetadataDialogError('')
+    setMetadataCandidates((current) => {
+      const next = [candidate, ...current.filter((entry) => entry.id !== candidate.id)]
+      return next
+    })
+    setSelectedMetadataCandidateId(candidate.id)
+  }
+
+  const toggleMetadataProvider = (provider: MetadataCandidateProvider) => {
+    setMetadataProviders((current) => {
+      if (current.includes(provider)) {
+        return current.length > 1 ? current.filter((entry) => entry !== provider) : current
+      }
+
+      const next = [...current, provider]
+      const orderedProviders: MetadataCandidateProvider[] = ['semantic_scholar', 'openalex', 'crossref']
+      return orderedProviders.filter((entry) => next.includes(entry))
+    })
+  }
+
+  const handleCreateRelation = async (direction: 'outbound' | 'inbound') => {
+    if (!document) return
+
+    const relationTargetId = direction === 'outbound' ? outgoingRelationTargetId : incomingRelationTargetId
+    if (!relationTargetId) return
+
+    const sourceDocumentId = direction === 'outbound' ? document.id : relationTargetId
+    const targetDocumentId = direction === 'outbound' ? relationTargetId : document.id
 
     const alreadyExists = relations.some(
       (relation) =>
         relation.sourceDocumentId === sourceDocumentId
         && relation.targetDocumentId === targetDocumentId
         && relation.linkOrigin === 'user'
-        && relation.linkType === relationType,
+        && relation.linkType === 'manual',
     )
 
     if (alreadyExists) return
@@ -224,16 +797,16 @@ export default function DocumentDetailPage() {
       await createRelation({
         sourceDocumentId,
         targetDocumentId,
-        linkType: relationType,
+        linkType: 'manual',
         linkOrigin: 'user',
-        label: relationLabel.trim() || undefined,
-        notes: relationNotes.trim() || undefined,
       })
-      setRelationTargetId('')
-      setRelationLabel('')
-      setRelationNotes('')
-      setRelationType('manual')
-      setRelationDirection('outbound')
+      if (direction === 'outbound') {
+        setOutgoingRelationTargetId('')
+        setIsOutgoingRelationPickerOpen(false)
+      } else {
+        setIncomingRelationTargetId('')
+        setIsIncomingRelationPickerOpen(false)
+      }
     } finally {
       setIsCreatingRelation(false)
     }
@@ -243,11 +816,92 @@ export default function DocumentDetailPage() {
     titleText: string,
     items: RelationListItem[],
     emptyText: string,
+    direction: 'outbound' | 'inbound',
   ) => (
     <section className="rounded-lg border border-border p-4">
       <div className="mb-3 flex items-center gap-2">
         <Link2 className="h-4 w-4 text-muted-foreground" />
         <Label className="text-sm font-medium">{titleText}</Label>
+      </div>
+      <div className="mb-4 flex gap-2">
+        <Popover
+          open={direction === 'outbound' ? isOutgoingRelationPickerOpen : isIncomingRelationPickerOpen}
+          onOpenChange={direction === 'outbound' ? setIsOutgoingRelationPickerOpen : setIsIncomingRelationPickerOpen}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              role="combobox"
+              aria-expanded={direction === 'outbound' ? isOutgoingRelationPickerOpen : isIncomingRelationPickerOpen}
+              className="flex-1 justify-between font-normal"
+            >
+              <span className="truncate">
+                {(direction === 'outbound' ? outgoingRelationTargetId : incomingRelationTargetId)
+                  ? availableRelationTargets.find(
+                    (targetDocument) =>
+                      targetDocument.id === (direction === 'outbound' ? outgoingRelationTargetId : incomingRelationTargetId),
+                  )?.title ?? 'Select a document'
+                  : 'Select a document'}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search document titles..." />
+              <CommandList>
+                <CommandEmpty>No document found.</CommandEmpty>
+                <CommandGroup>
+                  {availableRelationTargets.map((targetDocument) => {
+                    const selectedTargetId = direction === 'outbound' ? outgoingRelationTargetId : incomingRelationTargetId
+                    return (
+                      <CommandItem
+                        key={`${direction}-${targetDocument.id}`}
+                        value={[
+                          targetDocument.title,
+                          targetDocument.authors.join(' '),
+                          targetDocument.year ? String(targetDocument.year) : '',
+                        ].join(' ')}
+                        onSelect={() => {
+                          if (direction === 'outbound') {
+                            setOutgoingRelationTargetId(targetDocument.id)
+                            setIsOutgoingRelationPickerOpen(false)
+                          } else {
+                            setIncomingRelationTargetId(targetDocument.id)
+                            setIsIncomingRelationPickerOpen(false)
+                          }
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            'mr-2 h-4 w-4',
+                            selectedTargetId === targetDocument.id ? 'opacity-100' : 'opacity-0',
+                          )}
+                        />
+                        <div className="min-w-0">
+                          <div className="truncate">{targetDocument.title}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {targetDocument.authors.join(', ') || 'Unknown author'}
+                            {targetDocument.year ? ` â€¢ ${targetDocument.year}` : ''}
+                          </div>
+                        </div>
+                      </CommandItem>
+                    )
+                  })}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void handleCreateRelation(direction)}
+          disabled={!(direction === 'outbound' ? outgoingRelationTargetId : incomingRelationTargetId) || isCreatingRelation}
+        >
+          {isCreatingRelation ? 'Adding...' : 'Add'}
+        </Button>
       </div>
       {items.length > 0 ? (
         <div className="space-y-2">
@@ -270,17 +924,17 @@ export default function DocumentDetailPage() {
                   </Link>
                   <p className="text-xs text-muted-foreground">
                     {relatedDocument.authors.join(', ') || 'Unknown author'}
-                    {relatedDocument.year ? ` • ${relatedDocument.year}` : ''}
+                    {relatedDocument.year ? ` â€¢ ${relatedDocument.year}` : ''}
                     {libraryNameById.get(relatedDocument.libraryId)
-                      ? ` • ${libraryNameById.get(relatedDocument.libraryId)}`
+                      ? ` â€¢ ${libraryNameById.get(relatedDocument.libraryId)}`
                       : ''}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {relatedRelation.linkOrigin === 'auto' ? 'Automatic' : 'Manual'}
                     {relatedRelation.linkType !== 'manual'
-                      ? ` • ${relatedRelation.linkType.replaceAll('_', ' ')}`
+                      ? ` â€¢ ${relatedRelation.linkType.replaceAll('_', ' ')}`
                       : ''}
-                    {relatedRelation.label ? ` • ${relatedRelation.label}` : ''}
+                    {relatedRelation.label ? ` â€¢ ${relatedRelation.label}` : ''}
                   </p>
                 </div>
                 <Button
@@ -302,6 +956,13 @@ export default function DocumentDetailPage() {
     </section>
   )
 
+  const showPdfPreview = document.documentType === 'pdf' && Boolean(document.filePath)
+  const bookCoverPreviewUrl = coverImagePath
+    ? isDesktopApp
+      ? convertFileSrc(coverImagePath)
+      : coverImagePath
+    : ''
+
   return (
     <div className="p-6">
       <div className="mx-auto flex max-w-5xl flex-col gap-6">
@@ -319,20 +980,41 @@ export default function DocumentDetailPage() {
                 href={
                   document.documentType === 'physical_book'
                     ? `/books/notes?id=${document.id}`
-                    : `/reader/view?id=${document.id}`
+                    : document.documentType === 'my_work'
+                      ? `/documents?id=${document.id}`
+                      : `/reader/view?id=${document.id}`
                 }
               >
                 <BookOpen className="mr-2 h-4 w-4" />
-                {document.documentType === 'physical_book' ? 'Open Notes' : 'Open Reader'}
+                {document.documentType === 'physical_book'
+                  ? 'Open Notes'
+                  : document.documentType === 'my_work'
+                    ? 'Open Details'
+                    : 'Open Reader'}
               </Link>
             </Button>
-            <Button onClick={() => void handleSave()} disabled={isSaving}>
-              <Save className="mr-2 h-4 w-4" />
-              {isSaving ? 'Saving...' : 'Save'}
-            </Button>
+            {hasUnsavedChanges ? (
+              <Button onClick={() => void handleSave()} disabled={isSaving}>
+                <Save className="mr-2 h-4 w-4" />
+                {isSaving ? 'Saving...' : 'Save'}
+              </Button>
+            ) : null}
           </div>
         </div>
 
+        <div
+          className={cn(
+            'grid gap-6',
+            showPdfPreview ? 'xl:grid-cols-[520px_minmax(0,1fr)] 2xl:grid-cols-[580px_minmax(0,1fr)]' : '',
+          )}
+        >
+          {showPdfPreview ? (
+            <div className="xl:sticky xl:top-6 xl:self-start">
+              <DocumentPdfPreview document={document} />
+            </div>
+          ) : null}
+
+          <div className="space-y-6">
         <Card>
           <Collapsible open={detailsExpanded} onOpenChange={setDetailsExpanded}>
             <CardHeader>
@@ -343,6 +1025,44 @@ export default function DocumentDetailPage() {
             </CardHeader>
             <CollapsibleContent>
               <CardContent>
+                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+                  <span>Try fetching cleaner metadata from Crossref or Semantic Scholar.</span>
+                    <Button variant="outline" size="sm" onClick={() => void handleFetchOnlineMetadata()} disabled={isFetchingOnlineMetadata}>
+                      <Globe className="mr-2 h-4 w-4" />
+                      {isFetchingOnlineMetadata ? 'Searchingâ€¦' : 'Find Metadata Online'}
+                    </Button>
+                </div>
+                <div className="mb-4 rounded-lg border border-border">
+                  <Collapsible open={bibtexExpanded} onOpenChange={setBibtexExpanded}>
+                    <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+                      <div>
+                        <p className="text-sm font-medium">Paste BibTeX</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Import a manual metadata candidate from a BibTeX entry.</p>
+                      </div>
+                      <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${bibtexExpanded ? 'rotate-180' : ''}`} />
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="border-t border-border px-4 py-4">
+                        <Textarea
+                          className="min-h-32 font-mono text-xs"
+                          value={bibtexInput}
+                          onChange={(event) => setBibtexInput(event.target.value)}
+                          placeholder="@article{key,...}"
+                        />
+                        <div className="mt-3 flex justify-end">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleImportBibtexCandidate}
+                            disabled={bibtexInput.trim().length === 0}
+                          >
+                            Import BibTeX Candidate
+                          </Button>
+                        </div>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="md:col-span-2">
                     <Label htmlFor="title">Title</Label>
@@ -432,6 +1152,78 @@ export default function DocumentDetailPage() {
                       onChange={(event) => setAbstract(event.target.value)}
                     />
                   </div>
+
+                  {document.documentType === 'physical_book' ? (
+                    <div className="md:col-span-2 space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
+                      <div className="space-y-1">
+                        <Label>Book photo</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Add or change the physical book cover from this computer or from your phone.
+                        </p>
+                      </div>
+
+                      {bookCoverPreviewUrl ? (
+                        <div className="overflow-hidden rounded-xl border border-border/70 bg-background">
+                          <img
+                            src={bookCoverPreviewUrl}
+                            alt="Book cover preview"
+                            className="h-52 w-full object-cover"
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/70 bg-background text-sm text-muted-foreground">
+                          No photo selected yet
+                        </div>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" variant="outline" onClick={() => void handleSelectBookCoverFromComputer()}>
+                          <ImagePlus className="mr-2 h-4 w-4" />
+                          Upload from PC
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void handlePreparePhoneCoverUpload()}
+                          disabled={isPreparingBookCoverPhoneUpload}
+                        >
+                          <Smartphone className="mr-2 h-4 w-4" />
+                          {isPreparingBookCoverPhoneUpload ? 'Preparing QR...' : 'Add from phone'}
+                        </Button>
+                        {coverImagePath ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              setCoverImagePath('')
+                              setBookCoverPhoneStatus('')
+                            }}
+                          >
+                            Remove photo
+                          </Button>
+                        ) : null}
+                      </div>
+
+                      {bookCoverPhoneStatus ? (
+                        <p className="text-sm text-muted-foreground">{bookCoverPhoneStatus}</p>
+                      ) : null}
+
+                      {bookCoverPhoneSession ? (
+                        <div ref={bookCoverQrSectionRef} className="grid gap-4 rounded-xl border border-border/70 bg-background p-4 md:grid-cols-[220px_minmax(0,1fr)]">
+                          <div className="overflow-hidden rounded-lg border border-border/70 bg-white p-2">
+                            <img src={bookCoverPhoneSession.qrDataUrl} alt="QR code for phone cover upload" className="h-auto w-full" />
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-sm font-medium">Scan with your phone</p>
+                            <p className="text-sm text-muted-foreground">
+                              Keep the desktop app open. Your phone and computer need to be on the same local network.
+                            </p>
+                            <Input readOnly value={bookCoverPhoneSession.url} className="text-xs" />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               </CardContent>
             </CollapsibleContent>
@@ -563,7 +1355,7 @@ export default function DocumentDetailPage() {
                   <div>
                     <CardTitle>Document Links</CardTitle>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      Incoming, outgoing, and manual relationships
+                      Add and manage inbound and outbound references
                     </div>
                   </div>
                 </div>
@@ -575,158 +1367,199 @@ export default function DocumentDetailPage() {
                 {renderRelationList(
                   'Makes reference to',
                   relationItems.outgoing,
-                  'No outgoing links saved for this document.',
+                  'none',
+                  'outbound',
                 )}
                 {renderRelationList(
                   'Is referenced by',
                   relationItems.incoming,
-                  'No incoming links saved for this document.',
+                  'none',
+                  'inbound',
                 )}
-
-                <section className="rounded-lg border border-dashed border-border p-4">
-                  <div className="mb-4">
-                    <Label className="text-sm font-medium">Add manual link</Label>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Create a manual relationship without leaving the details page.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <Label htmlFor="relation-direction">Direction</Label>
-                      <Select
-                        value={relationDirection}
-                        onValueChange={(value) => setRelationDirection(value as 'outbound' | 'inbound')}
-                      >
-                        <SelectTrigger id="relation-direction" className="mt-1.5">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="outbound">Makes reference to</SelectItem>
-                          <SelectItem value="inbound">Is referenced by</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label htmlFor="relation-target">Document</Label>
-                      <Popover open={isRelationTargetPickerOpen} onOpenChange={setIsRelationTargetPickerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            id="relation-target"
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={isRelationTargetPickerOpen}
-                            className="mt-1.5 w-full justify-between font-normal"
-                          >
-                            <span className="truncate">
-                              {relationTargetId
-                                ? availableRelationTargets.find((targetDocument) => targetDocument.id === relationTargetId)?.title ?? 'Select a document'
-                                : 'Select a document'}
-                            </span>
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-                          <Command>
-                            <CommandInput placeholder="Search document titles..." />
-                            <CommandList>
-                              <CommandEmpty>No document found.</CommandEmpty>
-                              <CommandGroup>
-                                {availableRelationTargets.map((targetDocument) => (
-                                  <CommandItem
-                                    key={targetDocument.id}
-                                    value={[
-                                      targetDocument.title,
-                                      targetDocument.authors.join(' '),
-                                      targetDocument.year ? String(targetDocument.year) : '',
-                                    ].join(' ')}
-                                    onSelect={() => {
-                                      setRelationTargetId(targetDocument.id)
-                                      setIsRelationTargetPickerOpen(false)
-                                    }}
-                                  >
-                                    <Check
-                                      className={cn(
-                                        'mr-2 h-4 w-4',
-                                        relationTargetId === targetDocument.id ? 'opacity-100' : 'opacity-0',
-                                      )}
-                                    />
-                                    <div className="min-w-0">
-                                      <div className="truncate">{targetDocument.title}</div>
-                                      <div className="text-xs text-muted-foreground">
-                                        {targetDocument.authors.join(', ') || 'Unknown author'}
-                                        {targetDocument.year ? ` • ${targetDocument.year}` : ''}
-                                      </div>
-                                    </div>
-                                  </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-
-                    <div>
-                      <Label htmlFor="relation-type">Relationship type</Label>
-                      <Select
-                        value={relationType}
-                        onValueChange={(value) => setRelationType(value as DocumentRelationLinkType)}
-                      >
-                        <SelectTrigger id="relation-type" className="mt-1.5">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="manual">Manual</SelectItem>
-                          <SelectItem value="related">Related</SelectItem>
-                          <SelectItem value="supports">Supports</SelectItem>
-                          <SelectItem value="contradicts">Contradicts</SelectItem>
-                          <SelectItem value="same_topic">Same topic</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label htmlFor="relation-label">Label</Label>
-                      <Input
-                        id="relation-label"
-                        className="mt-1.5"
-                        value={relationLabel}
-                        onChange={(event) => setRelationLabel(event.target.value)}
-                        placeholder="Optional short label"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <Label htmlFor="relation-notes">Notes</Label>
-                      <Textarea
-                        id="relation-notes"
-                        className="mt-1.5 min-h-24"
-                        value={relationNotes}
-                        onChange={(event) => setRelationNotes(event.target.value)}
-                        placeholder="Optional note about why these documents are linked"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void handleCreateRelation()}
-                      disabled={!relationTargetId || isCreatingRelation}
-                    >
-                      {isCreatingRelation ? 'Adding link...' : 'Add Link'}
-                    </Button>
-                  </div>
-                </section>
               </CardContent>
             </CollapsibleContent>
           </Collapsible>
         </Card>
+          </div>
+        </div>
       </div>
+
+      <Dialog open={isMetadataDialogOpen} onOpenChange={setIsMetadataDialogOpen}>
+        <DialogContent className="max-h-[78vh] max-w-5xl overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>Find Metadata Online</DialogTitle>
+            <DialogDescription>Search and apply metadata candidates from your selected providers.</DialogDescription>
+          </DialogHeader>
+
+          <div className="h-[58vh] min-h-0 overflow-y-auto pr-1">
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border p-4">
+                <div className="grid gap-4 lg:grid-cols-[180px_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    <Label>Search by</Label>
+                    <Select
+                      value={metadataSearchField}
+                      onValueChange={(value) => {
+                        const nextField = value as 'title' | 'doi' | 'title_author'
+                        setMetadataSearchField(nextField)
+                        setMetadataSearchValue(nextField === 'doi' ? doi.trim() : title.trim())
+                        setMetadataSearchAuthorValue(authors.split(',').map((entry) => entry.trim()).filter(Boolean)[0] ?? '')
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="title_author">Title & Author</SelectItem>
+                        <SelectItem value="title">Title</SelectItem>
+                        <SelectItem value="doi">DOI</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <Label>{metadataSearchField === 'doi' ? 'DOI query' : 'Title query'}</Label>
+                      <Input
+                        value={metadataSearchValue}
+                        onChange={(event) => setMetadataSearchValue(event.target.value)}
+                        placeholder={metadataSearchField === 'doi' ? '10.xxxx/...' : 'Document title'}
+                      />
+                    </div>
+                    {metadataSearchField === 'title_author' ? (
+                      <div className="space-y-2">
+                        <Label>Author query</Label>
+                        <Input
+                          value={metadataSearchAuthorValue}
+                          onChange={(event) => setMetadataSearchAuthorValue(event.target.value)}
+                          placeholder="Optional author name"
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  <Label>Providers</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      ['semantic_scholar', 'Semantic Scholar'],
+                      ['openalex', 'OpenAlex'],
+                      ['crossref', 'Crossref'],
+                    ] as Array<[MetadataCandidateProvider, string]>).map(([provider, label]) => (
+                      <Button
+                        key={provider}
+                        type="button"
+                        variant={metadataProviders.includes(provider) ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => toggleMetadataProvider(provider)}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Results are prioritized as Semantic Scholar, OpenAlex, then Crossref.
+                  </p>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void runMetadataCandidateSearch()}
+                    disabled={
+                      isFetchingOnlineMetadata
+                      || metadataProviders.length === 0
+                      || (
+                        metadataSearchField === 'doi'
+                          ? metadataSearchValue.trim().length === 0
+                          : metadataSearchValue.trim().length === 0 && metadataSearchAuthorValue.trim().length === 0
+                      )
+                    }
+                  >
+                    <Globe className="mr-2 h-4 w-4" />
+                    {isFetchingOnlineMetadata ? 'Searching…' : 'Search Metadata'}
+                  </Button>
+                </div>
+              </div>
+
+              {isFetchingOnlineMetadata ? (
+                <div className="flex items-center justify-center rounded-lg border border-dashed border-border px-4 py-10 text-sm text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+              ) : metadataCandidates.length > 0 ? (
+                metadataCandidates.map((candidate) => (
+                  <div
+                    key={candidate.id}
+                    className={cn(
+                      'rounded-lg border px-4 py-4 transition-colors',
+                      selectedMetadataCandidateId === candidate.id ? 'border-primary bg-primary/5' : 'border-border',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => setSelectedMetadataCandidateId(candidate.id)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">
+                          {candidate.source === 'semantic_scholar'
+                            ? 'Semantic Scholar'
+                            : candidate.source === 'openalex'
+                              ? 'OpenAlex'
+                              : candidate.source === 'crossref'
+                                ? 'Crossref'
+                                : 'BibTeX'}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {candidate.matchedBy === 'doi' ? 'DOI match' : 'Title match'}
+                        </span>
+                      </div>
+                      <p className="mt-2 break-words text-sm font-medium leading-5">{candidate.title || 'Untitled result'}</p>
+                      <p className="mt-1 break-words text-xs text-muted-foreground">
+                        {candidate.authors.join(', ') || 'Unknown author'}
+                        {candidate.year ? ` • ${candidate.year}` : ''}
+                        {candidate.doi ? ` • ${candidate.doi}` : ''}
+                      </p>
+                    </button>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleApplyMetadataCandidate('fill_missing', candidate)}
+                        disabled={isApplyingMetadataCandidate}
+                      >
+                        {isApplyingMetadataCandidate && selectedMetadataCandidateId === candidate.id ? 'Applying…' : 'Fill Missing Fields'}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void handleApplyMetadataCandidate('replace_unlocked', candidate)}
+                        disabled={isApplyingMetadataCandidate}
+                      >
+                        {isApplyingMetadataCandidate && selectedMetadataCandidateId === candidate.id ? 'Applying…' : 'Apply Candidate'}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                  {metadataDialogError || 'No metadata candidates yet.'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsMetadataDialogOpen(false)} disabled={isApplyingMetadataCandidate}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

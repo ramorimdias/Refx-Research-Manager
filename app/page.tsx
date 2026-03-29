@@ -10,6 +10,14 @@ import { EmptyState } from '@/components/refx/common'
 import { useAppStore } from '@/lib/store'
 import { loadAppSettings } from '@/lib/app-settings'
 
+function getDocumentHref(document: ReturnType<typeof useAppStore.getState>['documents'][number]) {
+  return document.documentType === 'my_work'
+    ? `/documents?id=${document.id}`
+    : document.documentType === 'physical_book'
+      ? `/books/notes?id=${document.id}`
+      : `/reader/view?id=${document.id}`
+}
+
 type DashboardActivity = {
   id: string
   title: string
@@ -88,7 +96,7 @@ export default function HomePage() {
       id: `document-added-${document.id}`,
       title: 'Document added to library',
       detail: `${document.title} · ${librariesById.get(document.libraryId)?.name ?? 'Library'}`,
-      href: document.documentType === 'physical_book' ? `/books/notes?id=${document.id}` : `/reader/view?id=${document.id}`,
+      href: getDocumentHref(document),
       occurredAt: document.createdAt,
       icon: FilePlus2,
     }))
@@ -101,7 +109,7 @@ export default function HomePage() {
         const documentTitle = note.documentId ? documentsById.get(note.documentId)?.title : null
         return documentTitle ? `${noteTitle} · ${documentTitle}` : noteTitle
       })(),
-      href: note.documentId ? `/reader/view?id=${note.documentId}` : '/notes',
+      href: note.documentId ? (documentsById.get(note.documentId) ? getDocumentHref(documentsById.get(note.documentId)!) : '/notes') : '/notes',
       occurredAt: new Date(note.createdAt),
       icon: StickyNote,
     }))
@@ -118,7 +126,7 @@ export default function HomePage() {
           id: `annotation-${annotation.id}`,
           title: isHighlight ? 'Highlight created' : 'Annotation created',
           detail: `${document.title}${pageLabel}`,
-          href: `/reader/view?id=${document.id}&page=${annotation.pageNumber}`,
+          href: getDocumentHref(document),
           occurredAt: new Date(annotation.createdAt),
           icon: Highlighter,
         }
@@ -131,7 +139,7 @@ export default function HomePage() {
         id: `finished-${document.id}`,
         title: 'Finished reading',
         detail: document.title,
-        href: document.documentType === 'physical_book' ? `/books/notes?id=${document.id}` : `/reader/view?id=${document.id}`,
+        href: getDocumentHref(document),
         occurredAt: document.updatedAt,
         icon: CheckCircle2,
       }))

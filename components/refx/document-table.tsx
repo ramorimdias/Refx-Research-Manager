@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import type { CheckedState } from '@radix-ui/react-checkbox'
-import { BookMarked, FileText, MessageSquare, MoreHorizontal, Settings2, Star } from 'lucide-react'
+import { BookMarked, ChevronDown, ChevronUp, FileText, MessageSquare, MoreHorizontal, Settings2, Star } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -28,7 +28,7 @@ import {
 import { useDocumentListSelection } from '@/lib/hooks/use-document-list-selection'
 import { cn } from '@/lib/utils'
 import type { Document, DocumentEphemeralUiFlags, ReadingStage } from '@/lib/types'
-import { MetadataStatusBadge, NewBadge, OcrStatusBadge, ReadingStageBadge, StarRating } from './common'
+import { NewBadge, OcrStatusBadge, ReadingStageBadge, StarRating } from './common'
 import { DocumentBulkActions } from './document-bulk-actions'
 import { useAppStore } from '@/lib/store'
 import { DocumentActions, DocumentContextMenu } from './document-actions'
@@ -38,7 +38,7 @@ interface DocumentTableProps {
   ephemeralFlagsById?: Record<string, DocumentEphemeralUiFlags>
 }
 
-type ColumnKey = 'favorite' | 'title' | 'authors' | 'year' | 'status' | 'comments' | 'rating'
+type ColumnKey = 'favorite' | 'title' | 'authors' | 'year' | 'status' | 'metadata' | 'comments' | 'rating'
 
 type ColumnDefinition = {
   key: ColumnKey
@@ -50,6 +50,7 @@ type ColumnDefinition = {
 
 const TABLE_WIDTHS_KEY = 'refx-library-table-widths'
 const TABLE_VISIBILITY_KEY = 'refx-library-table-visibility'
+const TABLE_ORDER_KEY = 'refx-library-table-order'
 const SELECTION_IGNORE_SELECTOR = 'a, button, input, textarea, select, [role="checkbox"], [data-selection-ignore="true"]'
 const STICKY_HEADER_CLASS_NAME = 'sticky top-0 z-10 bg-background/95 shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur supports-[backdrop-filter]:bg-background/90'
 
@@ -59,28 +60,49 @@ const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: 'authors', label: 'Authors', defaultWidth: 220, minWidth: 140, hideable: true },
   { key: 'year', label: 'Year', defaultWidth: 80, minWidth: 70, hideable: true },
   { key: 'status', label: 'Status', defaultWidth: 150, minWidth: 120, hideable: true },
+  { key: 'metadata', label: 'Metadata', defaultWidth: 160, minWidth: 130, hideable: true },
   { key: 'comments', label: 'Comments', defaultWidth: 170, minWidth: 150, hideable: true },
   { key: 'rating', label: 'Rating', defaultWidth: 140, minWidth: 110, hideable: true },
 ]
 
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMN_DEFINITIONS.map((column) => [column.key, column.defaultWidth])) as Record<ColumnKey, number>
 const DEFAULT_VISIBILITY = Object.fromEntries(COLUMN_DEFINITIONS.map((column) => [column.key, true])) as Record<ColumnKey, boolean>
+const DEFAULT_ORDER = COLUMN_DEFINITIONS.map((column) => column.key)
 const READING_STAGE_OPTIONS: Array<{ value: ReadingStage; label: string }> = [
   { value: 'unread', label: 'Unread' },
   { value: 'reading', label: 'Reading' },
   { value: 'finished', label: 'Finished' },
 ]
 
+function getTableMetadataState(document: Document) {
+  const hasTitle = document.title.trim().length > 0
+  const hasAuthors = document.authors.length > 0
+  const hasYear = typeof document.year === 'number'
+  const hasDoi = (document.doi ?? '').trim().length > 0
+
+  if (hasTitle && hasAuthors && hasYear) {
+    return { label: 'Complete', className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
+  }
+
+  if (hasDoi) {
+    return { label: 'Fetch Possible', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
+  }
+
+  return { label: 'Missing', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+}
+
 export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTableProps) {
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(DEFAULT_WIDTHS)
   const [columnVisibility, setColumnVisibility] = useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBILITY)
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_ORDER)
   const [resizingColumn, setResizingColumn] = useState<{ key: ColumnKey; startX: number; startWidth: number } | null>(null)
   const { toggleFavorite, updateDocument, refreshTagSuggestionsForDocuments } = useAppStore()
   const selection = useDocumentListSelection(documents.map((document) => document.id))
 
   useEffect(() => {
-    const storedWidths = window.sessionStorage.getItem(TABLE_WIDTHS_KEY)
-    const storedVisibility = window.sessionStorage.getItem(TABLE_VISIBILITY_KEY)
+    const storedWidths = window.localStorage.getItem(TABLE_WIDTHS_KEY)
+    const storedVisibility = window.localStorage.getItem(TABLE_VISIBILITY_KEY)
+    const storedOrder = window.localStorage.getItem(TABLE_ORDER_KEY)
 
     if (storedWidths) {
       try {
@@ -99,15 +121,33 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
         // Ignore malformed session state.
       }
     }
+
+    if (storedOrder) {
+      try {
+        const parsed = JSON.parse(storedOrder) as ColumnKey[]
+        const allowedKeys = new Set(DEFAULT_ORDER)
+        const nextOrder = parsed.filter((key) => allowedKeys.has(key))
+        const missing = DEFAULT_ORDER.filter((key) => !nextOrder.includes(key))
+        if (nextOrder.length > 0) {
+          setColumnOrder([...nextOrder, ...missing])
+        }
+      } catch {
+        // Ignore malformed session state.
+      }
+    }
   }, [])
 
   useEffect(() => {
-    window.sessionStorage.setItem(TABLE_WIDTHS_KEY, JSON.stringify(columnWidths))
+    window.localStorage.setItem(TABLE_WIDTHS_KEY, JSON.stringify(columnWidths))
   }, [columnWidths])
 
   useEffect(() => {
-    window.sessionStorage.setItem(TABLE_VISIBILITY_KEY, JSON.stringify(columnVisibility))
+    window.localStorage.setItem(TABLE_VISIBILITY_KEY, JSON.stringify(columnVisibility))
   }, [columnVisibility])
+
+  useEffect(() => {
+    window.localStorage.setItem(TABLE_ORDER_KEY, JSON.stringify(columnOrder))
+  }, [columnOrder])
 
   useEffect(() => {
     if (!resizingColumn) return
@@ -143,8 +183,18 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
   }, [resizingColumn])
 
   const visibleColumns = useMemo(
-    () => COLUMN_DEFINITIONS.filter((column) => columnVisibility[column.key]),
-    [columnVisibility],
+    () => columnOrder
+      .map((key) => COLUMN_DEFINITIONS.find((column) => column.key === key))
+      .filter((column): column is ColumnDefinition => Boolean(column))
+      .filter((column) => columnVisibility[column.key]),
+    [columnOrder, columnVisibility],
+  )
+
+  const orderedColumns = useMemo(
+    () => columnOrder
+      .map((key) => COLUMN_DEFINITIONS.find((column) => column.key === key))
+      .filter((column): column is ColumnDefinition => Boolean(column)),
+    [columnOrder],
   )
 
   const beginResize = (key: ColumnKey, event: React.MouseEvent<HTMLDivElement>) => {
@@ -163,6 +213,18 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
       ...current,
       [key]: visible,
     }))
+  }
+
+  const moveColumn = (key: ColumnKey, direction: 'up' | 'down') => {
+    setColumnOrder((current) => {
+      const index = current.indexOf(key)
+      if (index === -1) return current
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (targetIndex < 0 || targetIndex >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[targetIndex]] = [next[targetIndex], next[index]]
+      return next
+    })
   }
 
   const handleRowClick = (id: string, event: React.MouseEvent<HTMLTableRowElement>) => {
@@ -199,6 +261,13 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
     selection.clearSelection()
   }
 
+  const getOpenHref = (document: Document) =>
+    document.documentType === 'my_work'
+      ? `/documents?id=${document.id}`
+      : document.documentType === 'physical_book'
+        ? `/books/notes?id=${document.id}`
+        : `/reader/view?id=${document.id}`
+
   const renderResizeHandle = (key: ColumnKey) => (
     <div
       role="presentation"
@@ -206,6 +275,168 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
       className="absolute right-0 top-0 h-full w-2 cursor-col-resize select-none"
     />
   )
+
+  const renderHeaderCell = (column: ColumnDefinition) => {
+    const centered = column.key === 'year' || column.key === 'comments'
+    return (
+      <TableHead key={column.key} className={cn('relative', centered && 'text-center', STICKY_HEADER_CLASS_NAME)}>
+        {column.label}
+        {renderResizeHandle(column.key)}
+      </TableHead>
+    )
+  }
+
+  const renderDocumentCell = (doc: Document, column: ColumnDefinition, ephemeralFlags?: DocumentEphemeralUiFlags) => {
+    switch (column.key) {
+      case 'favorite':
+        return (
+          <TableCell key={column.key}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => toggleFavorite(doc.id)}
+              className={cn(
+                'rounded-full transition-colors',
+                doc.favorite ? 'text-amber-400' : 'text-muted-foreground/30 hover:text-amber-400',
+              )}
+            >
+              <Star className="h-4 w-4" fill={doc.favorite ? 'currentColor' : 'none'} />
+            </Button>
+          </TableCell>
+        )
+      case 'title':
+        return (
+          <TableCell key={column.key}>
+            <Link href={getOpenHref(doc)} className="group/link flex items-start gap-2">
+              {doc.documentType === 'physical_book' ? <BookMarked className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+              <div className="min-w-0">
+                <div className="flex items-start gap-2">
+                  <span className="block min-w-0 truncate font-medium text-foreground transition-colors group-hover/link:text-primary">
+                    {doc.title}
+                  </span>
+                  {ephemeralFlags?.isNewlyAdded && <NewBadge />}
+                </div>
+                {doc.tags.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {doc.tags.slice(0, 3).map((tag) => (
+                      <Badge key={tag} variant="secondary" className="py-0 text-xs">
+                        {tag}
+                      </Badge>
+                    ))}
+                    {doc.tags.length > 3 && (
+                      <Badge variant="secondary" className="py-0 text-xs">
+                        +{doc.tags.length - 3}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Link>
+          </TableCell>
+        )
+      case 'authors':
+        return (
+          <TableCell key={column.key}>
+            <span className="block truncate text-sm text-muted-foreground">
+              {doc.authors.slice(0, 2).join(', ')}
+              {doc.authors.length > 2 && ' et al.'}
+            </span>
+          </TableCell>
+        )
+      case 'year':
+        return (
+          <TableCell key={column.key} className="text-center">
+            <span className="text-sm">{doc.year || '—'}</span>
+          </TableCell>
+        )
+      case 'status':
+        return (
+          <TableCell key={column.key}>
+            <div className="flex flex-col gap-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    data-selection-ignore="true"
+                    className="w-fit rounded-full"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <ReadingStageBadge stage={doc.readingStage} />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
+                  <DropdownMenuLabel>Reading Status</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuRadioGroup
+                    value={doc.readingStage}
+                    onValueChange={(value) => void updateDocument(doc.id, { readingStage: value as ReadingStage })}
+                  >
+                    {READING_STAGE_OPTIONS.map((stage) => (
+                      <DropdownMenuRadioItem key={stage.value} value={stage.value}>
+                        {stage.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {doc.hasOcr && <OcrStatusBadge status={doc.ocrStatus} />}
+            </div>
+          </TableCell>
+        )
+      case 'metadata':
+        return (
+          <TableCell key={column.key}>
+            {(() => {
+              const metadataState = getTableMetadataState(doc)
+              const isFetchPossible = metadataState.label === 'Fetch Possible'
+              return (
+                isFetchPossible ? (
+                  <Link
+                    href={`/documents?id=${doc.id}&metadata=doi&autoSearchMetadata=1`}
+                    className="inline-flex"
+                    data-selection-ignore="true"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <Badge className={cn('border-0 cursor-pointer transition-opacity hover:opacity-85', metadataState.className)}>
+                      {metadataState.label}
+                    </Badge>
+                  </Link>
+                ) : (
+                  <Badge className={cn('border-0', metadataState.className)}>
+                    {metadataState.label}
+                  </Badge>
+                )
+              )
+            })()}
+          </TableCell>
+        )
+      case 'comments':
+        return (
+          <TableCell key={column.key} className="text-center">
+            <div className="flex items-center justify-center gap-2">
+              <Button asChild variant="outline" size="icon-sm" className="rounded-full">
+                <Link href={`/comments?id=${doc.id}`}>
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span className="sr-only">Open comments</span>
+                </Link>
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                {doc.notesCount} notes
+              </span>
+            </div>
+          </TableCell>
+        )
+      case 'rating':
+        return (
+          <TableCell key={column.key}>
+            <StarRating rating={doc.rating} onChange={(rating) => updateDocument(doc.id, { rating })} />
+          </TableCell>
+        )
+      default:
+        return null
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border/80 bg-background shadow-[0_10px_28px_rgba(15,23,42,0.04)]">
@@ -244,6 +475,45 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                   {column.label}
                 </DropdownMenuCheckboxItem>
               ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Column Order</DropdownMenuLabel>
+              <div className="space-y-1 p-1">
+                {orderedColumns.map((column, index) => (
+                  <div key={column.key} className="flex items-center justify-between rounded-md px-2 py-1 text-sm">
+                    <span className="truncate">{column.label}</span>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="h-7 w-7 rounded-full"
+                        disabled={index === 0}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          moveColumn(column.key, 'up')
+                        }}
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="h-7 w-7 rounded-full"
+                        disabled={index === orderedColumns.length - 1}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          moveColumn(column.key, 'down')
+                        }}
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -265,13 +535,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                 onCheckedChange={handleSelectAllChange}
               />
             </TableHead>
-            {columnVisibility.favorite && <TableHead className={cn('relative', STICKY_HEADER_CLASS_NAME)}>Favorite{renderResizeHandle('favorite')}</TableHead>}
-            {columnVisibility.title && <TableHead className={cn('relative', STICKY_HEADER_CLASS_NAME)}>Title{renderResizeHandle('title')}</TableHead>}
-            {columnVisibility.authors && <TableHead className={cn('relative', STICKY_HEADER_CLASS_NAME)}>Authors{renderResizeHandle('authors')}</TableHead>}
-            {columnVisibility.year && <TableHead className={cn('relative text-center', STICKY_HEADER_CLASS_NAME)}>Year{renderResizeHandle('year')}</TableHead>}
-            {columnVisibility.status && <TableHead className={cn('relative', STICKY_HEADER_CLASS_NAME)}>Status{renderResizeHandle('status')}</TableHead>}
-            {columnVisibility.comments && <TableHead className={cn('relative text-center', STICKY_HEADER_CLASS_NAME)}>Comments{renderResizeHandle('comments')}</TableHead>}
-            {columnVisibility.rating && <TableHead className={cn('relative', STICKY_HEADER_CLASS_NAME)}>Rating{renderResizeHandle('rating')}</TableHead>}
+            {visibleColumns.map(renderHeaderCell)}
             <TableHead className={cn('w-12', STICKY_HEADER_CLASS_NAME)} />
           </TableRow>
         </TableHeader>
@@ -296,127 +560,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                       onClick={(event) => handleCheckboxClick(doc.id, event)}
                     />
                   </TableCell>
-
-                  {columnVisibility.favorite && (
-                    <TableCell>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => toggleFavorite(doc.id)}
-                        className={cn(
-                          'rounded-full transition-colors',
-                          doc.favorite ? 'text-amber-400' : 'text-muted-foreground/30 hover:text-amber-400',
-                        )}
-                      >
-                        <Star className="h-4 w-4" fill={doc.favorite ? 'currentColor' : 'none'} />
-                      </Button>
-                    </TableCell>
-                  )}
-
-                  {columnVisibility.title && (
-                    <TableCell>
-                      <Link href={doc.documentType === 'physical_book' ? `/books/notes?id=${doc.id}` : `/reader/view?id=${doc.id}`} className="group/link flex items-start gap-2">
-                        {doc.documentType === 'physical_book' ? <BookMarked className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
-                        <div className="min-w-0">
-                          <div className="flex items-start gap-2">
-                            <span className="block min-w-0 truncate font-medium text-foreground transition-colors group-hover/link:text-primary">
-                              {doc.title}
-                            </span>
-                            {ephemeralFlags?.isNewlyAdded && <NewBadge />}
-                          </div>
-                          {doc.tags.length > 0 && (
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {doc.tags.slice(0, 3).map((tag) => (
-                                <Badge key={tag} variant="secondary" className="py-0 text-xs">
-                                  {tag}
-                                </Badge>
-                              ))}
-                              {doc.tags.length > 3 && (
-                                <Badge variant="secondary" className="py-0 text-xs">
-                                  +{doc.tags.length - 3}
-                                </Badge>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </Link>
-                    </TableCell>
-                  )}
-
-                  {columnVisibility.authors && (
-                    <TableCell>
-                      <span className="block truncate text-sm text-muted-foreground">
-                        {doc.authors.slice(0, 2).join(', ')}
-                        {doc.authors.length > 2 && ' et al.'}
-                      </span>
-                    </TableCell>
-                  )}
-
-                  {columnVisibility.year && (
-                    <TableCell className="text-center">
-                      <span className="text-sm">{doc.year || '—'}</span>
-                    </TableCell>
-                  )}
-
-                  {columnVisibility.status && (
-                    <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button
-                              type="button"
-                              data-selection-ignore="true"
-                              className="w-fit rounded-full"
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <ReadingStageBadge stage={doc.readingStage} />
-                            </button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
-                            <DropdownMenuLabel>Reading Status</DropdownMenuLabel>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuRadioGroup
-                              value={doc.readingStage}
-                              onValueChange={(value) => void updateDocument(doc.id, { readingStage: value as ReadingStage })}
-                            >
-                              {READING_STAGE_OPTIONS.map((stage) => (
-                                <DropdownMenuRadioItem key={stage.value} value={stage.value}>
-                                  {stage.label}
-                                </DropdownMenuRadioItem>
-                              ))}
-                            </DropdownMenuRadioGroup>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        {doc.hasOcr && <OcrStatusBadge status={doc.ocrStatus} />}
-                        {doc.metadataStatus === 'missing' && (
-                          <MetadataStatusBadge status={doc.metadataStatus} />
-                        )}
-                      </div>
-                    </TableCell>
-                  )}
-
-                  {columnVisibility.comments && (
-                    <TableCell className="text-center">
-                      <div className="flex items-center justify-center gap-2">
-                        <Button asChild variant="outline" size="icon-sm" className="rounded-full">
-                          <Link href={`/comments?id=${doc.id}`}>
-                            <MessageSquare className="h-3.5 w-3.5" />
-                            <span className="sr-only">Open comments</span>
-                          </Link>
-                        </Button>
-                        <span className="text-sm text-muted-foreground">
-                          {doc.notesCount} notes
-                        </span>
-                      </div>
-                    </TableCell>
-                  )}
-
-                  {columnVisibility.rating && (
-                    <TableCell>
-                      <StarRating rating={doc.rating} onChange={(rating) => updateDocument(doc.id, { rating })} />
-                    </TableCell>
-                  )}
+                  {visibleColumns.map((column) => renderDocumentCell(doc, column, ephemeralFlags))}
 
                   <TableCell>
                     <DocumentActions

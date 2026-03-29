@@ -14,7 +14,7 @@ export default function ReaderIndexPage() {
   const continueReading = useMemo(
     () =>
       documents
-        .filter((doc) => doc.readingStage === 'reading' && doc.lastOpenedAt)
+        .filter((doc) => doc.documentType === 'pdf' && doc.readingStage === 'reading' && doc.lastOpenedAt)
         .sort((a, b) => (b.lastOpenedAt?.getTime() ?? 0) - (a.lastOpenedAt?.getTime() ?? 0))
         .slice(0, 4),
     [documents],
@@ -23,7 +23,7 @@ export default function ReaderIndexPage() {
   const recentDocs = useMemo(
     () =>
       [...documents]
-        .filter((doc) => doc.lastOpenedAt)
+        .filter((doc) => doc.documentType === 'pdf' && doc.lastOpenedAt)
         .sort((a, b) => (b.lastOpenedAt?.getTime() ?? 0) - (a.lastOpenedAt?.getTime() ?? 0))
         .slice(0, 10),
     [documents],

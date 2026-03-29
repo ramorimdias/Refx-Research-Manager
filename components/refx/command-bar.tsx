@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   BookOpen,
+  CloudDownload,
   FileText,
   Home,
   Keyboard,
@@ -94,6 +95,10 @@ export function CommandBar() {
           <CommandItem onSelect={() => runCommand(() => router.push('/references'))}>
             <FileText className="mr-2 h-4 w-4" />
             <span>References</span>
+          </CommandItem>
+          <CommandItem onSelect={() => runCommand(() => router.push('/metadata'))}>
+            <CloudDownload className="mr-2 h-4 w-4" />
+            <span>Metadata</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/notes'))}>
             <StickyNote className="mr-2 h-4 w-4" />

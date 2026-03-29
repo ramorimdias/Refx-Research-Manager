@@ -24,6 +24,14 @@ function formatCitation(document: ReturnType<typeof useAppStore.getState>['docum
   return `${authorPart} ${yearPart}. ${document.title}.${doiPart}`
 }
 
+function getDocumentHref(document: ReturnType<typeof useAppStore.getState>['documents'][number]) {
+  return document.documentType === 'my_work'
+    ? `/documents?id=${document.id}`
+    : document.documentType === 'physical_book'
+      ? `/books/notes?id=${document.id}`
+      : `/reader/view?id=${document.id}`
+}
+
 export default function ReferencesPage() {
   const { documents } = useAppStore()
   const [query, setQuery] = useState('')
@@ -88,7 +96,7 @@ export default function ReferencesPage() {
                 <TableRow key={document.id}>
                   <TableCell>
                     <div className="space-y-1">
-                      <Link href={`/reader/view?id=${document.id}`} className="font-medium hover:text-primary">
+                      <Link href={getDocumentHref(document)} className="font-medium hover:text-primary">
                         {document.title}
                       </Link>
                       <p className="text-xs text-muted-foreground">{formatCitation(document)}</p>

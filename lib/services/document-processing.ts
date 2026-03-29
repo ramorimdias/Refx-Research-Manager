@@ -28,6 +28,12 @@ export type PdfPageWords = {
   words: PdfWord[]
 }
 
+export type PdfPageLines = {
+  pageNumber: number
+  text: string
+  lines: string[]
+}
+
 export type SearchOccurrence = {
   index: number
   matchedText?: string
@@ -46,6 +52,44 @@ let pdfJsPromise: Promise<{
 
 function normalizeText(input: string) {
   return input.replace(/\s+/g, ' ').trim()
+}
+
+function buildPageLines(words: PdfWord[]) {
+  if (words.length === 0) return []
+
+  const sorted = [...words].sort((left, right) => {
+    if (Math.abs(left.top - right.top) > 4) {
+      return left.top - right.top
+    }
+    return left.left - right.left
+  })
+
+  const grouped: PdfWord[][] = []
+  for (const word of sorted) {
+    const current = grouped[grouped.length - 1]
+    if (!current) {
+      grouped.push([word])
+      continue
+    }
+
+    const averageTop = current.reduce((sum, entry) => sum + entry.top, 0) / current.length
+    if (Math.abs(word.top - averageTop) <= 4) {
+      current.push(word)
+    } else {
+      grouped.push([word])
+    }
+  }
+
+  return grouped
+    .map((line) =>
+      normalizeText(
+        line
+          .sort((left, right) => left.left - right.left)
+          .map((entry) => entry.text)
+          .join(' '),
+      ),
+    )
+    .filter(Boolean)
 }
 
 function unique<T>(items: T[]) {
@@ -387,6 +431,15 @@ export async function extractPdfDocumentText(filePath: string) {
     pages,
     text: pages.map((page) => page.text).join('\n\n'),
   }
+}
+
+export async function extractPdfPageLines(filePath: string): Promise<PdfPageLines[]> {
+  const pages = await extractPdfPages(filePath)
+  return pages.map((page) => ({
+    pageNumber: page.pageNumber,
+    text: page.text,
+    lines: buildPageLines(page.words),
+  }))
 }
 
 export async function extractPdfSearchText(filePath: string) {

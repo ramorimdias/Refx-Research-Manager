@@ -28,7 +28,12 @@ export type DocumentIngestionOptions = {
   semanticClassificationMode?: SemanticClassificationMode
   enableTagSuggestion?: boolean
   forceStages?: DocumentProcessingStage[]
+  onStageUpdate?: (stage: DocumentProcessingStageState) => void
 }
+
+type ResolvedDocumentIngestionOptions =
+  Omit<Required<DocumentIngestionOptions>, 'onStageUpdate'>
+  & Pick<DocumentIngestionOptions, 'onStageUpdate'>
 
 export type ImportPdfDocumentInput = {
   libraryId: string
@@ -43,13 +48,14 @@ export type DocumentIngestionResult = {
   error?: string
 }
 
-const DEFAULT_PIPELINE_OPTIONS: Required<DocumentIngestionOptions> = {
+const DEFAULT_PIPELINE_OPTIONS: ResolvedDocumentIngestionOptions = {
   enableOcrFallback: true,
   enableOnlineMetadataEnrichment: false,
   enableSemanticClassification: false,
   semanticClassificationMode: 'off',
   enableTagSuggestion: true,
   forceStages: [],
+  onStageUpdate: undefined,
 }
 
 export const DOCUMENT_INGESTION_STAGE_ORDER: DocumentProcessingStage[] = [
@@ -148,7 +154,7 @@ function mergePipelineOptions(options?: DocumentIngestionOptions) {
   }
 }
 
-function isForced(stage: DocumentProcessingStage, options: Required<DocumentIngestionOptions>) {
+function isForced(stage: DocumentProcessingStage, options: ResolvedDocumentIngestionOptions) {
   return options.forceStages.includes(stage)
 }
 
@@ -315,7 +321,7 @@ async function applyMetadata(document: repo.DbDocument, metadata: LocalPdfMetada
 
 async function runLocalMetadataExtractionStage(
   context: ProcessingContext,
-  options: Required<DocumentIngestionOptions>,
+  options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'local_metadata_extraction'
   const startedAt = new Date()
@@ -344,7 +350,7 @@ async function runLocalMetadataExtractionStage(
 
 async function runTextExtractionStage(
   context: ProcessingContext,
-  options: Required<DocumentIngestionOptions>,
+  options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'text_extraction'
   const startedAt = new Date()
@@ -375,7 +381,7 @@ async function runTextExtractionStage(
 
 async function runOcrFallbackStage(
   context: ProcessingContext,
-  options: Required<DocumentIngestionOptions>,
+  options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'ocr_fallback'
   const startedAt = new Date()
@@ -446,7 +452,7 @@ async function runSaveDocumentStage(context: ProcessingContext) {
 
 async function runIndexingStage(
   context: ProcessingContext,
-  options: Required<DocumentIngestionOptions>,
+  options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'indexing'
   const startedAt = new Date()
@@ -482,7 +488,7 @@ async function runIndexingStage(
 
 async function runTagSuggestionStage(
   context: ProcessingContext,
-  options: Required<DocumentIngestionOptions>,
+  options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'tag_suggestion'
   const startedAt = new Date()
@@ -532,7 +538,7 @@ async function runTagSuggestionStage(
 
 async function runCitationLinkingStage(
   context: ProcessingContext,
-  _options: Required<DocumentIngestionOptions>,
+  _options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'citation_linking'
   const startedAt = new Date()
@@ -573,7 +579,7 @@ async function runCitationLinkingStage(
 
 async function runSemanticClassificationStage(
   context: ProcessingContext,
-  options: Required<DocumentIngestionOptions>,
+  options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'semantic_classification'
   const startedAt = new Date()
@@ -628,7 +634,7 @@ async function runSemanticClassificationStage(
 
 async function runOnlineMetadataEnrichmentStage(
   context: ProcessingContext,
-  options: Required<DocumentIngestionOptions>,
+  options: ResolvedDocumentIngestionOptions,
 ) {
   const stage: DocumentProcessingStage = 'online_metadata_enrichment'
   const startedAt = new Date()
@@ -677,16 +683,20 @@ async function runProcessingStages(
 ) {
   const resolvedOptions = mergePipelineOptions(options)
   const stages: DocumentProcessingStageState[] = []
+  const pushStage = (stage: DocumentProcessingStageState) => {
+    stages.push(stage)
+    resolvedOptions.onStageUpdate?.(stage)
+  }
 
-  stages.push(await runLocalMetadataExtractionStage(context, resolvedOptions))
-  stages.push(await runTextExtractionStage(context, resolvedOptions))
-  stages.push(await runOcrFallbackStage(context, resolvedOptions))
-  stages.push(await runSaveDocumentStage(context))
-  stages.push(await runIndexingStage(context, resolvedOptions))
-  stages.push(await runCitationLinkingStage(context, resolvedOptions))
-  stages.push(await runTagSuggestionStage(context, resolvedOptions))
-  stages.push(await runSemanticClassificationStage(context, resolvedOptions))
-  stages.push(await runOnlineMetadataEnrichmentStage(context, resolvedOptions))
+  pushStage(await runLocalMetadataExtractionStage(context, resolvedOptions))
+  pushStage(await runTextExtractionStage(context, resolvedOptions))
+  pushStage(await runOcrFallbackStage(context, resolvedOptions))
+  pushStage(await runSaveDocumentStage(context))
+  pushStage(await runIndexingStage(context, resolvedOptions))
+  pushStage(await runCitationLinkingStage(context, resolvedOptions))
+  pushStage(await runTagSuggestionStage(context, resolvedOptions))
+  pushStage(await runSemanticClassificationStage(context, resolvedOptions))
+  pushStage(await runOnlineMetadataEnrichmentStage(context, resolvedOptions))
 
   await refreshContextDocument(context)
 
@@ -767,7 +777,9 @@ export async function ingestImportedPdfDocument(input: ImportPdfDocumentInput, o
       throw new Error(`Could not create the local document record: ${normalizeErrorMessage(error)}`)
     })
 
-    stages.push(stageCompleted('import_pdf', importStartedAt, 'PDF copied into local library storage.'))
+    const importStage = stageCompleted('import_pdf', importStartedAt, 'PDF copied into local library storage.')
+    stages.push(importStage)
+    options?.onStageUpdate?.(importStage)
 
     const pipelineResult = await runProcessingStages(
       {
@@ -785,7 +797,9 @@ export async function ingestImportedPdfDocument(input: ImportPdfDocumentInput, o
     } satisfies DocumentIngestionResult
   } catch (error) {
     const message = normalizeErrorMessage(error)
-    stages.push(stageFailed('import_pdf', importStartedAt, message))
+    const failedImportStage = stageFailed('import_pdf', importStartedAt, message)
+    stages.push(failedImportStage)
+    options?.onStageUpdate?.(failedImportStage)
     return {
       document: null,
       documentId,

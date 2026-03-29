@@ -459,7 +459,7 @@ fn insert_document(conn: &Connection, document: &Document) -> Result<(), AppErro
           rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result,
           classification_text_hash, classification_status, processing_error, processing_updated_at,
           last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text,
-          commentary_updated_at, created_at, updated_at
+          commentary_updated_at, cover_image_path, created_at, updated_at
         ) VALUES (
           ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
           ?12, ?13, ?14, ?15, ?16, ?17,
@@ -468,7 +468,7 @@ fn insert_document(conn: &Connection, document: &Document) -> Result<(), AppErro
           ?29, ?30, ?31, ?32,
           ?33, ?34, ?35, ?36,
           ?37, ?38, ?39, ?40, ?41, ?42, ?43,
-          ?44, ?45, ?46
+          ?44, ?45, ?46, ?47
         )"#,
         params![
             document.id,
@@ -515,6 +515,7 @@ fn insert_document(conn: &Connection, document: &Document) -> Result<(), AppErro
             document.last_read_page,
             document.commentary_text,
             document.commentary_updated_at,
+            document.cover_image_path,
             document.created_at,
             document.updated_at,
         ],

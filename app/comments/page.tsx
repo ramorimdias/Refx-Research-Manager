@@ -186,7 +186,11 @@ export default function CommentsPage() {
     }
   }
 
-  const openHref = currentDocument.documentType === 'physical_book' ? `/books/notes?id=${currentDocument.id}` : `/reader/view?id=${currentDocument.id}`
+  const openHref = currentDocument.documentType === 'my_work'
+    ? `/documents?id=${currentDocument.id}`
+    : currentDocument.documentType === 'physical_book'
+      ? `/books/notes?id=${currentDocument.id}`
+      : `/reader/view?id=${currentDocument.id}`
   const plainTextLength = htmlToPlainText(draft).length
 
   return (
@@ -212,7 +216,11 @@ export default function CommentsPage() {
           <div className="flex items-center gap-2">
             <Button asChild variant="outline">
               <Link href={openHref}>
-                {currentDocument.documentType === 'physical_book' ? 'Open Notes' : 'Open Reader'}
+                {currentDocument.documentType === 'physical_book'
+                  ? 'Open Notes'
+                  : currentDocument.documentType === 'my_work'
+                    ? 'Open Details'
+                    : 'Open Reader'}
               </Link>
             </Button>
             <Button onClick={() => void handleSave()} disabled={!hasPendingChanges || isSaving || !isDesktopApp}>

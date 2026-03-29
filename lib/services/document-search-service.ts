@@ -52,6 +52,14 @@ export type SearchDocumentsOptions = {
   documentIds?: string[]
   flexibility?: number
   limit?: number
+  onProgress?: (update: SearchProgressUpdate) => void
+}
+
+export type SearchProgressUpdate = {
+  detail?: string
+  processed: number
+  stage: 'synchronizing' | 'querying' | 'ranking' | 'page_hits' | 'complete'
+  total: number
 }
 
 export type DocumentSearchMatchPosition = {
@@ -70,6 +78,7 @@ export type DocumentSearchResult = {
   documentId: string
   matchedQueryTerms: string[]
   matchedTerms: string[]
+  occurrenceCounts: Record<string, number>
   pageHits: DocumentSearchPageHit[]
   score: number
   snippet?: string
@@ -136,12 +145,64 @@ function normalizeQueryFragment(input: string) {
   return normalizeSearchText(input).replace(/\s+/g, ' ').trim()
 }
 
+function stripDiacritics(input: string) {
+  return input.normalize('NFKD').replace(/\p{M}+/gu, '')
+}
+
+function normalizeWordToken(input: string) {
+  return stripDiacritics(normalizeQueryFragment(input))
+}
+
+function tokenizeWordLike(input: string) {
+  return Array.from(normalizeWordToken(input).matchAll(/\b[\p{L}\p{N}]+\b/gu), (match) => match[0] ?? '')
+    .filter(Boolean)
+}
+
 function countOccurrences(text: string, term: string) {
-  const normalizedText = normalizeSearchText(text)
+  const normalizedText = normalizeQueryFragment(text)
   const normalizedTerm = normalizeQueryFragment(term)
   if (!normalizedText || !normalizedTerm) return 0
   const matches = normalizedText.match(new RegExp(`\\b${escapeRegExp(normalizedTerm)}\\b`, 'g'))
   return matches?.length ?? 0
+}
+
+function countCompactOccurrences(text: string, term: string) {
+  const normalizedText = normalizeWordToken(text).replace(/[\s-]+/g, '')
+  const normalizedTerm = normalizeWordToken(term).replace(/[\s-]+/g, '')
+  if (!normalizedText || !normalizedTerm) return 0
+
+  let occurrences = 0
+  let startIndex = 0
+  while (startIndex < normalizedText.length) {
+    const foundIndex = normalizedText.indexOf(normalizedTerm, startIndex)
+    if (foundIndex < 0) break
+    occurrences += 1
+    startIndex = foundIndex + normalizedTerm.length
+  }
+
+  return occurrences
+}
+
+function buildOccurrenceCounts(
+  query: DocumentSearchQuery,
+  document: repo.DbDocument,
+  persistedText?: Awaited<ReturnType<typeof readPersistedDocumentText>> | null,
+) {
+  const queryTerms = unique(collectPositiveQueryStrings(query).map((entry) => normalizeQueryFragment(entry)).filter(Boolean))
+  const searchableText = [
+    document.title,
+    parseDocumentAuthors(document).join(' '),
+    document.abstractText,
+    persistedText?.text ?? document.searchText ?? '',
+  ].filter(Boolean).join(' ')
+
+  return Object.fromEntries(
+    queryTerms.map((term) => {
+      const spacedCount = countOccurrences(searchableText, term)
+      const compactCount = term.includes(' ') ? 0 : countCompactOccurrences(searchableText, term)
+      return [term, Math.max(spacedCount, compactCount)]
+    }),
+  )
 }
 
 function collectPositiveQueryStrings(query: DocumentSearchQuery, include = true): string[] {
@@ -170,6 +231,114 @@ function buildQuerySignals(query: DocumentSearchQuery) {
     phrases,
     tokens,
   }
+}
+
+type SearchCorpus = {
+  compactText: string
+  text: string
+  words: string[]
+}
+
+function buildSearchCorpus(document: repo.DbDocument, persistedText?: Awaited<ReturnType<typeof readPersistedDocumentText>> | null): SearchCorpus {
+  const title = document.title ?? ''
+  const authors = parseDocumentAuthors(document).join(' ')
+  const metadataCorpus = buildDocumentMetadataCorpus(document)
+  const fullText = persistedText?.text ?? document.searchText ?? ''
+  const text = normalizeWordToken([title, authors, metadataCorpus, fullText].join(' '))
+  return {
+    compactText: text.replace(/[\s-]+/g, ''),
+    text,
+    words: tokenizeWordLike(text),
+  }
+}
+
+function levenshteinDistance(left: string, right: string) {
+  if (left === right) return 0
+  if (!left.length) return right.length
+  if (!right.length) return left.length
+
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index)
+  const current = new Array<number>(right.length + 1).fill(0)
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + substitutionCost,
+      )
+    }
+
+    for (let rightIndex = 0; rightIndex <= right.length; rightIndex += 1) {
+      previous[rightIndex] = current[rightIndex] ?? previous[rightIndex]
+    }
+  }
+
+  return previous[right.length] ?? 0
+}
+
+function buildAllowedFuzzyDistance(token: string, flexibility = 35) {
+  if (flexibility < 45) return 0
+  if (token.length < 6) return 0
+  if (flexibility < 75) return 1
+  return token.length >= 10 ? 2 : 1
+}
+
+function hasVerifiedTokenMatch(corpus: SearchCorpus, token: string, flexibility = 35) {
+  const normalizedToken = normalizeWordToken(token)
+  if (!normalizedToken) return false
+  if (corpus.words.includes(normalizedToken)) return true
+
+  for (let index = 0; index < corpus.words.length - 1; index += 1) {
+    const left = corpus.words[index] ?? ''
+    const right = corpus.words[index + 1] ?? ''
+    if (left && right && `${left}${right}` === normalizedToken) {
+      return true
+    }
+  }
+
+  const allowedDistance = buildAllowedFuzzyDistance(normalizedToken, flexibility)
+  if (allowedDistance <= 0) return false
+
+  return corpus.words.some((word) => {
+    if (!word) return false
+    if (word[0] !== normalizedToken[0]) return false
+    if (Math.abs(word.length - normalizedToken.length) > allowedDistance) return false
+    return levenshteinDistance(word, normalizedToken) <= allowedDistance
+  })
+}
+
+function hasVerifiedPhraseMatch(corpus: SearchCorpus, phrase: string) {
+  const normalizedPhrase = normalizeWordToken(phrase)
+  if (!normalizedPhrase) return false
+  if (corpus.text.includes(normalizedPhrase)) return true
+  return corpus.compactText.includes(normalizedPhrase.replace(/[\s-]+/g, ''))
+}
+
+function documentMatchesQuery(corpus: SearchCorpus, query: DocumentSearchQuery, flexibility = 35): boolean {
+  if (typeof query === 'string') {
+    const normalized = normalizeQueryFragment(query)
+    if (!normalized) return true
+    if (normalized.includes(' ')) {
+      return hasVerifiedPhraseMatch(corpus, normalized)
+    }
+
+    return hasVerifiedTokenMatch(corpus, normalized, flexibility)
+  }
+
+  if (query.combineWith === 'AND') {
+    return query.queries.every((entry) => documentMatchesQuery(corpus, entry, flexibility))
+  }
+
+  if (query.combineWith === 'OR') {
+    return query.queries.some((entry) => documentMatchesQuery(corpus, entry, flexibility))
+  }
+
+  const [positive, ...negative] = query.queries
+  if (!positive || !documentMatchesQuery(corpus, positive, flexibility)) return false
+  return negative.every((entry) => !documentMatchesQuery(corpus, entry, flexibility))
 }
 
 function parseDocumentAuthors(document: repo.DbDocument) {
@@ -556,9 +725,26 @@ async function upsertDocument(state: SearchIndexState, document: repo.DbDocument
   return true
 }
 
-async function ensureIndexSynchronized(state: SearchIndexState, documents: repo.DbDocument[]) {
+async function ensureIndexSynchronized(
+  state: SearchIndexState,
+  documents: repo.DbDocument[],
+  onProgress?: (update: SearchProgressUpdate) => void,
+) {
   const documentsById = new Map(documents.map((document) => [document.id, document]))
   let changed = false
+  let processed = 0
+  const total = documents.length
+
+  const emitProgress = (detail: string) => {
+    onProgress?.({
+      detail,
+      processed,
+      stage: 'synchronizing',
+      total,
+    })
+  }
+
+  emitProgress('Checking indexed document text…')
 
   for (const indexedId of Object.keys(state.indexedTextHashes)) {
     if (!documentsById.has(indexedId)) {
@@ -571,6 +757,8 @@ async function ensureIndexSynchronized(state: SearchIndexState, documents: repo.
     const isIndexed = state.index.has(document.id)
     if (!hasSearchText) {
       changed = (await discardDocument(state, document.id)) || changed
+      processed += 1
+      emitProgress(`Preparing ${processed}/${total}`)
       continue
     }
 
@@ -579,6 +767,9 @@ async function ensureIndexSynchronized(state: SearchIndexState, documents: repo.
     if (!isIndexed || state.indexedTextHashes[document.id] !== textHash) {
       changed = (await upsertDocument(state, document)) || changed
     }
+
+    processed += 1
+    emitProgress(`Preparing ${processed}/${total}`)
   }
 
   return changed
@@ -600,7 +791,7 @@ function buildFuzzySetting(flexibility = 35) {
 }
 
 function buildPrefixSetting(flexibility = 35) {
-  return flexibility >= 15
+  return flexibility >= 25
 }
 
 function buildSnippet(text: string, terms: string[], radius = 110) {
@@ -723,12 +914,30 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
   return withIndexLock(async () => {
     const documents = await repo.listAllDocuments()
     const state = await getSearchIndexState()
-    const synchronized = await ensureIndexSynchronized(state, documents)
+    const allowedIds = options.documentIds?.length ? new Set(options.documentIds) : null
+    const searchableDocuments = allowedIds
+      ? documents.filter((document) => allowedIds.has(document.id))
+      : documents
+
+    options.onProgress?.({
+      detail: 'Preparing the local search index…',
+      processed: 0,
+      stage: 'synchronizing',
+      total: searchableDocuments.length,
+    })
+
+    const synchronized = await ensureIndexSynchronized(state, documents, options.onProgress)
     if (synchronized) {
       await persistSearchIndexState(state)
     }
 
-    const allowedIds = options.documentIds?.length ? new Set(options.documentIds) : null
+    options.onProgress?.({
+      detail: 'Querying the local index…',
+      processed: searchableDocuments.length,
+      stage: 'querying',
+      total: searchableDocuments.length,
+    })
+
     const rawResults = state.index.search(query as MiniSearchQuery, {
       combineWith: typeof query === 'string' ? (options.combineWith ?? 'AND') : undefined,
       filter: allowedIds ? (result) => allowedIds.has(String(result.id)) : undefined,
@@ -746,6 +955,8 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
     const mappedResults: Array<DocumentSearchResult & {
       persistedText: Awaited<ReturnType<typeof readPersistedDocumentText>>
     }> = []
+    const totalCandidateResults = candidateResults.length
+    let rankedCount = 0
 
     for (const result of candidateResults) {
       const document = documentsById.get(String(result.id))
@@ -761,11 +972,24 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
         matchedTerms,
         matchedQueryTerms,
       )
+      const corpus = buildSearchCorpus(document, ranked.persistedText)
+      rankedCount += 1
+      options.onProgress?.({
+        detail: `Scoring ${rankedCount}/${totalCandidateResults || 1}`,
+        processed: rankedCount,
+        stage: 'ranking',
+        total: totalCandidateResults || 1,
+      })
+
+      if (!documentMatchesQuery(corpus, query, options.flexibility)) {
+        continue
+      }
 
       mappedResults.push({
         documentId: document.id,
         matchedQueryTerms,
         matchedTerms,
+        occurrenceCounts: buildOccurrenceCounts(query, document, ranked.persistedText),
         pageHits: [],
         persistedText: ranked.persistedText,
         score: ranked.score,
@@ -775,9 +999,14 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
     }
 
     mappedResults.sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
-    return mappedResults
-      .slice(0, options.limit ?? 100)
-      .map(({ persistedText, ...result }) => {
+    const limitedResults = mappedResults.slice(0, options.limit ?? 100)
+    const finalResults = limitedResults.map(({ persistedText, ...result }, index) => {
+        options.onProgress?.({
+          detail: `Resolving page hits ${index + 1}/${limitedResults.length || 1}`,
+          processed: index + 1,
+          stage: 'page_hits',
+          total: limitedResults.length || 1,
+        })
         const pageHits = buildPageHits(persistedText, query, result.matchedTerms, result.matchedQueryTerms)
         return {
           ...result,
@@ -785,5 +1014,12 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
           snippet: pageHits[0]?.snippet ?? result.snippet,
         }
       })
+    options.onProgress?.({
+      detail: `${finalResults.length} result${finalResults.length === 1 ? '' : 's'} ready`,
+      processed: searchableDocuments.length,
+      stage: 'complete',
+      total: searchableDocuments.length,
+    })
+    return finalResults
   })
 }
