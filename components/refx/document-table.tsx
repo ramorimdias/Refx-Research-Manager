@@ -32,6 +32,7 @@ import { NewBadge, OcrStatusBadge, ReadingStageBadge, StarRating } from './commo
 import { DocumentBulkActions } from './document-bulk-actions'
 import { useAppStore } from '@/lib/store'
 import { DocumentActions, DocumentContextMenu } from './document-actions'
+import { useT } from '@/lib/localization'
 
 interface DocumentTableProps {
   documents: Document[]
@@ -55,14 +56,14 @@ const SELECTION_IGNORE_SELECTOR = 'a, button, input, textarea, select, [role="ch
 const STICKY_HEADER_CLASS_NAME = 'sticky top-0 z-10 bg-background/95 shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur supports-[backdrop-filter]:bg-background/90'
 
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
-  { key: 'favorite', label: 'Favorite', defaultWidth: 56, minWidth: 48, hideable: true },
-  { key: 'title', label: 'Title', defaultWidth: 360, minWidth: 220 },
-  { key: 'authors', label: 'Authors', defaultWidth: 220, minWidth: 140, hideable: true },
-  { key: 'year', label: 'Year', defaultWidth: 80, minWidth: 70, hideable: true },
-  { key: 'status', label: 'Status', defaultWidth: 150, minWidth: 120, hideable: true },
-  { key: 'metadata', label: 'Metadata', defaultWidth: 160, minWidth: 130, hideable: true },
-  { key: 'comments', label: 'Comments', defaultWidth: 170, minWidth: 150, hideable: true },
-  { key: 'rating', label: 'Rating', defaultWidth: 140, minWidth: 110, hideable: true },
+  { key: 'favorite', label: 'favorite', defaultWidth: 56, minWidth: 48, hideable: true },
+  { key: 'title', label: 'title', defaultWidth: 360, minWidth: 220 },
+  { key: 'authors', label: 'authors', defaultWidth: 220, minWidth: 140, hideable: true },
+  { key: 'year', label: 'year', defaultWidth: 80, minWidth: 70, hideable: true },
+  { key: 'status', label: 'status', defaultWidth: 150, minWidth: 120, hideable: true },
+  { key: 'metadata', label: 'metadata', defaultWidth: 160, minWidth: 130, hideable: true },
+  { key: 'comments', label: 'comments', defaultWidth: 170, minWidth: 150, hideable: true },
+  { key: 'rating', label: 'rating', defaultWidth: 140, minWidth: 110, hideable: true },
 ]
 
 const DEFAULT_WIDTHS = Object.fromEntries(COLUMN_DEFINITIONS.map((column) => [column.key, column.defaultWidth])) as Record<ColumnKey, number>
@@ -92,6 +93,7 @@ function getTableMetadataState(document: Document) {
 }
 
 export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTableProps) {
+  const t = useT()
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(DEFAULT_WIDTHS)
   const [columnVisibility, setColumnVisibility] = useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBILITY)
   const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_ORDER)
@@ -280,7 +282,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
     const centered = column.key === 'year' || column.key === 'comments'
     return (
       <TableHead key={column.key} className={cn('relative', centered && 'text-center', STICKY_HEADER_CLASS_NAME)}>
-        {column.label}
+        {t(`documentTable.${column.label}`)}
         {renderResizeHandle(column.key)}
       </TableHead>
     )
@@ -366,7 +368,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" onClick={(event) => event.stopPropagation()}>
-                  <DropdownMenuLabel>Reading Status</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('documentTable.readingStatus')}</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuRadioGroup
                     value={doc.readingStage}
@@ -399,12 +401,12 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                     onClick={(event) => event.stopPropagation()}
                   >
                     <Badge className={cn('border-0 cursor-pointer transition-opacity hover:opacity-85', metadataState.className)}>
-                      {metadataState.label}
+                      {t('documentTable.fetchPossible')}
                     </Badge>
                   </Link>
                 ) : (
                   <Badge className={cn('border-0', metadataState.className)}>
-                    {metadataState.label}
+                    {metadataState.label === 'Complete' ? t('common.complete') : t('common.missing')}
                   </Badge>
                 )
               )
@@ -418,11 +420,11 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
               <Button asChild variant="outline" size="icon-sm" className="rounded-full">
                 <Link href={`/comments?id=${doc.id}`}>
                   <MessageSquare className="h-3.5 w-3.5" />
-                  <span className="sr-only">Open comments</span>
+                  <span className="sr-only">{t('documentTable.openComments')}</span>
                 </Link>
               </Button>
               <span className="text-sm text-muted-foreground">
-                {doc.notesCount} notes
+                {t('documentTable.notes', { count: doc.notesCount })}
               </span>
             </div>
           </TableCell>
@@ -447,7 +449,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
             onClearSelection={selection.clearSelection}
           >
             <Button size="sm" variant="outline" className="rounded-full" onClick={() => void refreshTagSuggestionsForDocuments(selection.selectedDocumentIds)}>
-              Generate Suggestions
+              {t('documentTable.generateSuggestions')}
             </Button>
           </DocumentBulkActions>
         ) : (
@@ -459,11 +461,11 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
             <DropdownMenuTrigger asChild>
               <Button size="sm" variant="outline" className="rounded-full">
                 <Settings2 className="mr-2 h-4 w-4" />
-                Columns
+                {t('documentTable.columns')}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuLabel>Visible Columns</DropdownMenuLabel>
+              <DropdownMenuLabel>{t('documentTable.visibleColumns')}</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {COLUMN_DEFINITIONS.map((column) => (
                 <DropdownMenuCheckboxItem
@@ -472,15 +474,15 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                   disabled={!column.hideable}
                   onCheckedChange={(checked) => setColumnVisible(column.key, Boolean(checked))}
                 >
-                  {column.label}
+                  {t(`documentTable.${column.label}`)}
                 </DropdownMenuCheckboxItem>
               ))}
               <DropdownMenuSeparator />
-              <DropdownMenuLabel>Column Order</DropdownMenuLabel>
+              <DropdownMenuLabel>{t('documentTable.columnOrder')}</DropdownMenuLabel>
               <div className="space-y-1 p-1">
                 {orderedColumns.map((column, index) => (
                   <div key={column.key} className="flex items-center justify-between rounded-md px-2 py-1 text-sm">
-                    <span className="truncate">{column.label}</span>
+                    <span className="truncate">{t(`documentTable.${column.label}`)}</span>
                     <div className="flex items-center gap-1">
                       <Button
                         type="button"

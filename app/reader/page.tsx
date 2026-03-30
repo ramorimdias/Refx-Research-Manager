@@ -7,8 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { EmptyState } from '@/components/refx/common'
 import { useAppStore } from '@/lib/store'
+import { useT } from '@/lib/localization'
 
 export default function ReaderIndexPage() {
+  const t = useT()
   const { documents } = useAppStore()
 
   const continueReading = useMemo(
@@ -34,11 +36,11 @@ export default function ReaderIndexPage() {
       <div className="flex h-full items-center justify-center">
         <EmptyState
           icon={BookOpen}
-          title="No documents to read"
-          description="Import PDFs and open a document to build your local reading queue."
+          title={t('readerIndex.emptyTitle')}
+          description={t('readerIndex.emptyDescription')}
           action={
             <Button asChild>
-              <Link href="/libraries">Go to Libraries</Link>
+              <Link href="/libraries">{t('readerIndex.goLibraries')}</Link>
             </Button>
           }
         />
@@ -49,15 +51,15 @@ export default function ReaderIndexPage() {
   return (
     <div className="mx-auto max-w-4xl p-6">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold">Reader</h1>
-        <p className="text-muted-foreground">Continue where you left off or jump back into recent files.</p>
+        <h1 className="text-2xl font-semibold">{t('readerIndex.title')}</h1>
+        <p className="text-muted-foreground">{t('readerIndex.subtitle')}</p>
       </div>
 
       {continueReading.length > 0 && (
         <div className="mb-8">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
             <Clock className="h-5 w-5 text-primary" />
-            Continue Reading
+            {t('readerIndex.continueReading')}
           </h2>
           <div className="space-y-3">
             {continueReading.map((document) => (
@@ -75,7 +77,7 @@ export default function ReaderIndexPage() {
                       </p>
                     </div>
                     <span className="shrink-0 text-sm text-muted-foreground">
-                      Continue reading
+                      {t('readerIndex.continueLabel')}
                     </span>
                     <ArrowRight className="h-5 w-5 text-muted-foreground" />
                   </CardContent>
@@ -90,7 +92,7 @@ export default function ReaderIndexPage() {
         <div>
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
             <BookOpen className="h-5 w-5 text-primary" />
-            Recently Opened
+            {t('readerIndex.recentlyOpened')}
           </h2>
           <div className="grid gap-3 sm:grid-cols-2">
             {recentDocs.map((document) => (
@@ -104,7 +106,7 @@ export default function ReaderIndexPage() {
                       <div className="min-w-0">
                         <h3 className="line-clamp-2 font-medium">{document.title}</h3>
                         <p className="mt-1 truncate text-sm text-muted-foreground">
-                          {document.authors[0] || 'Unknown author'}
+                          {document.authors[0] || t('readerIndex.unknownAuthor')}
                           {document.authors.length > 1 && ' et al.'}
                           {document.year && ` (${document.year})`}
                         </p>

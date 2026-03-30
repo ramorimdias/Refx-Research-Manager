@@ -293,14 +293,11 @@ export async function extractLocalPdfMetadata(filePath: string): Promise<LocalPd
   const fileNameTitle = titleFromFilePath(filePath)
   const provenance: DocumentMetadataProvenance = {}
 
-  const title = normalizeExtractedTitle(rawMetadata.title)
-    ?? firstPageMetadata.title
-    ?? fileNameTitle
+  const embeddedTitle = normalizeExtractedTitle(rawMetadata.title)
+  const title = embeddedTitle ?? fileNameTitle
 
-  if (normalizeExtractedTitle(rawMetadata.title)) {
+  if (embeddedTitle) {
     provenance.title = provenanceEntry('embedded_pdf_metadata', 'Embedded PDF title metadata.', 0.95)
-  } else if (firstPageMetadata.title) {
-    provenance.title = provenanceEntry('first_page_heuristic', 'First-page title heuristic.', 0.82)
   } else if (fileNameTitle) {
     provenance.title = provenanceEntry('filename_fallback', 'Filename fallback.', 0.25)
   }

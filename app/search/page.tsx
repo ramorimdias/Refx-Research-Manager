@@ -10,10 +10,12 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { EmptyState, MetadataStatusBadge, ReadingStageBadge } from '@/components/refx/common'
 import { useAppStore } from '@/lib/store'
 import type { KeywordGroup, MetadataStatus, ReadingStage } from '@/lib/types'
 import { searchDocuments, type DocumentSearchPageHit, type DocumentSearchQuery, type SearchProgressUpdate } from '@/lib/services/document-search-service'
+import { useT } from '@/lib/localization'
 
 type SearchResult = {
   document: ReturnType<typeof useAppStore.getState>['documents'][number]
@@ -144,6 +146,25 @@ function buildSimpleSearchQuery(query: string): DocumentSearchQuery | null {
   }
 }
 
+function SearchHelpTooltip({
+  content,
+  children,
+}: {
+  content: string
+  children: React.ReactNode
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex cursor-help items-center">{children}</span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-pretty">
+        {content}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function highlightText(text: string, keywords: string[]) {
   const normalized = normalizeKeywords(keywords)
   if (normalized.length === 0) return text
@@ -168,14 +189,8 @@ function highlightText(text: string, keywords: string[]) {
   )
 }
 
-function flexibilityLabel(flexibility: number) {
-  if (flexibility < 20) return 'Strict'
-  if (flexibility < 45) return 'Balanced'
-  if (flexibility < 70) return 'Flexible'
-  return 'Very flexible'
-}
-
 export default function SearchPage() {
+  const t = useT()
   const router = useRouter()
   const params = useSearchParams()
   const paramString = params.toString()
@@ -208,6 +223,12 @@ export default function SearchPage() {
   const executedGroupJoinOperator = useMemo(() => initialGroupJoinOperator, [initialGroupJoinOperator])
   const executedSimpleQuery = useMemo(() => initialSimpleQuery.trim(), [initialSimpleQuery])
   const executedSimpleTerms = useMemo(() => parseSimpleSearchTerms(executedSimpleQuery), [executedSimpleQuery])
+  const flexibilityLabel = (flexibility: number) => {
+    if (flexibility < 20) return t('searchPage.strict')
+    if (flexibility < 45) return t('searchPage.balanced')
+    if (flexibility < 70) return t('searchPage.flexible')
+    return t('searchPage.veryFlexible')
+  }
   const executedKeywords = useMemo(
     () => queryMode === 'simple'
       ? executedSimpleTerms
@@ -298,7 +319,7 @@ export default function SearchPage() {
       setResults([])
       setSearchedCount(0)
       setTotalToSearch(filteredDocuments.length)
-      setSearchStatus('Preparing the local search index…')
+      setSearchStatus(t('searchPage.preparingIndex'))
       const nextResults = await searchDocuments(executedSearchQuery, {
         documentIds: searchableDocumentIds,
         flexibility,
@@ -332,7 +353,10 @@ export default function SearchPage() {
 
       setResults(mappedResults)
       setSearchedCount(filteredDocuments.length)
-      setSearchStatus(`${mappedResults.length} result${mappedResults.length === 1 ? '' : 's'} ready`)
+      setSearchStatus(t('searchPage.resultsReady', {
+        count: mappedResults.length,
+        suffix: mappedResults.length === 1 ? '' : 's',
+      }))
       setIsSearching(false)
     }
 
@@ -345,7 +369,7 @@ export default function SearchPage() {
         setSearchStatus('')
       }
     }
-  }, [executedSearchQuery, filteredDocuments.length, flexibility, searchableDocumentIds, searchableDocumentsById])
+  }, [executedSearchQuery, filteredDocuments.length, flexibility, searchableDocumentIds, searchableDocumentsById, t])
 
   const updateGroup = (groupId: string, updates: Partial<KeywordGroup>) => {
     setDraftGroups((current) =>
@@ -463,21 +487,14 @@ export default function SearchPage() {
             <SearchIcon className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-semibold">Search</h1>
-            <p className="text-sm text-muted-foreground">Indexed full-library search backed by the local MiniSearch index.</p>
+            <h1 className="text-2xl font-semibold">{t('searchPage.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('searchPage.subtitleCompact')}</p>
           </div>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
           <Card className="h-fit">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Filter className="h-4 w-4" />
-                Advanced Filters
-              </CardTitle>
-              <CardDescription>Build grouped keyword queries with AND and OR logic, then run them across the selected library scope.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-5 pt-6">
               <form
                 className="space-y-4"
                 onSubmit={(event) => {
@@ -486,39 +503,45 @@ export default function SearchPage() {
                 }}
               >
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Query mode</label>
+                  <SearchHelpTooltip content={t('searchPage.queryModeHelp')}>
+                    <label className="text-sm font-medium">{t('searchPage.queryMode')}</label>
+                  </SearchHelpTooltip>
                   <div className="grid grid-cols-2 gap-2">
                     <Button
                       type="button"
                       variant={queryMode === 'simple' ? 'default' : 'outline'}
                       onClick={() => switchMode('simple')}
                     >
-                      Simple
+                      {t('searchPage.simple')}
                     </Button>
                     <Button
                       type="button"
                       variant={queryMode === 'complex' ? 'default' : 'outline'}
                       onClick={() => switchMode('complex')}
                     >
-                      Complex
+                      {t('searchPage.complex')}
                     </Button>
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium">Keyword query</label>
+                    <SearchHelpTooltip content={t('searchPage.keywordQueryHelp')}>
+                      <label className="text-sm font-medium">{t('searchPage.keywordQuery')}</label>
+                    </SearchHelpTooltip>
                     {queryMode === 'complex' && (
                       <Button type="button" variant="outline" size="sm" onClick={addGroup}>
                         <Plus className="mr-2 h-4 w-4" />
-                        Add group
+                        {t('searchPage.addGroup')}
                       </Button>
                     )}
                   </div>
 
                   {queryMode === 'simple' ? (
                     <div className="space-y-3 rounded-xl border p-3">
-                      <label className="text-sm font-medium">Quick search</label>
+                      <SearchHelpTooltip content={t('searchPage.simpleHelp')}>
+                        <label className="text-sm font-medium">{t('searchPage.quickSearch')}</label>
+                      </SearchHelpTooltip>
                       <div className="flex gap-2">
                         <div className="relative flex-1">
                           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -532,22 +555,21 @@ export default function SearchPage() {
                               }
                             }}
                             className="pl-9"
-                            placeholder="Search the local full-text index"
+                            placeholder={t('searchPage.quickSearchPlaceholder')}
                           />
                         </div>
                         <Button type="button" onClick={submitSearch} disabled={simpleQueryInput.trim().length === 0}>
-                          Search
+                          {t('searchPage.search')}
                         </Button>
                       </div>
-                      <p className="text-sm text-muted-foreground">
-                        Press Enter or Search to run. Use quotes for exact phrases, like "historia cronicas".
-                      </p>
                     </div>
                   ) : null}
 
                   {queryMode === 'complex' && draftGroups.length > 1 && (
                     <div className="space-y-2 rounded-xl border p-3">
-                      <label className="text-sm font-medium">Between groups</label>
+                      <SearchHelpTooltip content={draftGroupJoinOperator === 'AND' ? t('searchPage.everyGroup') : t('searchPage.anyGroup')}>
+                        <label className="text-sm font-medium">{t('searchPage.betweenGroups')}</label>
+                      </SearchHelpTooltip>
                       <Select value={draftGroupJoinOperator} onValueChange={(value) => setDraftGroupJoinOperator(value as GroupJoinOperator)}>
                         <SelectTrigger className="w-28">
                           <SelectValue />
@@ -557,11 +579,6 @@ export default function SearchPage() {
                           <SelectItem value="OR">OR</SelectItem>
                         </SelectContent>
                       </Select>
-                      <p className="text-xs text-muted-foreground">
-                        {draftGroupJoinOperator === 'AND'
-                          ? 'A document must satisfy every group.'
-                          : 'A document can satisfy any one of the groups.'}
-                      </p>
                     </div>
                   )}
 
@@ -569,7 +586,9 @@ export default function SearchPage() {
                     <div key={group.id} className="space-y-3 rounded-xl border p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium">{`Group ${index + 1}`}</span>
+                          <SearchHelpTooltip content={group.operator === 'AND' ? t('searchPage.addKeywordsHelpAnd') : t('searchPage.addKeywordsHelpOr')}>
+                            <span className="text-sm font-medium">{t('searchPage.group', { index: index + 1 })}</span>
+                          </SearchHelpTooltip>
                           <Select value={group.operator} onValueChange={(value) => updateGroup(group.id, { operator: value as KeywordGroup['operator'] })}>
                             <SelectTrigger className="h-8 w-24">
                               <SelectValue />
@@ -589,11 +608,11 @@ export default function SearchPage() {
                         <Input
                           value={groupInputs[group.id] ?? ''}
                           onChange={(event) => setGroupInputs((current) => ({ ...current, [group.id]: event.target.value }))}
-                          placeholder={`Add a keyword to this ${group.operator} group`}
+                          placeholder={t('searchPage.addKeywordPlaceholder')}
                         />
                         <Button type="button" variant="outline" className="shrink-0" onClick={() => addKeywordToGroup(group.id)} disabled={!(groupInputs[group.id] ?? '').trim()}>
                           <Plus className="mr-2 h-4 w-4" />
-                          Add
+                          {t('searchPage.add')}
                         </Button>
                       </div>
 
@@ -609,7 +628,7 @@ export default function SearchPage() {
                           ))
                         ) : (
                           <p className="text-sm text-muted-foreground">
-                            {`Add one or more keywords. Each keyword is treated as one phrase, and this group matches when ${group.operator === 'AND' ? 'every keyword phrase is found.' : 'any keyword phrase is found.'}`}
+                            {group.operator === 'AND' ? t('searchPage.addKeywordsHelpAnd') : t('searchPage.addKeywordsHelpOr')}
                           </p>
                         )}
                       </div>
@@ -619,16 +638,18 @@ export default function SearchPage() {
 
                 {queryMode === 'complex' && (
                   <Button type="submit" className="w-full">
-                    Search
+                    {t('searchPage.search')}
                   </Button>
                 )}
               </form>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Flexibility</label>
+                <SearchHelpTooltip content={t('searchPage.flexibilityHelp')}>
+                  <label className="text-sm font-medium">{t('searchPage.flexibility')}</label>
+                </SearchHelpTooltip>
                 <div className="rounded-lg border px-3 py-4">
                   <div className="mb-3 flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{flexibilityLabel(flexibility)}</span>
+                    <span className="text-muted-foreground">{flexibility < 20 ? t('searchPage.strict') : flexibility < 45 ? t('searchPage.balanced') : flexibility < 70 ? t('searchPage.flexible') : t('searchPage.veryFlexible')}</span>
                     <span className="font-medium">{flexibility}%</span>
                   </div>
                   <Slider
@@ -638,20 +659,17 @@ export default function SearchPage() {
                     step={1}
                     onValueChange={([value]) => setPersistentSearch({ flexibility: value ?? 0 })}
                   />
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    Higher flexibility allows closer variants such as misspellings, broken words across line wraps, and near matches.
-                  </p>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Library</label>
+                <label className="text-sm font-medium">{t('searchPage.library')}</label>
                 <Select value={selectedLibraryId} onValueChange={(value) => setPersistentSearch({ selectedLibraryId: value })}>
                   <SelectTrigger>
-                    <SelectValue placeholder="All libraries" />
+                    <SelectValue placeholder={t('notesPage.allLibraries')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All libraries</SelectItem>
+                    <SelectItem value="all">{t('notesPage.allLibraries')}</SelectItem>
                     {libraries.map((library) => (
                       <SelectItem key={library.id} value={library.id}>
                         {library.name}
@@ -662,31 +680,31 @@ export default function SearchPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Reading stage</label>
+                <label className="text-sm font-medium">{t('searchPage.readingStage')}</label>
                 <Select value={readingStage} onValueChange={(value) => setPersistentSearch({ readingStage: value as 'all' | ReadingStage })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Any stage</SelectItem>
-                    <SelectItem value="unread">Unread</SelectItem>
-                    <SelectItem value="reading">Reading</SelectItem>
-                    <SelectItem value="finished">Finished</SelectItem>
+                    <SelectItem value="all">{t('searchPage.anyStage')}</SelectItem>
+                    <SelectItem value="unread">{t('common.unread')}</SelectItem>
+                    <SelectItem value="reading">{t('common.reading')}</SelectItem>
+                    <SelectItem value="finished">{t('common.finished')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium">Metadata quality</label>
+                <label className="text-sm font-medium">{t('searchPage.metadataQuality')}</label>
                 <Select value={metadataStatus} onValueChange={(value) => setPersistentSearch({ metadataStatus: value as 'all' | MetadataStatus })}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Any status</SelectItem>
-                    <SelectItem value="missing">Missing</SelectItem>
-                    <SelectItem value="partial">Partial</SelectItem>
-                    <SelectItem value="complete">Complete</SelectItem>
+                    <SelectItem value="all">{t('searchPage.anyStatus')}</SelectItem>
+                    <SelectItem value="missing">{t('common.missing')}</SelectItem>
+                    <SelectItem value="partial">{t('common.partial')}</SelectItem>
+                    <SelectItem value="complete">{t('common.complete')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -697,7 +715,7 @@ export default function SearchPage() {
                 className="w-full"
                 onClick={() => setPersistentSearch({ favoriteOnly: !favoriteOnly })}
               >
-                {favoriteOnly ? 'Showing favorites only' : 'Filter to favorites'}
+                {favoriteOnly ? t('searchPage.favoritesOnly') : t('searchPage.filterFavorites')}
               </Button>
             </CardContent>
           </Card>
@@ -706,11 +724,11 @@ export default function SearchPage() {
             {executedGroups.length > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
                 <div>
-                  <p className="text-sm text-muted-foreground">Persistent indexed search</p>
+                  <p className="text-sm text-muted-foreground">{t('searchPage.persistentSearch')}</p>
                   <p className="font-medium">
                     {isSearching
-                      ? `Searching ${searchedCount}/${totalToSearch || filteredDocuments.length} documents for ${executedQueryLabel}`
-                      : `${results.length} result${results.length === 1 ? '' : 's'} for ${executedQueryLabel}`}
+                      ? t('searchPage.searchingDocs', { processed: searchedCount, total: totalToSearch || filteredDocuments.length, query: executedQueryLabel })
+                      : t('searchPage.resultsFor', { count: results.length, suffix: results.length === 1 ? '' : 's', query: executedQueryLabel })}
                   </p>
                   {searchStatus ? (
                     <p className="mt-1 text-sm text-muted-foreground">{searchStatus}</p>
@@ -720,7 +738,7 @@ export default function SearchPage() {
                   {isSearching && (
                     <Badge variant="secondary" className="gap-1.5">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Searching
+                      {t('searchPage.searchingBadge')}
                     </Badge>
                   )}
                   <Badge variant="secondary">{flexibilityLabel(flexibility)}</Badge>
@@ -729,10 +747,10 @@ export default function SearchPage() {
             ) : (
               <EmptyState
                 icon={SearchIcon}
-                title="Start a Search"
+                title={t('searchPage.startTitle')}
                 description={queryMode === 'simple'
-                  ? 'Type into the search box to query your local indexed library.'
-                  : 'Add one or more keyword groups and press Search to scan your full library.'}
+                  ? t('searchPage.startDescriptionSimple')
+                  : t('searchPage.startDescriptionComplex')}
               />
             )}
 
@@ -740,7 +758,7 @@ export default function SearchPage() {
               <Card>
                 <CardContent className="flex items-center gap-3 py-4 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  {searchStatus || 'Querying the local MiniSearch index and resolving snippets from stored extracted text.'}
+                  {searchStatus || t('searchPage.loadingFallback')}
                 </CardContent>
               </Card>
             )}
@@ -748,8 +766,8 @@ export default function SearchPage() {
             {executedGroups.length > 0 && !isSearching && results.length === 0 && (
               <EmptyState
                 icon={SearchIcon}
-                title="No matching documents"
-                description="Try increasing flexibility or broadening the filters."
+                title={t('searchPage.noMatchesTitle')}
+                description={t('searchPage.noMatchesDescription')}
               />
             )}
 
@@ -776,7 +794,7 @@ export default function SearchPage() {
                           {document.title}
                         </Link>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          {document.authors.join(', ') || 'Unknown author'}
+                          {document.authors.join(', ') || t('searchPage.unknownAuthor')}
                           {document.year ? ` • ${document.year}` : ''}
                           {library ? ` • ${library.name}` : ''}
                         </p>
@@ -803,7 +821,7 @@ export default function SearchPage() {
                       ))}
                       {primaryPageHit && (
                         <Badge variant="outline">
-                          Page {primaryPageHit.pageNumber}
+                          {t('searchPage.page', { page: primaryPageHit.pageNumber })}
                         </Badge>
                       )}
                     </div>
@@ -815,11 +833,11 @@ export default function SearchPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <Button asChild>
                         <Link href={readerHref}>
-                          Open in Reader
+                          {t('searchPage.openReader')}
                         </Link>
                       </Button>
                       <Button asChild variant="outline">
-                        <Link href={`/documents?id=${document.id}&edit=1`}>Open Details</Link>
+                        <Link href={`/documents?id=${document.id}&edit=1`}>{t('searchPage.openDetails')}</Link>
                       </Button>
                     </div>
                   </CardContent>

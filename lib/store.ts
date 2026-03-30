@@ -555,25 +555,34 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
 
-    const { libraries, documents, notes, annotations, relations, graphViews } = await fetchDesktopData()
-    const currentActiveLibraryId = get().activeLibraryId
-    const activeLibraryId = libraries.some((library) => library.id === currentActiveLibraryId)
-      ? currentActiveLibraryId
-      : libraries[0]?.id ?? null
+    try {
+      const { libraries, documents, notes, annotations, relations, graphViews } = await fetchDesktopData()
+      const currentActiveLibraryId = get().activeLibraryId
+      const activeLibraryId = libraries.some((library) => library.id === currentActiveLibraryId)
+        ? currentActiveLibraryId
+        : libraries[0]?.id ?? null
 
-    set({
-      initialized: true,
-      isDesktopApp: true,
-      libraries,
-      documents,
-      annotations,
-      notes,
-      relations,
-      graphViews,
-      graphViewLayouts: [],
-      activeLibraryId,
-      activeDocumentId: get().activeDocumentId,
-    })
+      set({
+        initialized: true,
+        isDesktopApp: true,
+        libraries,
+        documents,
+        annotations,
+        notes,
+        relations,
+        graphViews,
+        graphViewLayouts: [],
+        activeLibraryId,
+        activeDocumentId: get().activeDocumentId,
+      })
+    } catch (error) {
+      console.error('Desktop bootstrap failed; starting with a safe empty workspace.', error)
+      set({
+        ...previewState(),
+        initialized: true,
+        isDesktopApp: true,
+      })
+    }
   },
 
   refreshData: async () => {

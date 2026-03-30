@@ -42,18 +42,13 @@ import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
+import { APP_LOCALES, useT } from '@/lib/localization'
+import { APP_VERSION } from '@/lib/app-version'
 
 type SettingsSection = 'general' | 'display' | 'processing' | 'data' | 'about'
 
-const sections: Array<{ id: SettingsSection; label: string; icon: typeof Settings }> = [
-  { id: 'general', label: 'General', icon: Settings },
-  { id: 'display', label: 'Display', icon: Palette },
-  { id: 'processing', label: 'Processing', icon: Sparkles },
-  { id: 'data', label: 'Data', icon: Database },
-  { id: 'about', label: 'About', icon: HardDrive },
-]
-
 export default function SettingsPage() {
+  const t = useT()
   const router = useRouter()
   const { setTheme } = useTheme()
   const { clearLocalData, refreshData, scanDocumentsOcr, documents, isDesktopApp } = useAppStore()
@@ -73,6 +68,7 @@ export default function SettingsPage() {
   const [restoreTargetPath, setRestoreTargetPath] = useState<string | null>(null)
   const [isRestoreWarningOpen, setIsRestoreWarningOpen] = useState(false)
   const hasLoadedSettingsRef = useRef(false)
+  const [isSettingsLoaded, setIsSettingsLoaded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -82,6 +78,7 @@ export default function SettingsPage() {
       if (!cancelled) {
         setSettings(loaded)
         hasLoadedSettingsRef.current = true
+        setIsSettingsLoaded(true)
       }
     }
 
@@ -92,9 +89,17 @@ export default function SettingsPage() {
     }
   }, [isDesktopApp])
 
+  const sections: Array<{ id: SettingsSection; label: string; icon: typeof Settings }> = [
+    { id: 'general', label: t('settings.general'), icon: Settings },
+    { id: 'display', label: t('settings.display'), icon: Palette },
+    { id: 'processing', label: t('settings.processing'), icon: Sparkles },
+    { id: 'data', label: t('settings.data'), icon: Database },
+    { id: 'about', label: t('settings.about'), icon: HardDrive },
+  ]
+
   const activeMeta = useMemo(
     () => sections.find((section) => section.id === activeSection) ?? sections[0],
-    [activeSection],
+    [activeSection, sections],
   )
 
   const updateSettings = <K extends keyof StoredAppSettings>(key: K, value: StoredAppSettings[K]) => {
@@ -149,9 +154,10 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
+    if (!isSettingsLoaded) return
     applySettingsImmediately()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.theme, settings.fontSize])
+  }, [isSettingsLoaded, settings.theme, settings.fontSize])
 
   const handleClearLocalData = async () => {
     const confirmed = window.confirm('Clear all local documents, notes, and imported files? This cannot be undone.')
@@ -274,6 +280,17 @@ export default function SettingsPage() {
     }
   }
 
+  if (!isSettingsLoaded) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center p-6">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>{t('appProvider.loadingWorkspace')}</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="border-b border-border/80 bg-background/92 px-6 py-5 backdrop-blur">
@@ -281,9 +298,9 @@ export default function SettingsPage() {
           <div>
             <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
               <Settings className="h-6 w-6" />
-              Settings
+              {t('settings.title')}
             </h1>
-            <p className="mt-1 text-sm text-muted-foreground">Preferences for this device.</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t('settings.subtitle')}</p>
           </div>
         </div>
       </div>
@@ -311,28 +328,43 @@ export default function SettingsPage() {
           <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">{activeMeta.label}</h2>
-              <p className="text-sm text-muted-foreground">Adjust local behavior.</p>
+              <p className="text-sm text-muted-foreground">{t('settings.adjustLocalBehavior')}</p>
             </div>
 
             {activeSection === 'general' && (
               <>
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Profile</CardTitle>
-                    <CardDescription>Name used across your workspace.</CardDescription>
+                    <CardTitle className="text-base">{t('settings.profileTitle')}</CardTitle>
+                    <CardDescription>{t('settings.profileDescription')}</CardDescription>
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">Your Name</Label>
+                      <Label className="text-sm font-medium">{t('settings.yourName')}</Label>
                       <Input
                         value={settings.userName}
                         onChange={(event) => updateSettings('userName', event.target.value)}
                         className="mt-2"
-                        placeholder="Enter your name"
+                        placeholder={t('settings.yourNamePlaceholder')}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Leave this blank if you prefer an impersonal greeting. You can change it anytime.
+                        {t('settings.yourNameHelp')}
                       </p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium">{t('settings.language')}</Label>
+                      <Select value={settings.locale} onValueChange={(value) => updateSettings('locale', value as StoredAppSettings['locale'])}>
+                        <SelectTrigger className="mt-1.5 max-w-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {APP_LOCALES.map((locale) => (
+                            <SelectItem key={locale} value={locale}>
+                              {t(`localeNames.${locale}`)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </CardContent>
                 </Card>
@@ -358,12 +390,12 @@ export default function SettingsPage() {
             {activeSection === 'display' && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Appearance</CardTitle>
-                  <CardDescription>Appearance for this device.</CardDescription>
+                    <CardTitle className="text-base">{t('settings.appearanceTitle')}</CardTitle>
+                    <CardDescription>{t('settings.appearanceDescription')}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <Label className="text-sm">Theme</Label>
+                    <Label className="text-sm">{t('settings.theme')}</Label>
                     <Select value={settings.theme} onValueChange={(value) => updateSettings('theme', value as StoredAppSettings['theme'])}>
                       <SelectTrigger className="mt-1.5">
                         <SelectValue />
@@ -383,7 +415,7 @@ export default function SettingsPage() {
                   </div>
 
                   <div>
-                    <Label className="text-sm">Font Size</Label>
+                    <Label className="text-sm">{t('settings.fontSize')}</Label>
                     <Select value={settings.fontSize} onValueChange={(value) => updateSettings('fontSize', value as StoredAppSettings['fontSize'])}>
                       <SelectTrigger className="mt-1.5">
                         <SelectValue />
@@ -737,7 +769,7 @@ export default function SettingsPage() {
                   <Separator />
                   <div className="flex items-center justify-between">
                     <span className="text-sm">Version</span>
-                    <Badge variant="secondary">v1.0.0</Badge>
+                    <Badge variant="secondary">v{APP_VERSION}</Badge>
                   </div>
                 </CardContent>
               </Card>

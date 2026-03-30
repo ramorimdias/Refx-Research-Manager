@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::path::PathBuf;
@@ -240,6 +240,13 @@ pub struct CreateDocumentInput {
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
     pub cover_image_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeDocumentsInput {
+    pub primary_document_id: String,
+    pub duplicate_document_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1253,6 +1260,232 @@ pub fn open_document_file_location(path: String) -> Result<(), AppError> {
     Ok(())
 }
 
+fn ensure_tag_exists(conn: &Connection, tag_name: &str) -> Result<String, AppError> {
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM tags WHERE name = ?1",
+            params![tag_name],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    match existing {
+        Some(id) => Ok(id),
+        None => {
+            let generated_id = format!("tag-{}", uuid::Uuid::new_v4());
+            conn.execute(
+                "INSERT INTO tags (id, name, created_at) VALUES (?1, ?2, ?3)",
+                params![generated_id, tag_name, now_iso()],
+            )?;
+            Ok(generated_id)
+        }
+    }
+}
+
+fn parse_json_string_array(value: Option<String>) -> Vec<String> {
+    value
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn merge_string_lists(primary: Vec<String>, duplicate: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut merged = Vec::new();
+
+    for item in primary.into_iter().chain(duplicate.into_iter()) {
+        let normalized = item.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+
+        let key = normalized.to_lowercase();
+        if seen.insert(key) {
+            merged.push(normalized.to_string());
+        }
+    }
+
+    merged
+}
+
+fn choose_non_empty(primary: Option<String>, duplicate: Option<String>) -> Option<String> {
+    match primary {
+        Some(value) if !value.trim().is_empty() => Some(value),
+        _ => duplicate.filter(|value| !value.trim().is_empty()),
+    }
+}
+
+fn merge_distinct_text(primary: Option<String>, duplicate: Option<String>) -> Option<String> {
+    match (
+        primary.filter(|value| !value.trim().is_empty()),
+        duplicate.filter(|value| !value.trim().is_empty()),
+    ) {
+        (Some(primary_value), Some(duplicate_value)) => {
+            if primary_value.trim().eq_ignore_ascii_case(duplicate_value.trim()) {
+                Some(primary_value)
+            } else {
+                Some(format!("{}\n\n{}", primary_value.trim(), duplicate_value.trim()))
+            }
+        }
+        (Some(primary_value), None) => Some(primary_value),
+        (None, Some(duplicate_value)) => Some(duplicate_value),
+        (None, None) => None,
+    }
+}
+
+fn reading_stage_rank(value: &str) -> i64 {
+    match value {
+        "finished" => 3,
+        "reading" => 2,
+        "unread" => 1,
+        _ => 0,
+    }
+}
+
+fn metadata_status_rank(value: &str) -> i64 {
+    match value {
+        "complete" => 3,
+        "partial" => 2,
+        "missing" => 1,
+        _ => 0,
+    }
+}
+
+fn processing_status_rank(value: &str) -> i64 {
+    match value {
+        "complete" => 5,
+        "processing" => 4,
+        "queued" => 3,
+        "pending" => 2,
+        "skipped" => 1,
+        _ => 0,
+    }
+}
+
+fn merge_relation_duplicates(conn: &Connection) -> Result<(), AppError> {
+    #[derive(Clone)]
+    struct RelationRow {
+        id: String,
+        source_document_id: String,
+        target_document_id: String,
+        link_type: String,
+        link_origin: String,
+        relation_status: Option<String>,
+        confidence: Option<f64>,
+        label: Option<String>,
+        notes: Option<String>,
+        updated_at: String,
+    }
+
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          id,
+          source_document_id,
+          target_document_id,
+          link_type,
+          link_origin,
+          relation_status,
+          confidence,
+          label,
+          notes,
+          updated_at,
+          created_at
+        FROM document_relations
+        ORDER BY source_document_id, target_document_id, link_type, link_origin, updated_at DESC, created_at DESC, id DESC
+        "#,
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(RelationRow {
+            id: row.get(0)?,
+            source_document_id: row.get(1)?,
+            target_document_id: row.get(2)?,
+            link_type: row.get(3)?,
+            link_origin: row.get(4)?,
+            relation_status: row.get(5)?,
+            confidence: row.get(6)?,
+            label: row.get(7)?,
+            notes: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    })?;
+
+    let mut grouped: HashMap<(String, String, String, String), Vec<RelationRow>> = HashMap::new();
+    for row in rows {
+        let row = row?;
+        grouped
+            .entry((
+                row.source_document_id.clone(),
+                row.target_document_id.clone(),
+                row.link_type.clone(),
+                row.link_origin.clone(),
+            ))
+            .or_default()
+            .push(row);
+    }
+
+    for rows in grouped.values() {
+        if rows.len() <= 1 {
+            continue;
+        }
+
+        let keeper = &rows[0];
+        let merged_label = rows
+            .iter()
+            .filter_map(|row| row.label.clone())
+            .find(|value| !value.trim().is_empty());
+        let merged_notes = rows.iter().fold(None, |acc, row| merge_distinct_text(acc, row.notes.clone()));
+        let merged_status = rows
+            .iter()
+            .filter_map(|row| row.relation_status.clone())
+            .max_by_key(|value| {
+                match value.as_str() {
+                    "confirmed" => 4,
+                    "auto_confirmed" => 3,
+                    "proposed" => 2,
+                    "rejected" => 1,
+                    _ => 0,
+                }
+            });
+        let merged_confidence = rows
+            .iter()
+            .filter_map(|row| row.confidence)
+            .max_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal));
+
+        conn.execute(
+            r#"UPDATE document_relations SET
+              relation_status = COALESCE(?1, relation_status),
+              confidence = COALESCE(?2, confidence),
+              label = COALESCE(?3, label),
+              notes = COALESCE(?4, notes),
+              updated_at = ?5
+              WHERE id = ?6"#,
+            params![
+                merged_status,
+                merged_confidence,
+                merged_label,
+                merged_notes,
+                keeper.updated_at,
+                keeper.id
+            ],
+        )?;
+
+        for duplicate in rows.iter().skip(1) {
+            conn.execute(
+                "DELETE FROM document_relations WHERE id = ?1",
+                params![duplicate.id.clone()],
+            )?;
+        }
+    }
+
+    conn.execute(
+        "DELETE FROM document_relations WHERE source_document_id = target_document_id",
+        [],
+    )?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn import_book_cover(app: AppHandle, source_path: String) -> Result<String, AppError> {
     import_book_cover_file(&app, &source_path)
@@ -1786,6 +2019,683 @@ pub fn delete_document(app: AppHandle, id: String) -> Result<bool, AppError> {
         }
     }
     Ok(rows > 0)
+}
+
+#[tauri::command]
+pub fn merge_documents(
+    app: AppHandle,
+    input: MergeDocumentsInput,
+) -> Result<Option<Document>, AppError> {
+    let unique_duplicate_ids: Vec<String> = input
+        .duplicate_document_ids
+        .into_iter()
+        .filter(|id| id != &input.primary_document_id)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    if unique_duplicate_ids.is_empty() {
+        return get_document_by_id(app, input.primary_document_id);
+    }
+
+    let mut conn = open_db(&app)?;
+    let primary_library_id: String = conn.query_row(
+        "SELECT library_id FROM documents WHERE id = ?1",
+        params![input.primary_document_id.clone()],
+        |row| row.get(0),
+    )?;
+
+    let mut duplicate_file_cleanup_paths: Vec<String> = Vec::new();
+    let tx = conn.transaction()?;
+
+    let primary_before = tx
+        .query_row(
+            r#"SELECT
+                title,
+                authors,
+                year,
+                abstract,
+                doi,
+                isbn,
+                publisher,
+                citation_key,
+                source_path,
+                imported_file_path,
+                extracted_text_path,
+                search_text,
+                text_hash,
+                text_extracted_at,
+                text_extraction_status,
+                page_count,
+                has_extracted_text,
+                has_ocr,
+                has_ocr_text,
+                ocr_status,
+                metadata_status,
+                metadata_provenance,
+                metadata_user_edited_fields,
+                indexing_status,
+                tag_suggestions,
+                rejected_tag_suggestions,
+                tag_suggestion_text_hash,
+                tag_suggestion_status,
+                classification_result,
+                classification_text_hash,
+                classification_status,
+                processing_error,
+                processing_updated_at,
+                last_processed_at,
+                reading_stage,
+                rating,
+                favorite,
+                last_opened_at,
+                last_read_page,
+                commentary_text,
+                commentary_updated_at,
+                cover_image_path,
+                updated_at
+            FROM documents
+            WHERE id = ?1"#,
+            params![input.primary_document_id.clone()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, String>(14)?,
+                    row.get::<_, Option<i64>>(15)?,
+                    row.get::<_, bool>(16)?,
+                    row.get::<_, bool>(17)?,
+                    row.get::<_, bool>(18)?,
+                    row.get::<_, String>(19)?,
+                    row.get::<_, String>(20)?,
+                    row.get::<_, Option<String>>(21)?,
+                    row.get::<_, Option<String>>(22)?,
+                    row.get::<_, String>(23)?,
+                    row.get::<_, Option<String>>(24)?,
+                    row.get::<_, Option<String>>(25)?,
+                    row.get::<_, Option<String>>(26)?,
+                    row.get::<_, String>(27)?,
+                    row.get::<_, Option<String>>(28)?,
+                    row.get::<_, Option<String>>(29)?,
+                    row.get::<_, String>(30)?,
+                    row.get::<_, Option<String>>(31)?,
+                    row.get::<_, Option<String>>(32)?,
+                    row.get::<_, Option<String>>(33)?,
+                    row.get::<_, String>(34)?,
+                    row.get::<_, i64>(35)?,
+                    row.get::<_, bool>(36)?,
+                    row.get::<_, Option<String>>(37)?,
+                    row.get::<_, Option<i64>>(38)?,
+                    row.get::<_, Option<String>>(39)?,
+                    row.get::<_, Option<String>>(40)?,
+                    row.get::<_, Option<String>>(41)?,
+                    row.get::<_, String>(42)?,
+                ))
+            },
+        )?;
+
+    let (
+        mut merged_title,
+        mut merged_authors,
+        mut merged_year,
+        mut merged_abstract,
+        mut merged_doi,
+        mut merged_isbn,
+        mut merged_publisher,
+        mut merged_citation_key,
+        mut merged_source_path,
+        mut merged_imported_file_path,
+        mut merged_extracted_text_path,
+        mut merged_search_text,
+        mut merged_text_hash,
+        mut merged_text_extracted_at,
+        mut merged_text_extraction_status,
+        mut merged_page_count,
+        mut merged_has_extracted_text,
+        mut merged_has_ocr,
+        mut merged_has_ocr_text,
+        mut merged_ocr_status,
+        mut merged_metadata_status,
+        mut merged_metadata_provenance,
+        mut merged_metadata_user_edited_fields,
+        mut merged_indexing_status,
+        mut merged_tag_suggestions,
+        mut merged_rejected_tag_suggestions,
+        mut merged_tag_suggestion_text_hash,
+        mut merged_tag_suggestion_status,
+        mut merged_classification_result,
+        mut merged_classification_text_hash,
+        mut merged_classification_status,
+        mut merged_processing_error,
+        mut merged_processing_updated_at,
+        mut merged_last_processed_at,
+        mut merged_reading_stage,
+        mut merged_rating,
+        mut merged_favorite,
+        mut merged_last_opened_at,
+        mut merged_last_read_page,
+        mut merged_commentary_text,
+        mut merged_commentary_updated_at,
+        mut merged_cover_image_path,
+        _primary_updated_at,
+    ) = primary_before;
+
+    let primary_tags = document_tags(&tx, &input.primary_document_id)?;
+    let mut merged_tags = primary_tags;
+
+    for duplicate_id in unique_duplicate_ids.iter() {
+        let duplicate_row: Option<(
+            String,
+            String,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<i64>,
+            bool,
+            bool,
+            bool,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            String,
+            i64,
+            bool,
+            Option<String>,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        )> = tx
+            .query_row(
+                r#"SELECT
+                    title,
+                    authors,
+                    year,
+                    abstract,
+                    doi,
+                    isbn,
+                    publisher,
+                    citation_key,
+                    source_path,
+                    imported_file_path,
+                    extracted_text_path,
+                    search_text,
+                    text_hash,
+                    text_extracted_at,
+                    text_extraction_status,
+                    page_count,
+                    has_extracted_text,
+                    has_ocr,
+                    has_ocr_text,
+                    ocr_status,
+                    metadata_status,
+                    metadata_provenance,
+                    metadata_user_edited_fields,
+                    indexing_status,
+                    tag_suggestions,
+                    rejected_tag_suggestions,
+                    tag_suggestion_text_hash,
+                    tag_suggestion_status,
+                    classification_result,
+                    classification_text_hash,
+                    classification_status,
+                    processing_error,
+                    processing_updated_at,
+                    last_processed_at,
+                    reading_stage,
+                    rating,
+                    favorite,
+                    last_opened_at,
+                    last_read_page,
+                    commentary_text,
+                    commentary_updated_at,
+                    cover_image_path
+                FROM documents
+                WHERE id = ?1"#,
+                params![duplicate_id.clone()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                        row.get(12)?,
+                        row.get(13)?,
+                        row.get(14)?,
+                        row.get(15)?,
+                        row.get(16)?,
+                        row.get(17)?,
+                        row.get(18)?,
+                        row.get(19)?,
+                        row.get(20)?,
+                        row.get(21)?,
+                        row.get(22)?,
+                        row.get(23)?,
+                        row.get(24)?,
+                        row.get(25)?,
+                        row.get(26)?,
+                        row.get(27)?,
+                        row.get(28)?,
+                        row.get(29)?,
+                        row.get(30)?,
+                        row.get(31)?,
+                        row.get(32)?,
+                        row.get(33)?,
+                        row.get(34)?,
+                        row.get(35)?,
+                        row.get(36)?,
+                        row.get(37)?,
+                        row.get(38)?,
+                        row.get(39)?,
+                        row.get(40)?,
+                        row.get(41)?,
+                    ))
+                },
+            )
+            .optional()?;
+
+        let Some((
+            duplicate_title,
+            duplicate_authors,
+            duplicate_year,
+            duplicate_abstract,
+            duplicate_doi,
+            duplicate_isbn,
+            duplicate_publisher,
+            duplicate_citation_key,
+            duplicate_source_path,
+            duplicate_imported_file_path,
+            duplicate_extracted_text_path,
+            duplicate_search_text,
+            duplicate_text_hash,
+            duplicate_text_extracted_at,
+            duplicate_text_extraction_status,
+            duplicate_page_count,
+            duplicate_has_extracted_text,
+            duplicate_has_ocr,
+            duplicate_has_ocr_text,
+            duplicate_ocr_status,
+            duplicate_metadata_status,
+            duplicate_metadata_provenance,
+            duplicate_metadata_user_edited_fields,
+            duplicate_indexing_status,
+            duplicate_tag_suggestions,
+            duplicate_rejected_tag_suggestions,
+            duplicate_tag_suggestion_text_hash,
+            duplicate_tag_suggestion_status,
+            duplicate_classification_result,
+            duplicate_classification_text_hash,
+            duplicate_classification_status,
+            duplicate_processing_error,
+            duplicate_processing_updated_at,
+            duplicate_last_processed_at,
+            duplicate_reading_stage,
+            duplicate_rating,
+            duplicate_favorite,
+            duplicate_last_opened_at,
+            duplicate_last_read_page,
+            duplicate_commentary_text,
+            duplicate_commentary_updated_at,
+            duplicate_cover_image_path,
+        )) = duplicate_row else {
+            continue;
+        };
+
+        let duplicate_library_id: String = tx.query_row(
+            "SELECT library_id FROM documents WHERE id = ?1",
+            params![duplicate_id.clone()],
+            |row| row.get(0),
+        )?;
+
+        if duplicate_library_id != primary_library_id {
+            return Err(AppError::Validation(
+                "Duplicate documents must belong to the same library.".to_string(),
+            ));
+        }
+
+        merged_title = if merged_title.trim().is_empty() {
+            duplicate_title
+        } else {
+            merged_title
+        };
+        merged_authors = serde_json::to_string(&merge_string_lists(
+            parse_json_string_array(Some(merged_authors)),
+            parse_json_string_array(Some(duplicate_authors)),
+        ))
+        .map_err(|error| AppError::Validation(error.to_string()))?;
+        merged_year = merged_year.or(duplicate_year);
+        merged_abstract = merge_distinct_text(merged_abstract, duplicate_abstract);
+        merged_doi = choose_non_empty(merged_doi, duplicate_doi);
+        merged_isbn = choose_non_empty(merged_isbn, duplicate_isbn);
+        merged_publisher = choose_non_empty(merged_publisher, duplicate_publisher);
+        merged_citation_key = choose_non_empty(merged_citation_key, duplicate_citation_key);
+        merged_source_path = choose_non_empty(merged_source_path, duplicate_source_path.clone());
+        merged_imported_file_path = choose_non_empty(merged_imported_file_path, duplicate_imported_file_path.clone());
+        merged_extracted_text_path = choose_non_empty(merged_extracted_text_path, duplicate_extracted_text_path.clone());
+        merged_search_text = choose_non_empty(merged_search_text, duplicate_search_text);
+        merged_text_hash = choose_non_empty(merged_text_hash, duplicate_text_hash);
+        merged_text_extracted_at = choose_non_empty(merged_text_extracted_at, duplicate_text_extracted_at);
+        if processing_status_rank(&duplicate_text_extraction_status) > processing_status_rank(&merged_text_extraction_status) {
+            merged_text_extraction_status = duplicate_text_extraction_status;
+        }
+        merged_page_count = merged_page_count.or(duplicate_page_count);
+        merged_has_extracted_text = merged_has_extracted_text || duplicate_has_extracted_text;
+        merged_has_ocr = merged_has_ocr || duplicate_has_ocr;
+        merged_has_ocr_text = merged_has_ocr_text || duplicate_has_ocr_text;
+        if processing_status_rank(&duplicate_ocr_status) > processing_status_rank(&merged_ocr_status) {
+            merged_ocr_status = duplicate_ocr_status;
+        }
+        if metadata_status_rank(&duplicate_metadata_status) > metadata_status_rank(&merged_metadata_status) {
+            merged_metadata_status = duplicate_metadata_status;
+        }
+        merged_metadata_provenance = choose_non_empty(merged_metadata_provenance, duplicate_metadata_provenance);
+        merged_metadata_user_edited_fields =
+            choose_non_empty(merged_metadata_user_edited_fields, duplicate_metadata_user_edited_fields);
+        if processing_status_rank(&duplicate_indexing_status) > processing_status_rank(&merged_indexing_status) {
+            merged_indexing_status = duplicate_indexing_status;
+        }
+        merged_tag_suggestions = serde_json::to_string(&merge_string_lists(
+            parse_json_string_array(merged_tag_suggestions),
+            parse_json_string_array(duplicate_tag_suggestions),
+        ))
+        .ok()
+        .filter(|value| value != "[]");
+        merged_rejected_tag_suggestions = serde_json::to_string(&merge_string_lists(
+            parse_json_string_array(merged_rejected_tag_suggestions),
+            parse_json_string_array(duplicate_rejected_tag_suggestions),
+        ))
+        .ok()
+        .filter(|value| value != "[]");
+        merged_tag_suggestion_text_hash =
+            choose_non_empty(merged_tag_suggestion_text_hash, duplicate_tag_suggestion_text_hash);
+        if processing_status_rank(&duplicate_tag_suggestion_status) > processing_status_rank(&merged_tag_suggestion_status) {
+            merged_tag_suggestion_status = duplicate_tag_suggestion_status;
+        }
+        merged_classification_result = choose_non_empty(merged_classification_result, duplicate_classification_result);
+        merged_classification_text_hash =
+            choose_non_empty(merged_classification_text_hash, duplicate_classification_text_hash);
+        if processing_status_rank(&duplicate_classification_status) > processing_status_rank(&merged_classification_status) {
+            merged_classification_status = duplicate_classification_status;
+        }
+        merged_processing_error = merge_distinct_text(merged_processing_error, duplicate_processing_error);
+        merged_processing_updated_at = choose_non_empty(merged_processing_updated_at, duplicate_processing_updated_at);
+        merged_last_processed_at = choose_non_empty(merged_last_processed_at, duplicate_last_processed_at);
+        if reading_stage_rank(&duplicate_reading_stage) > reading_stage_rank(&merged_reading_stage) {
+            merged_reading_stage = duplicate_reading_stage;
+        }
+        if duplicate_rating > merged_rating {
+            merged_rating = duplicate_rating;
+        }
+        merged_favorite = merged_favorite || duplicate_favorite;
+        merged_last_opened_at = choose_non_empty(merged_last_opened_at, duplicate_last_opened_at);
+        if duplicate_last_read_page.unwrap_or(0) > merged_last_read_page.unwrap_or(0) {
+            merged_last_read_page = duplicate_last_read_page;
+        }
+        merged_commentary_text = merge_distinct_text(merged_commentary_text, duplicate_commentary_text);
+        merged_commentary_updated_at = choose_non_empty(merged_commentary_updated_at, duplicate_commentary_updated_at);
+        merged_cover_image_path = choose_non_empty(merged_cover_image_path, duplicate_cover_image_path.clone());
+
+        merged_tags = merge_string_lists(merged_tags, document_tags(&tx, duplicate_id)?);
+
+        if let Some(path) = duplicate_imported_file_path {
+            duplicate_file_cleanup_paths.push(path);
+        }
+        if let Some(path) = duplicate_extracted_text_path {
+            duplicate_file_cleanup_paths.push(path);
+        }
+        if let Some(path) = duplicate_cover_image_path {
+            duplicate_file_cleanup_paths.push(path);
+        }
+
+        tx.execute(
+            "UPDATE notes SET document_id = ?1 WHERE document_id = ?2",
+            params![input.primary_document_id.clone(), duplicate_id.clone()],
+        )?;
+        tx.execute(
+            "UPDATE annotations SET document_id = ?1 WHERE document_id = ?2",
+            params![input.primary_document_id.clone(), duplicate_id.clone()],
+        )?;
+        tx.execute(
+            "UPDATE OR IGNORE graph_view_node_layouts SET document_id = ?1 WHERE document_id = ?2",
+            params![input.primary_document_id.clone(), duplicate_id.clone()],
+        )?;
+        tx.execute(
+            "DELETE FROM graph_view_node_layouts WHERE document_id = ?1",
+            params![duplicate_id.clone()],
+        )?;
+        tx.execute(
+            "UPDATE document_relations SET source_document_id = ?1 WHERE source_document_id = ?2",
+            params![input.primary_document_id.clone(), duplicate_id.clone()],
+        )?;
+        tx.execute(
+            "UPDATE document_relations SET target_document_id = ?1 WHERE target_document_id = ?2",
+            params![input.primary_document_id.clone(), duplicate_id.clone()],
+        )?;
+        tx.execute(
+            "UPDATE graph_views SET selected_document_id = ?1 WHERE selected_document_id = ?2",
+            params![input.primary_document_id.clone(), duplicate_id.clone()],
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO document_tags (document_id, tag_id) SELECT ?1, tag_id FROM document_tags WHERE document_id = ?2",
+            params![input.primary_document_id.clone(), duplicate_id.clone()],
+        )?;
+    }
+
+    let graph_views_to_update: Vec<(String, Option<String>)> = {
+        let mut stmt = tx.prepare("SELECT id, document_ids_json FROM graph_views WHERE library_id = ?1")?;
+        let rows = stmt.query_map(params![primary_library_id.clone()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })?;
+        rows.filter_map(Result::ok).collect()
+    };
+
+    for (graph_view_id, document_ids_json) in graph_views_to_update {
+        let document_ids = parse_json_string_array(document_ids_json);
+        let mut next_document_ids = Vec::new();
+        let mut seen = BTreeSet::new();
+
+        for document_id in document_ids {
+            let next_id = if unique_duplicate_ids.iter().any(|duplicate_id| duplicate_id == &document_id) {
+                input.primary_document_id.clone()
+            } else {
+                document_id
+            };
+
+            if seen.insert(next_id.clone()) {
+                next_document_ids.push(next_id);
+            }
+        }
+
+        tx.execute(
+            "UPDATE graph_views SET document_ids_json = ?1 WHERE id = ?2",
+            params![
+                serde_json::to_string(&next_document_ids).map_err(|error| AppError::Validation(error.to_string()))?,
+                graph_view_id
+            ],
+        )?;
+    }
+
+    tx.execute(
+        r#"UPDATE documents SET
+          title = ?1,
+          authors = ?2,
+          year = ?3,
+          abstract = ?4,
+          doi = ?5,
+          isbn = ?6,
+          publisher = ?7,
+          citation_key = ?8,
+          source_path = ?9,
+          imported_file_path = ?10,
+          extracted_text_path = ?11,
+          search_text = ?12,
+          text_hash = ?13,
+          text_extracted_at = ?14,
+          text_extraction_status = ?15,
+          page_count = ?16,
+          has_extracted_text = ?17,
+          has_ocr = ?18,
+          has_ocr_text = ?19,
+          ocr_status = ?20,
+          metadata_status = ?21,
+          metadata_provenance = ?22,
+          metadata_user_edited_fields = ?23,
+          indexing_status = ?24,
+          tag_suggestions = ?25,
+          rejected_tag_suggestions = ?26,
+          tag_suggestion_text_hash = ?27,
+          tag_suggestion_status = ?28,
+          classification_result = ?29,
+          classification_text_hash = ?30,
+          classification_status = ?31,
+          processing_error = ?32,
+          processing_updated_at = ?33,
+          last_processed_at = ?34,
+          reading_stage = ?35,
+          rating = ?36,
+          favorite = ?37,
+          last_opened_at = ?38,
+          last_read_page = ?39,
+          commentary_text = ?40,
+          commentary_updated_at = ?41,
+          cover_image_path = ?42,
+          updated_at = ?43
+          WHERE id = ?44"#,
+        params![
+            merged_title,
+            merged_authors,
+            merged_year,
+            merged_abstract,
+            merged_doi,
+            merged_isbn,
+            merged_publisher,
+            merged_citation_key,
+            merged_source_path,
+            merged_imported_file_path,
+            merged_extracted_text_path,
+            merged_search_text,
+            merged_text_hash,
+            merged_text_extracted_at,
+            merged_text_extraction_status,
+            merged_page_count,
+            if merged_has_extracted_text { 1 } else { 0 },
+            if merged_has_ocr { 1 } else { 0 },
+            if merged_has_ocr_text { 1 } else { 0 },
+            merged_ocr_status,
+            merged_metadata_status,
+            merged_metadata_provenance,
+            merged_metadata_user_edited_fields,
+            merged_indexing_status,
+            merged_tag_suggestions,
+            merged_rejected_tag_suggestions,
+            merged_tag_suggestion_text_hash,
+            merged_tag_suggestion_status,
+            merged_classification_result,
+            merged_classification_text_hash,
+            merged_classification_status,
+            merged_processing_error,
+            merged_processing_updated_at,
+            merged_last_processed_at,
+            merged_reading_stage,
+            merged_rating,
+            if merged_favorite { 1 } else { 0 },
+            merged_last_opened_at,
+            merged_last_read_page,
+            merged_commentary_text,
+            merged_commentary_updated_at,
+            merged_cover_image_path,
+            now_iso(),
+            input.primary_document_id.clone()
+        ],
+    )?;
+
+    for tag in merged_tags {
+        let normalized = tag.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        let tag_id = ensure_tag_exists(&tx, normalized)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO document_tags (document_id, tag_id) VALUES (?1, ?2)",
+            params![input.primary_document_id.clone(), tag_id],
+        )?;
+    }
+
+    merge_relation_duplicates(&tx)?;
+    backfill_document_comment_numbers(&tx)?;
+
+    for duplicate_id in unique_duplicate_ids.iter() {
+        tx.execute("DELETE FROM document_tags WHERE document_id = ?1", params![duplicate_id.clone()])?;
+        tx.execute("DELETE FROM documents WHERE id = ?1", params![duplicate_id.clone()])?;
+    }
+
+    tx.commit()?;
+
+    let retained_paths = [
+        get_document_by_id(app.clone(), input.primary_document_id.clone())?
+            .and_then(|document| document.imported_file_path),
+        get_document_by_id(app.clone(), input.primary_document_id.clone())?
+            .and_then(|document| document.extracted_text_path),
+        get_document_by_id(app.clone(), input.primary_document_id.clone())?
+            .and_then(|document| document.cover_image_path),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<BTreeSet<_>>();
+
+    for path in duplicate_file_cleanup_paths {
+        if retained_paths.contains(&path) {
+            continue;
+        }
+        let file_path = std::path::PathBuf::from(path);
+        if file_path.exists() {
+            let _ = std::fs::remove_file(file_path);
+        }
+    }
+
+    get_document_by_id(app, input.primary_document_id)
 }
 
 #[tauri::command]

@@ -1,12 +1,14 @@
 'use client'
 
 import * as repo from '@/lib/repositories/local-db'
+import type { AppLocale } from '@/lib/localization'
 
 const ENV_SEMANTIC_SCHOLAR_API_KEY = process.env.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY ?? ''
 
 export type StoredAppSettings = {
   userName: string
   skipNamePrompt: boolean
+  locale: AppLocale
   theme:
     | 'light'
     | 'dark'
@@ -34,6 +36,7 @@ export type StoredAppSettings = {
 export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   userName: '',
   skipNamePrompt: false,
+  locale: 'en',
   theme: 'system',
   fontSize: '16',
   autoCheckForUpdates: true,
@@ -121,6 +124,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     return {
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
+      locale: parsed.locale ?? DEFAULT_APP_SETTINGS.locale,
       semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() || ENV_SEMANTIC_SCHOLAR_API_KEY,
     }
   }
@@ -129,6 +133,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
   return {
     userName: parseValue(stored.userName, DEFAULT_APP_SETTINGS.userName),
     skipNamePrompt: parseValue(stored.skipNamePrompt, DEFAULT_APP_SETTINGS.skipNamePrompt),
+    locale: parseValue(stored.locale, DEFAULT_APP_SETTINGS.locale),
     theme: parseValue(stored.theme, DEFAULT_APP_SETTINGS.theme),
     fontSize: parseValue(stored.fontSize, DEFAULT_APP_SETTINGS.fontSize),
     autoCheckForUpdates: parseValue(stored.autoCheckForUpdates, DEFAULT_APP_SETTINGS.autoCheckForUpdates),
@@ -155,6 +160,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
   if (!isDesktopApp) {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+      window.dispatchEvent(new CustomEvent('refx-settings-changed', { detail: settings }))
     }
     return
   }
@@ -162,6 +168,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
   await repo.setSettings({
     userName: JSON.stringify(settings.userName),
     skipNamePrompt: JSON.stringify(settings.skipNamePrompt),
+    locale: JSON.stringify(settings.locale),
     theme: JSON.stringify(settings.theme),
     fontSize: JSON.stringify(settings.fontSize),
     autoCheckForUpdates: JSON.stringify(settings.autoCheckForUpdates),
@@ -176,4 +183,8 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     crossrefContactEmail: JSON.stringify(settings.crossrefContactEmail),
     semanticScholarApiKey: JSON.stringify(settings.semanticScholarApiKey),
   })
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('refx-settings-changed', { detail: settings }))
+  }
 }

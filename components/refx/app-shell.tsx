@@ -10,6 +10,7 @@ import { DETACHED_READER_QUERY_VALUE } from '@/lib/services/reader-window-servic
 import { getCurrentWindow, isTauri } from '@/lib/tauri/client'
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/localization'
 
 interface AppShellProps {
   children: ReactNode
@@ -18,6 +19,7 @@ interface AppShellProps {
 const PENDING_IMPORT_STORAGE_KEY = 'refx.pending-import-paths'
 
 export function AppShell({ children }: AppShellProps) {
+  const t = useT()
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -143,8 +145,8 @@ export function AppShell({ children }: AppShellProps) {
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
               <FileUp className="h-7 w-7" />
             </div>
-            <p className="text-base font-semibold">Drop PDFs to import</p>
-            <p className="mt-1 text-sm text-muted-foreground">REFX will open Libraries and continue the import there.</p>
+            <p className="text-base font-semibold">{t('shell.dropTitle')}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{t('shell.dropDescription')}</p>
           </div>
         </div>
       ) : null}

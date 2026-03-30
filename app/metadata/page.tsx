@@ -28,6 +28,7 @@ import {
 import { useAppStore } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import type { Document } from '@/lib/types'
+import { useT } from '@/lib/localization'
 
 type MetadataQueueMode = 'fetch_possible' | 'missing'
 
@@ -69,6 +70,7 @@ function buildSavePayload(input: {
 }
 
 export default function MetadataWorkspacePage() {
+  const t = useT()
   const {
     libraries,
     documents,
@@ -251,15 +253,15 @@ export default function MetadataWorkspacePage() {
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Database className="h-4 w-4" />
-              Metadata workspace
+              {t('metadataPage.workspace')}
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight">Metadata</h1>
-            <p className="text-sm text-muted-foreground">Review DOI-based matches and bulk-fix incomplete documents by library.</p>
+            <h1 className="text-2xl font-semibold tracking-tight">{t('metadataPage.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('metadataPage.subtitle')}</p>
           </div>
           <Button asChild variant="outline" size="sm">
             <Link href="/maps">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back
+              {t('metadataPage.back')}
             </Link>
           </Button>
         </div>
@@ -267,13 +269,13 @@ export default function MetadataWorkspacePage() {
         <Card>
           <CardContent className="flex flex-wrap items-center gap-3 p-4">
             <div className="min-w-[240px] flex-1">
-              <Label className="text-sm">Library</Label>
+              <Label className="text-sm">{t('metadataPage.library')}</Label>
               <Select value={selectedLibraryId} onValueChange={(value) => {
                 setSelectedLibraryId(value)
                 setCurrentIndex(0)
               }}>
                 <SelectTrigger className="mt-1.5">
-                  <SelectValue placeholder="Select a library" />
+                  <SelectValue placeholder={t('metadataPage.selectLibrary')} />
                 </SelectTrigger>
                 <SelectContent>
                   {libraries.map((library) => (
@@ -293,7 +295,7 @@ export default function MetadataWorkspacePage() {
                   setCurrentIndex(0)
                 }}
               >
-                Fetch Possible
+                {t('metadataPage.fetchPossible')}
                 <Badge variant="secondary" className="ml-2">
                   {filteredDocuments.filter(isFetchPossibleDocument).length}
                 </Badge>
@@ -305,7 +307,7 @@ export default function MetadataWorkspacePage() {
                   setCurrentIndex(0)
                 }}
               >
-                Missing
+                {t('metadataPage.missing')}
                 <Badge variant="secondary" className="ml-2">
                   {filteredDocuments.filter(isMissingMetadataDocument).length}
                 </Badge>
@@ -317,17 +319,17 @@ export default function MetadataWorkspacePage() {
         {!currentLibrary ? (
           <EmptyState
             icon={Database}
-            title="No library selected"
-            description="Choose a library to start reviewing metadata."
+            title={t('metadataPage.noLibrary')}
+            description={t('metadataPage.noLibraryDescription')}
           />
         ) : !currentDocument ? (
           <EmptyState
             icon={Database}
-            title={mode === 'fetch_possible' ? 'No DOI-based metadata queue' : 'No missing-metadata queue'}
+            title={mode === 'fetch_possible' ? t('metadataPage.noFetchQueue') : t('metadataPage.noMissingQueue')}
             description={
               mode === 'fetch_possible'
-                ? `All DOI-backed documents in ${currentLibrary.name} already look complete.`
-                : `No documents without DOI-based fetch options are waiting in ${currentLibrary.name}.`
+                ? t('metadataFields.allCompleteDescription', { library: currentLibrary.name })
+                : t('metadataFields.noMissingDescription', { library: currentLibrary.name })
             }
           />
         ) : (
@@ -336,9 +338,9 @@ export default function MetadataWorkspacePage() {
               <CardHeader className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <CardTitle className="text-base">{currentDocument.title || 'Untitled document'}</CardTitle>
+                    <CardTitle className="text-base">{currentDocument.title || t('metadataFields.untitledDocument')}</CardTitle>
                     <CardDescription>
-                      {currentLibrary.name} · {currentIndex + 1} of {queue.length}
+                      {currentLibrary.name} - {t('metadataFields.queuePosition', { current: currentIndex + 1, total: queue.length })}
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
@@ -365,53 +367,53 @@ export default function MetadataWorkspacePage() {
                   {hasUnsavedChanges ? (
                     <Button onClick={() => void handleSave()} disabled={isSaving}>
                       <Save className="mr-2 h-4 w-4" />
-                      {isSaving ? 'Saving...' : 'Save'}
+                      {isSaving ? t('metadataPage.saving') : t('metadataPage.save')}
                     </Button>
                   ) : null}
                   <Button asChild variant="outline">
-                    <Link href={`/documents?id=${currentDocument.id}`}>Open full details</Link>
+                    <Link href={`/documents?id=${currentDocument.id}`}>{t('metadataPage.openDetails')}</Link>
                   </Button>
                 </div>
               </CardHeader>
               <CardContent className="grid gap-4 md:grid-cols-2">
                 <div className="md:col-span-2">
-                  <Label htmlFor="metadata-title">Title</Label>
+                  <Label htmlFor="metadata-title">{t('metadataFields.title')}</Label>
                   <Input id="metadata-title" className="mt-1.5" value={title} onChange={(event) => setTitle(event.target.value)} />
                 </div>
 
                 <div className="md:col-span-2">
-                  <Label htmlFor="metadata-authors">Authors</Label>
+                  <Label htmlFor="metadata-authors">{t('metadataFields.authors')}</Label>
                   <Input
                     id="metadata-authors"
                     className="mt-1.5"
                     value={authors}
                     onChange={(event) => setAuthors(event.target.value)}
-                    placeholder="Comma-separated author names"
+                    placeholder={t('libraries.authorsPlaceholder')}
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="metadata-year">Year</Label>
+                  <Label htmlFor="metadata-year">{t('metadataFields.year')}</Label>
                   <Input id="metadata-year" className="mt-1.5" value={year} onChange={(event) => setYear(event.target.value)} />
                 </div>
 
                 <div>
-                  <Label htmlFor="metadata-doi">DOI</Label>
+                  <Label htmlFor="metadata-doi">{t('metadataFields.doi')}</Label>
                   <Input id="metadata-doi" className="mt-1.5" value={doi} onChange={(event) => setDoi(event.target.value)} />
                 </div>
 
                 <div>
-                  <Label htmlFor="metadata-isbn">ISBN</Label>
+                  <Label htmlFor="metadata-isbn">{t('metadataFields.isbn')}</Label>
                   <Input id="metadata-isbn" className="mt-1.5" value={isbn} onChange={(event) => setIsbn(event.target.value)} />
                 </div>
 
                 <div>
-                  <Label htmlFor="metadata-publisher">Publisher</Label>
+                  <Label htmlFor="metadata-publisher">{t('metadataFields.publisher')}</Label>
                   <Input id="metadata-publisher" className="mt-1.5" value={publisher} onChange={(event) => setPublisher(event.target.value)} />
                 </div>
 
                 <div className="md:col-span-2">
-                  <Label htmlFor="metadata-citation-key">Citation Key</Label>
+                  <Label htmlFor="metadata-citation-key">{t('metadataFields.citationKey')}</Label>
                   <Input
                     id="metadata-citation-key"
                     className="mt-1.5"
@@ -421,7 +423,7 @@ export default function MetadataWorkspacePage() {
                 </div>
 
                 <div className="md:col-span-2">
-                  <Label htmlFor="metadata-abstract">Abstract</Label>
+                  <Label htmlFor="metadata-abstract">{t('metadataFields.abstract')}</Label>
                   <Textarea
                     id="metadata-abstract"
                     className="mt-1.5 min-h-40"
@@ -437,12 +439,12 @@ export default function MetadataWorkspacePage() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <CardTitle className="text-base">
-                      {mode === 'fetch_possible' ? 'DOI Match Review' : 'Manual Review'}
+                      {mode === 'fetch_possible' ? t('metadataPage.doiReview') : t('metadataPage.manualReview')}
                     </CardTitle>
                     <CardDescription>
                       {mode === 'fetch_possible'
-                        ? 'Review DOI-based candidates and choose the best result.'
-                        : 'Use the arrows to move through documents that still need manual metadata cleanup.'}
+                        ? t('metadataPage.doiReviewDescription')
+                        : t('metadataPage.manualReviewDescription')}
                     </CardDescription>
                   </div>
                   {mode === 'fetch_possible' ? (
@@ -453,7 +455,7 @@ export default function MetadataWorkspacePage() {
                       disabled={isFetchingCandidates}
                     >
                       <Globe className="mr-2 h-4 w-4" />
-                      {isFetchingCandidates ? 'Searching...' : 'Refresh'}
+                      {isFetchingCandidates ? t('metadataPage.searching') : t('metadataPage.refresh')}
                     </Button>
                   ) : null}
                 </div>
@@ -463,7 +465,7 @@ export default function MetadataWorkspacePage() {
                   isFetchingCandidates ? (
                     <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
                       <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-                      Searching by DOI across Semantic Scholar, OpenAlex, and Crossref...
+                      {t('metadataPage.searchAcrossProviders')}
                     </div>
                   ) : metadataCandidates.length > 0 ? (
                     metadataCandidates.map((candidate) => (
@@ -477,12 +479,12 @@ export default function MetadataWorkspacePage() {
                                 : 'Crossref'}
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {candidate.matchedBy === 'doi' ? 'DOI match' : 'Title match'}
+                            {candidate.matchedBy === 'doi' ? t('metadataFields.doi') : t('metadataFields.title')}
                           </span>
                         </div>
-                        <p className="mt-2 break-words text-sm font-medium leading-5">{candidate.title || 'Untitled result'}</p>
+                        <p className="mt-2 break-words text-sm font-medium leading-5">{candidate.title || t('metadataFields.untitledDocument')}</p>
                         <p className="mt-1 break-words text-xs text-muted-foreground">
-                          {candidate.authors.join(', ') || 'Unknown author'}
+                          {candidate.authors.join(', ') || t('searchPage.unknownAuthor')}
                           {candidate.year ? ` • ${candidate.year}` : ''}
                           {candidate.doi ? ` • ${candidate.doi}` : ''}
                           {typeof candidate.citationCount === 'number' ? ` • ${candidate.citationCount} citations` : ''}
@@ -505,7 +507,7 @@ export default function MetadataWorkspacePage() {
                             onClick={() => void handleApplyCandidate('fill_missing', candidate)}
                             disabled={isApplyingCandidate}
                           >
-                            Fill Missing Fields
+                            {t('metadataPage.fillMissing')}
                           </Button>
                           <Button
                             type="button"
@@ -513,19 +515,19 @@ export default function MetadataWorkspacePage() {
                             onClick={() => void handleApplyCandidate('replace_unlocked', candidate)}
                             disabled={isApplyingCandidate}
                           >
-                            Apply Candidate
+                            {t('metadataPage.applyCandidate')}
                           </Button>
                         </div>
                       </div>
                     ))
                   ) : (
                     <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                      {candidateError || 'No metadata candidates found for this DOI.'}
+                      {candidateError || t('metadataPage.noCandidates')}
                     </div>
                   )
                 ) : (
                   <div className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                    This queue is focused on manual cleanup. Use the fields on the left, then save and move to the next document.
+                    {t('metadataPage.manualQueueHelp')}
                   </div>
                 )}
               </CardContent>

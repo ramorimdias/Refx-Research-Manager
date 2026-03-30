@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Search,
   Grid3X3,
@@ -18,6 +19,7 @@ import {
   BookMarked,
   Smartphone,
   ImagePlus,
+  CopyX,
 } from 'lucide-react'
 import * as QRCode from 'qrcode'
 import { Button } from '@/components/ui/button'
@@ -65,12 +67,13 @@ import { DocumentTable } from '@/components/refx/document-table'
 import { FilterPanel } from '@/components/refx/filter-panel'
 import { DocumentCard } from '@/components/refx/document-card'
 import { useDocumentViewFlags } from '@/lib/hooks/use-document-view-flags'
-import type { SortField, ViewMode } from '@/lib/types'
+import type { Document, SortField, ViewMode } from '@/lib/types'
 import { Spinner } from '@/components/ui/spinner'
 import { cn } from '@/lib/utils'
 import * as repo from '@/lib/repositories/local-db'
 import type { ImportProgressUpdate } from '@/lib/services/desktop-service'
-import { convertFileSrc, open as openFileDialog } from '@/lib/tauri/client'
+import { convertFileSrc, open as openFileDialog, stat } from '@/lib/tauri/client'
+import { useT } from '@/lib/localization'
 
 type LibraryFormState = {
   name: string
@@ -123,6 +126,15 @@ type BookCoverPhoneSession = {
   qrDataUrl: string
 }
 
+type DuplicateReason = 'doi' | 'filename' | 'fileSize'
+
+type DuplicateGroup = {
+  id: string
+  reason: DuplicateReason
+  signature: string
+  documents: Document[]
+}
+
 const DOCUMENTS_PER_PAGE = 20
 const PENDING_IMPORT_STORAGE_KEY = 'refx.pending-import-paths'
 
@@ -147,7 +159,123 @@ function fileNameFromPath(path?: string) {
   return path.split(/[\\/]/).pop() ?? path
 }
 
+function buildDuplicateGroups(
+  documents: Document[],
+  reason: DuplicateReason,
+  resolveKey: (document: Document) => string | null,
+) {
+  const grouped = new Map<string, Document[]>()
+
+  for (const document of documents) {
+    const key = resolveKey(document)
+    if (!key) continue
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.push(document)
+    } else {
+      grouped.set(key, [document])
+    }
+  }
+
+  return Array.from(grouped.entries())
+    .filter(([, groupedDocuments]) => groupedDocuments.length > 1)
+    .map(([signature, groupedDocuments]) => ({
+      id: `${reason}:${signature}`,
+      reason,
+      signature,
+      documents: groupedDocuments.slice().sort((left, right) => left.title.localeCompare(right.title)),
+    }))
+}
+
+async function findLibraryDuplicateGroups(documents: Document[], isDesktopApp: boolean) {
+  const groups: DuplicateGroup[] = []
+
+  groups.push(
+    ...buildDuplicateGroups(documents, 'doi', (document) => {
+      const doi = document.doi?.trim().toLowerCase()
+      return doi && doi.length > 0 ? doi : null
+    }),
+  )
+
+  groups.push(
+    ...buildDuplicateGroups(documents, 'filename', (document) => {
+      const fileName = fileNameFromPath(document.filePath).trim().toLowerCase()
+      return fileName.length > 0 ? fileName : null
+    }),
+  )
+
+  if (isDesktopApp) {
+    const sizeEntries = await Promise.all(
+      documents.map(async (document) => {
+        if (!document.filePath) return null
+
+        try {
+          const fileInfo = await stat(document.filePath)
+          const fileSize = typeof fileInfo.size === 'number' ? fileInfo.size : null
+          if (!fileSize || fileSize <= 0) return null
+          return { document, fileSize }
+        } catch {
+          return null
+        }
+      }),
+    )
+
+    const fileSizeMap = new Map<number, Document[]>()
+    for (const entry of sizeEntries) {
+      if (!entry) continue
+      const existing = fileSizeMap.get(entry.fileSize)
+      if (existing) {
+        existing.push(entry.document)
+      } else {
+        fileSizeMap.set(entry.fileSize, [entry.document])
+      }
+    }
+
+    groups.push(
+      ...Array.from(fileSizeMap.entries())
+        .filter(([, groupedDocuments]) => groupedDocuments.length > 1)
+        .map(([fileSize, groupedDocuments]) => ({
+          id: `fileSize:${fileSize}`,
+          reason: 'fileSize' as const,
+          signature: String(fileSize),
+          documents: groupedDocuments.slice().sort((left, right) => left.title.localeCompare(right.title)),
+        })),
+    )
+  }
+
+  return groups.sort((left, right) => left.reason.localeCompare(right.reason) || left.signature.localeCompare(right.signature))
+}
+
+function duplicateDocumentScore(document: Document) {
+  return [
+    document.hasExtractedText ? 1 : 0,
+    document.hasOcr ? 1 : 0,
+    document.favorite ? 1 : 0,
+    document.notesCount,
+    document.commentCount,
+    document.tags.length,
+    document.authors.length,
+    document.abstract ? 1 : 0,
+    document.doi ? 1 : 0,
+    document.year ? 1 : 0,
+    document.rating,
+    document.lastOpenedAt?.getTime() ?? 0,
+    document.addedAt.getTime(),
+  ].reduce((sum, value) => sum + value, 0)
+}
+
+function choosePrimaryDuplicateDocument(documents: Document[]) {
+  return documents
+    .slice()
+    .sort((left, right) => {
+      const scoreDifference = duplicateDocumentScore(right) - duplicateDocumentScore(left)
+      if (scoreDifference !== 0) return scoreDifference
+      return left.title.localeCompare(right.title)
+    })[0]
+}
+
 export default function LibrariesPage() {
+  const t = useT()
   const {
     activeLibraryId,
     currentPage,
@@ -160,6 +288,7 @@ export default function LibrariesPage() {
     filters,
     setFilters,
     libraries,
+    documents: storedDocuments,
     importDocuments,
     isDesktopApp,
     loadLibraryDocuments,
@@ -184,9 +313,18 @@ export default function LibrariesPage() {
   const [bookCoverPhoneSession, setBookCoverPhoneSession] = useState<BookCoverPhoneSession | null>(null)
   const [isPreparingBookCoverPhoneUpload, setIsPreparingBookCoverPhoneUpload] = useState(false)
   const [bookCoverPhoneStatus, setBookCoverPhoneStatus] = useState<string>('')
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false)
+  const [isScanningDuplicates, setIsScanningDuplicates] = useState(false)
+  const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([])
+  const [duplicateScanError, setDuplicateScanError] = useState<string>('')
+  const [mergingDuplicateGroupId, setMergingDuplicateGroupId] = useState<string | null>(null)
   const bookCoverQrSectionRef = useRef<HTMLDivElement | null>(null)
 
   const activeLibrary = libraries.find((lib) => lib.id === activeLibraryId)
+  const activeLibraryDocuments = useMemo(
+    () => (activeLibrary ? storedDocuments.filter((document) => document.libraryId === activeLibrary.id) : []),
+    [activeLibrary, storedDocuments],
+  )
   const paginationSessionKey = JSON.stringify({
     activeLibraryId,
     filters,
@@ -308,6 +446,80 @@ export default function LibrariesPage() {
       color: activeLibrary.color,
     })
     setIsRenameDialogOpen(true)
+  }
+
+  const getDocumentOpenHref = (document: Document) =>
+    document.documentType === 'my_work'
+      ? `/documents?id=${document.id}`
+      : document.documentType === 'physical_book'
+        ? `/books/notes?id=${document.id}`
+        : `/reader/view?id=${document.id}`
+
+  const formatDuplicateReason = (reason: DuplicateReason) => {
+    switch (reason) {
+      case 'doi':
+        return t('libraries.duplicateDoi')
+      case 'filename':
+        return t('libraries.duplicateFilename')
+      case 'fileSize':
+        return t('libraries.duplicateFileSize')
+      default:
+        return reason
+    }
+  }
+
+  const formatDuplicateSignature = (group: DuplicateGroup) => {
+    if (group.reason === 'fileSize') {
+      const bytes = Number(group.signature)
+      return t('libraries.duplicateFileSizeValue', { size: Number.isFinite(bytes) ? bytes.toLocaleString() : group.signature })
+    }
+    return group.signature
+  }
+
+  const openDuplicateDialog = async (documentsOverride?: Document[]) => {
+    if (!activeLibrary) return
+
+    setIsDuplicateDialogOpen(true)
+    setIsScanningDuplicates(true)
+    setDuplicateScanError('')
+    try {
+      const groups = await findLibraryDuplicateGroups(documentsOverride ?? activeLibraryDocuments, isDesktopApp)
+      setDuplicateGroups(groups)
+    } catch (error) {
+      console.error('Failed to scan library duplicates:', error)
+      setDuplicateGroups([])
+      setDuplicateScanError(t('libraries.duplicateScanFailed'))
+    } finally {
+      setIsScanningDuplicates(false)
+    }
+  }
+
+  const handleMergeDuplicateGroup = async (group: DuplicateGroup) => {
+    if (!activeLibrary) return
+
+    const primaryDocument = choosePrimaryDuplicateDocument(group.documents)
+    const duplicateDocumentIds = group.documents
+      .filter((document) => document.id !== primaryDocument.id)
+      .map((document) => document.id)
+    const activeLibraryIdForScan = activeLibrary.id
+
+    if (duplicateDocumentIds.length === 0) return
+
+    setMergingDuplicateGroupId(group.id)
+    try {
+      await repo.mergeDocuments({
+        primaryDocumentId: primaryDocument.id,
+        duplicateDocumentIds,
+      })
+      await refreshData()
+      const refreshedState = useAppStore.getState()
+      const refreshedLibraryDocuments = refreshedState.documents.filter(
+        (document) => document.libraryId === activeLibraryIdForScan,
+      )
+      await openDuplicateDialog(refreshedLibraryDocuments)
+    } finally {
+      setMergingDuplicateGroupId(null)
+    }
   }
 
   const handleCreateLibrary = async () => {
@@ -513,7 +725,7 @@ export default function LibrariesPage() {
             <div className="flex items-center gap-4 flex-1">
               <Button variant="outline" size="sm" className="rounded-full" onClick={() => setFiltersCollapsed((current) => !current)}>
                 {filtersCollapsed ? <PanelLeftOpen className="mr-2 h-4 w-4" /> : <PanelLeftClose className="mr-2 h-4 w-4" />}
-                Filters
+                {t('libraries.filters')}
                 {activeFilterCount > 0 && (
                   <Badge variant="secondary" className="ml-2 h-5 px-1.5">
                     {activeFilterCount}
@@ -526,10 +738,10 @@ export default function LibrariesPage() {
                 onValueChange={(val) => setActiveLibrary(val === 'all' ? null : val)}
               >
                 <SelectTrigger className="w-60">
-                  <SelectValue placeholder="All Libraries" />
+                  <SelectValue placeholder={t('libraries.allLibraries')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Libraries</SelectItem>
+                  <SelectItem value="all">{t('libraries.allLibraries')}</SelectItem>
                   {libraries.map((lib) => (
                     <SelectItem key={lib.id} value={lib.id}>
                       <div className="flex items-center gap-2">
@@ -547,7 +759,7 @@ export default function LibrariesPage() {
               <div className="relative flex-1 max-w-sm">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search"
+                  placeholder={t('libraries.search')}
                   className="pl-9"
                   value={filters.search || ''}
                   onChange={(e) => setFilters({ ...filters, search: e.target.value || undefined })}
@@ -558,15 +770,15 @@ export default function LibrariesPage() {
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" className="rounded-full" onClick={openCreateDialog}>
                 <Plus className="mr-2 h-4 w-4" />
-                Library
+                {t('libraries.library')}
               </Button>
               <Button size="sm" className="rounded-full" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
                 <Upload className="mr-2 h-4 w-4" />
-                {isImporting ? 'Importing...' : 'Import'}
+                {isImporting ? t('libraries.importing') : t('libraries.import')}
               </Button>
               <Button variant="outline" size="sm" className="rounded-full" onClick={openPhysicalBookDialog}>
                 <BookMarked className="mr-2 h-4 w-4" />
-                Book
+                {t('libraries.book')}
               </Button>
 
               <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
@@ -589,7 +801,7 @@ export default function LibrariesPage() {
             <div className="border-b border-border/70 bg-muted/30 px-5 py-2">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Filter className="h-4 w-4" />
-                <span>{activeFilterCount} active filter{activeFilterCount > 1 ? 's' : ''}</span>
+                <span>{t('libraries.activeFilters', { count: activeFilterCount, suffix: activeFilterCount > 1 ? 's' : '' })}</span>
               </div>
             </div>
           )}
@@ -603,11 +815,11 @@ export default function LibrariesPage() {
                 />
                 <div>
                   <h2 className="text-lg font-semibold tracking-tight">{activeLibrary.name}</h2>
-                  <p className="text-sm text-muted-foreground">{activeLibrary.description || 'Local library'}</p>
+                  <p className="text-sm text-muted-foreground">{activeLibrary.description || t('libraries.localLibrary')}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge variant="secondary">{documents.length} documents</Badge>
+                <Badge variant="secondary">{t('libraries.documentsCount', { count: documents.length })}</Badge>
                 <Select
                   value={sort.field}
                   onValueChange={(val) => setSort({ ...sort, field: val as SortField })}
@@ -617,14 +829,18 @@ export default function LibrariesPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="addedAt">Date Added</SelectItem>
-                    <SelectItem value="lastOpenedAt">Last Opened</SelectItem>
-                    <SelectItem value="title">Title</SelectItem>
-                    <SelectItem value="authors">Authors</SelectItem>
-                    <SelectItem value="year">Year</SelectItem>
-                    <SelectItem value="rating">Rating</SelectItem>
+                    <SelectItem value="addedAt">{t('libraries.sortAdded')}</SelectItem>
+                    <SelectItem value="lastOpenedAt">{t('libraries.sortOpened')}</SelectItem>
+                    <SelectItem value="title">{t('libraries.sortTitle')}</SelectItem>
+                    <SelectItem value="authors">{t('libraries.sortAuthors')}</SelectItem>
+                    <SelectItem value="year">{t('libraries.sortYear')}</SelectItem>
+                    <SelectItem value="rating">{t('libraries.sortRating')}</SelectItem>
                   </SelectContent>
                 </Select>
+                <Button variant="outline" size="sm" className="rounded-full" onClick={() => void openDuplicateDialog()}>
+                  <CopyX className="mr-2 h-4 w-4" />
+                  {t('libraries.deduplicate')}
+                </Button>
                 <Button variant="outline" size="sm" className="rounded-full" onClick={openRenameDialog}>
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit
@@ -647,7 +863,7 @@ export default function LibrariesPage() {
                     <Spinner className="size-4" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-3 text-sm">
-                        <span className="font-medium">Importing documents</span>
+                        <span className="font-medium">{t('libraries.importDocuments')}</span>
                         <span className="text-muted-foreground">
                           {importProgress?.current ?? 0}/{importProgress?.total ?? pendingImportCount ?? 0}
                         </span>
@@ -683,16 +899,16 @@ export default function LibrariesPage() {
                     <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/70">
                       <FolderOpen className="h-8 w-8 text-muted-foreground" />
                     </div>
-                    <h3 className="mb-2 text-lg font-semibold">No documents found</h3>
+                    <h3 className="mb-2 text-lg font-semibold">{t('libraries.noDocuments')}</h3>
                     <p className="mb-6 max-w-sm text-sm text-muted-foreground">
                       {filters.search || Object.keys(filters).length > 1
-                        ? 'Try adjusting your filters or search query.'
-                        : 'Import PDFs or register a book to get started.'}
+                        ? t('libraries.noDocumentsFiltered')
+                        : t('libraries.noDocumentsEmpty')}
                     </p>
                     <div className="flex gap-2">
                       <Button onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
                         <Upload className="mr-2 h-4 w-4" />
-                        {isImporting ? 'Importing PDFs...' : 'Import PDFs'}
+                        {isImporting ? t('libraries.importingPdfs') : t('libraries.importPdfs')}
                       </Button>
                     </div>
                   </div>
@@ -719,7 +935,11 @@ export default function LibrariesPage() {
                 <div className="sticky bottom-0 mt-6 -mx-5 border-t border-border/80 bg-background px-5 py-4">
                 <div className="flex flex-col gap-3">
                 <div className="text-sm text-muted-foreground">
-                  Showing {(currentPage - 1) * DOCUMENTS_PER_PAGE + 1}-{Math.min(currentPage * DOCUMENTS_PER_PAGE, documents.length)} of {documents.length}
+                  {t('libraries.showingRange', {
+                    start: (currentPage - 1) * DOCUMENTS_PER_PAGE + 1,
+                    end: Math.min(currentPage * DOCUMENTS_PER_PAGE, documents.length),
+                    total: documents.length,
+                  })}
                 </div>
                 <Pagination>
                   <PaginationContent>
@@ -786,12 +1006,12 @@ export default function LibrariesPage() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Register Physical Book</DialogTitle>
-            <DialogDescription>Add a non-PDF book to this library so you can capture reading notes by page or chapter.</DialogDescription>
+            <DialogTitle>{t('libraries.registerPhysicalBook')}</DialogTitle>
+            <DialogDescription>{t('libraries.registerPhysicalBookDescription')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="physical-book-title">Title</Label>
+              <Label htmlFor="physical-book-title">{t('libraries.title')}</Label>
               <Input
                 id="physical-book-title"
                 value={physicalBookForm.title}
@@ -799,17 +1019,17 @@ export default function LibrariesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="physical-book-authors">Authors</Label>
+              <Label htmlFor="physical-book-authors">{t('libraries.authors')}</Label>
               <Input
                 id="physical-book-authors"
-                placeholder="Comma-separated author names"
+                placeholder={t('libraries.authorsPlaceholder')}
                 value={physicalBookForm.authors}
                 onChange={(event) => setPhysicalBookForm((state) => ({ ...state, authors: event.target.value }))}
               />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="physical-book-year">Year</Label>
+                <Label htmlFor="physical-book-year">{t('libraries.year')}</Label>
                 <Input
                   id="physical-book-year"
                   value={physicalBookForm.year}
@@ -817,7 +1037,7 @@ export default function LibrariesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="physical-book-isbn">ISBN</Label>
+                <Label htmlFor="physical-book-isbn">{t('libraries.isbn')}</Label>
                 <Input
                   id="physical-book-isbn"
                   value={physicalBookForm.isbn}
@@ -826,7 +1046,7 @@ export default function LibrariesPage() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="physical-book-publisher">Publisher</Label>
+              <Label htmlFor="physical-book-publisher">{t('libraries.publisher')}</Label>
               <Input
                 id="physical-book-publisher"
                 value={physicalBookForm.publisher}
@@ -834,19 +1054,19 @@ export default function LibrariesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="physical-book-description">Description</Label>
+              <Label htmlFor="physical-book-description">{t('libraries.description')}</Label>
               <Input
                 id="physical-book-description"
                 value={physicalBookForm.description}
                 onChange={(event) => setPhysicalBookForm((state) => ({ ...state, description: event.target.value }))}
-                placeholder="Optional notes or summary"
+                placeholder={t('libraries.descriptionPlaceholder')}
               />
             </div>
             <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/20 p-4">
               <div className="space-y-1">
-                <Label>Book photo</Label>
+                <Label>{t('libraries.bookPhoto')}</Label>
                 <p className="text-sm text-muted-foreground">
-                  Optional. Add a cover photo from this computer or scan a QR code to upload it from your phone.
+                  {t('libraries.bookPhotoDescription')}
                 </p>
               </div>
 
@@ -860,14 +1080,14 @@ export default function LibrariesPage() {
                 </div>
               ) : (
                 <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-border/70 bg-background text-sm text-muted-foreground">
-                  No photo selected yet
+                  {t('libraries.noPhoto')}
                 </div>
               )}
 
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" onClick={() => void handleSelectBookCoverFromComputer()}>
                   <ImagePlus className="mr-2 h-4 w-4" />
-                  Upload from PC
+                  {t('libraries.uploadFromPc')}
                 </Button>
                 <Button
                   type="button"
@@ -876,7 +1096,7 @@ export default function LibrariesPage() {
                   disabled={isPreparingBookCoverPhoneUpload}
                 >
                   <Smartphone className="mr-2 h-4 w-4" />
-                  {isPreparingBookCoverPhoneUpload ? 'Preparing QR...' : 'Add from phone'}
+                  {isPreparingBookCoverPhoneUpload ? t('libraries.preparingQr') : t('libraries.addFromPhone')}
                 </Button>
                 {physicalBookForm.coverImagePath ? (
                   <Button
@@ -887,7 +1107,7 @@ export default function LibrariesPage() {
                       setBookCoverPhoneStatus('')
                     }}
                   >
-                    Remove photo
+                    {t('libraries.removePhoto')}
                   </Button>
                 ) : null}
               </div>
@@ -902,9 +1122,9 @@ export default function LibrariesPage() {
                     <img src={bookCoverPhoneSession.qrDataUrl} alt="QR code for phone cover upload" className="h-auto w-full" />
                   </div>
                   <div className="space-y-2">
-                    <p className="text-sm font-medium">Scan with your phone</p>
+                    <p className="text-sm font-medium">{t('libraries.scanWithPhone')}</p>
                     <p className="text-sm text-muted-foreground">
-                      Keep the desktop app open. Your phone and computer need to be on the same local network.
+                      {t('libraries.sameNetwork')}
                     </p>
                     <Input readOnly value={bookCoverPhoneSession.url} className="text-xs" />
                   </div>
@@ -914,10 +1134,110 @@ export default function LibrariesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsPhysicalBookDialogOpen(false)}>
-              Cancel
+              {t('libraries.cancel')}
             </Button>
             <Button onClick={() => void handleCreatePhysicalBook()} disabled={!physicalBookForm.title.trim() || isSavingLibrary}>
-              {isSavingLibrary ? 'Registering...' : 'Register Book'}
+              {isSavingLibrary ? t('libraries.registering') : t('libraries.registerBook')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isDuplicateDialogOpen}
+        onOpenChange={(open) => {
+          setIsDuplicateDialogOpen(open)
+          if (!open) {
+            setDuplicateScanError('')
+          }
+        }}
+      >
+        <DialogContent className="max-h-[85vh] max-w-[96vw] overflow-x-hidden overflow-y-auto xl:max-w-[1400px]">
+          <DialogHeader>
+            <DialogTitle>{t('libraries.deduplicateDialogTitle')}</DialogTitle>
+            <DialogDescription>
+              {activeLibrary
+                ? t('libraries.deduplicateDialogDescription', { library: activeLibrary.name })
+                : t('libraries.deduplicateDialogDescriptionFallback')}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {isScanningDuplicates ? (
+              <div className="flex items-center gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
+                <Spinner className="size-4" />
+                <span className="text-sm text-muted-foreground">{t('libraries.scanningDuplicates')}</span>
+              </div>
+            ) : duplicateScanError ? (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                {duplicateScanError}
+              </div>
+            ) : duplicateGroups.length === 0 ? (
+              <div className="rounded-xl border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                {t('libraries.noDuplicatesFound')}
+              </div>
+            ) : (
+              duplicateGroups.map((group) => (
+                <div key={group.id} className="space-y-3 overflow-hidden rounded-2xl border border-border/70 bg-background p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary">{formatDuplicateReason(group.reason)}</Badge>
+                    <span className="text-sm text-muted-foreground">{formatDuplicateSignature(group)}</span>
+                    <Badge variant="outline">{t('libraries.duplicateDocumentsCount', { count: group.documents.length })}</Badge>
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-muted/20 px-3 py-2 text-sm">
+                    <span className="text-muted-foreground">{t('libraries.keepDocument')} </span>
+                    <span
+                      className="inline-block max-w-full truncate align-bottom font-medium"
+                      title={choosePrimaryDuplicateDocument(group.documents).title}
+                    >
+                      {choosePrimaryDuplicateDocument(group.documents).title}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {group.documents.map((document) => (
+                      <div key={`${group.id}:${document.id}`} className="flex min-w-0 items-center justify-between gap-3 overflow-hidden rounded-xl border border-border/60 bg-muted/15 px-3 py-2">
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <p className="truncate text-sm font-medium" title={document.title}>{document.title}</p>
+                          <p
+                            className="truncate text-xs text-muted-foreground"
+                            title={[
+                              document.authors.join(', ') || t('searchPage.unknownAuthor'),
+                              document.year ? `(${document.year})` : '',
+                              document.filePath ? fileNameFromPath(document.filePath) : '',
+                            ].filter(Boolean).join(' · ')}
+                          >
+                            {document.authors.join(', ') || t('searchPage.unknownAuthor')}
+                            {document.year ? ` (${document.year})` : ''}
+                            {document.filePath ? ` · ${fileNameFromPath(document.filePath)}` : ''}
+                          </p>
+                        </div>
+                        <Button asChild variant="outline" size="sm" className="rounded-full shrink-0">
+                          <Link href={getDocumentOpenHref(document)} onClick={() => setIsDuplicateDialogOpen(false)}>
+                            {t('libraries.openDocument')}
+                          </Link>
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      className="rounded-full"
+                      onClick={() => void handleMergeDuplicateGroup(group)}
+                      disabled={mergingDuplicateGroupId === group.id}
+                    >
+                      {mergingDuplicateGroupId === group.id ? t('libraries.mergingDuplicates') : t('libraries.mergeDuplicates')}
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDuplicateDialogOpen(false)}>
+              {t('libraries.close')}
+            </Button>
+            <Button onClick={() => void openDuplicateDialog()} disabled={isScanningDuplicates}>
+              {isScanningDuplicates ? t('libraries.scanning') : t('libraries.rescan')}
             </Button>
           </DialogFooter>
         </DialogContent>

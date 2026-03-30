@@ -16,25 +16,26 @@ import {
   Loader2,
   XCircle,
 } from 'lucide-react'
+import { useT } from '@/lib/localization'
 
-const readingStageConfig: Record<ReadingStage, { label: string; icon: typeof BookOpen; className: string }> = {
-  unread: { label: 'Unread', icon: BookOpen, className: 'bg-muted text-muted-foreground' },
-  reading: { label: 'Reading', icon: BookMarked, className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  finished: { label: 'Finished', icon: CheckCircle2, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+const readingStageConfig: Record<ReadingStage, { labelKey: string; icon: typeof BookOpen; className: string }> = {
+  unread: { labelKey: 'common.unread', icon: BookOpen, className: 'bg-muted text-muted-foreground' },
+  reading: { labelKey: 'common.reading', icon: BookMarked, className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+  finished: { labelKey: 'common.finished', icon: CheckCircle2, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
 }
 
-const metadataStatusConfig: Record<MetadataStatus, { label: string; icon: typeof AlertCircle; className: string }> = {
-  missing: { label: 'Missing', icon: AlertCircle, className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
-  partial: { label: 'Partial', icon: AlertTriangle, className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  complete: { label: 'Complete', icon: CheckCheck, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+const metadataStatusConfig: Record<MetadataStatus, { labelKey: string; icon: typeof AlertCircle; className: string }> = {
+  missing: { labelKey: 'common.missing', icon: AlertCircle, className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  partial: { labelKey: 'common.partial', icon: AlertTriangle, className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  complete: { labelKey: 'common.complete', icon: CheckCheck, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
 }
 
-const ocrStatusConfig: Record<OcrStatus, { label: string; icon: typeof Clock; className: string }> = {
-  pending: { label: 'OCR Pending', icon: Clock, className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  processing: { label: 'Processing', icon: Loader2, className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  complete: { label: 'OCR Complete', icon: FileCheck, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-  failed: { label: 'OCR Failed', icon: XCircle, className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
-  not_needed: { label: 'Native Text', icon: CheckCheck, className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
+const ocrStatusConfig: Record<OcrStatus, { labelKey: string; icon: typeof Clock; className: string }> = {
+  pending: { labelKey: 'common.ocrPending', icon: Clock, className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  processing: { labelKey: 'common.processing', icon: Loader2, className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+  complete: { labelKey: 'common.ocrComplete', icon: FileCheck, className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+  failed: { labelKey: 'common.ocrFailed', icon: XCircle, className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  not_needed: { labelKey: 'common.nativeText', icon: CheckCheck, className: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' },
 }
 
 function CompactBadge({
@@ -55,22 +56,25 @@ function CompactBadge({
 }
 
 export function ReadingStageBadge({ stage }: { stage: ReadingStage }) {
+  const t = useT()
   const config = readingStageConfig[stage]
-  return <CompactBadge icon={config.icon} label={config.label} className={config.className} />
+  return <CompactBadge icon={config.icon} label={t(config.labelKey)} className={config.className} />
 }
 
 export function MetadataStatusBadge({ status }: { status: MetadataStatus }) {
+  const t = useT()
   const config = metadataStatusConfig[status]
-  return <CompactBadge icon={config.icon} label={config.label} className={config.className} />
+  return <CompactBadge icon={config.icon} label={t(config.labelKey)} className={config.className} />
 }
 
 export function OcrStatusBadge({ status }: { status: OcrStatus }) {
+  const t = useT()
   const config = ocrStatusConfig[status]
   const Icon = config.icon
   return (
     <Badge variant="secondary" className={cn('h-6 gap-1.5 rounded-full px-2.5 text-[11px] font-medium', config.className)}>
       <Icon className={cn('h-3 w-3', status === 'processing' && 'animate-spin')} />
-      {config.label}
+      {t(config.labelKey)}
     </Badge>
   )
 }
@@ -116,12 +120,13 @@ export function TagChip({
 }
 
 export function NewBadge() {
+  const t = useT()
   return (
     <Badge
       variant="outline"
       className="h-5 rounded-full border-emerald-300/60 bg-emerald-500/[0.08] px-2 text-[10px] font-semibold tracking-[0.12em] text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300"
     >
-      NEW
+      {t('common.new')}
     </Badge>
   )
 }

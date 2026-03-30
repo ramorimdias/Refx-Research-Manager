@@ -16,12 +16,14 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/lib/store'
 import * as repo from '@/lib/repositories/local-db'
+import { useT } from '@/lib/localization'
 
 type SortMode = 'timestamp' | 'page'
 
 type AppNote = ReturnType<typeof useAppStore.getState>['notes'][number]
 
 export default function NotesPage() {
+  const t = useT()
   const { notes, documents, libraries, loadNotes, isDesktopApp, activeLibraryId } = useAppStore()
   const [query, setQuery] = useState('')
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>('all')
@@ -74,7 +76,7 @@ export default function NotesPage() {
     for (const note of filteredNotes) {
       const document = note.documentId ? documentsById.get(note.documentId) : undefined
       const key = note.documentId ?? 'unlinked'
-      const label = document?.title ?? 'Unlinked Notes'
+        const label = document?.title ?? t('notesPage.unlinkedNotes')
       const existing = groups.get(key)
 
       if (existing) {
@@ -108,7 +110,7 @@ export default function NotesPage() {
 
       return new Date(rightLead.updatedAt).getTime() - new Date(leftLead.updatedAt).getTime()
     })
-  }, [documentsById, filteredNotes, sortMode])
+  }, [documentsById, filteredNotes, sortMode, t])
 
   const flatVisibleNotes = useMemo(
     () => groupedNotes.flatMap((group) => group.notes),
@@ -158,7 +160,7 @@ export default function NotesPage() {
     setIsSaving(true)
     try {
       await repo.updateNote(selectedNote.id, {
-        title: draftTitle.trim() || 'Untitled note',
+      title: draftTitle.trim() || t('notesPage.untitledNote'),
         content: draftContent,
         pageNumber: selectedNote.pageNumber,
       })
@@ -174,16 +176,16 @@ export default function NotesPage() {
         <div className="space-y-3 border-b p-4">
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder="Search notes" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <Input className="pl-8" placeholder={t('notesPage.searchNotes')} value={query} onChange={(event) => setQuery(event.target.value)} />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <Select value={selectedLibraryId} onValueChange={setSelectedLibraryId}>
               <SelectTrigger>
-                <SelectValue placeholder="All libraries" />
+                <SelectValue placeholder={t('notesPage.allLibraries')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All libraries</SelectItem>
+                <SelectItem value="all">{t('notesPage.allLibraries')}</SelectItem>
                 {libraries.map((library) => (
                   <SelectItem key={library.id} value={library.id}>
                     {library.name}
@@ -197,15 +199,15 @@ export default function NotesPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="timestamp">Sort by timestamp</SelectItem>
-                <SelectItem value="page">Sort by page</SelectItem>
+                <SelectItem value="timestamp">{t('notesPage.sortTimestamp')}</SelectItem>
+                <SelectItem value="page">{t('notesPage.sortPage')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <Button className="w-full" onClick={() => void handleCreateNote()}>
             <Plus className="mr-2 h-4 w-4" />
-            New Note
+            {t('notesPage.newNote')}
           </Button>
         </div>
 
@@ -227,8 +229,8 @@ export default function NotesPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{note.title || 'Untitled note'}</div>
-                        <div className="line-clamp-2 text-xs text-muted-foreground">{note.content || 'No content yet.'}</div>
+                        <div className="truncate text-sm font-medium">{note.title || t('notesPage.untitledNote')}</div>
+                        <div className="line-clamp-2 text-xs text-muted-foreground">{note.content || t('notesPage.noContent')}</div>
                       </div>
                       {note.pageNumber ? (
                         <Badge variant="outline">p. {note.pageNumber}</Badge>
@@ -246,7 +248,7 @@ export default function NotesPage() {
 
           {groupedNotes.length === 0 && (
             <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-              No notes found for the current filters.
+              {t('notesPage.noNotesForFilters')}
             </div>
           )}
         </div>
@@ -268,9 +270,9 @@ export default function NotesPage() {
                       {selectedNote.pageNumber ? <Badge variant="outline">Page {selectedNote.pageNumber}</Badge> : null}
                     </>
                   ) : (
-                    <Badge variant="outline">Standalone note</Badge>
+                    <Badge variant="outline">{t('notesPage.standaloneNote')}</Badge>
                   )}
-                  <span>Updated {new Date(selectedNote.updatedAt).toLocaleString()}</span>
+                  <span>{t('notesPage.updated', { value: new Date(selectedNote.updatedAt).toLocaleString() })}</span>
                 </div>
               </div>
 
@@ -286,10 +288,10 @@ export default function NotesPage() {
                     }
                   >
                     {selectedDocument.documentType === 'physical_book'
-                      ? 'Open Book Notes'
+                      ? t('notesPage.openBookNotes')
                       : selectedDocument.documentType === 'my_work'
-                        ? 'Open Details'
-                        : 'Open In Reader'}
+                        ? t('notesPage.openDetails')
+                        : t('notesPage.openReader')}
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
@@ -307,15 +309,15 @@ export default function NotesPage() {
                 setDraftTitle(selectedNote.title)
                 setDraftContent(selectedNote.content)
               }} disabled={!hasPendingChanges || isSaving}>
-                Reset
+                {t('notesPage.reset')}
               </Button>
               <Button onClick={() => void handleSave()} disabled={!hasPendingChanges || isSaving || !isDesktopApp}>
-                {isSaving ? 'Saving...' : 'Save'}
+                {isSaving ? t('notesPage.saving') : t('notesPage.save')}
               </Button>
             </div>
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-muted-foreground">Select a note</div>
+          <div className="flex h-full items-center justify-center text-muted-foreground">{t('notesPage.selectNote')}</div>
         )}
       </div>
     </div>

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/refx/common'
 import { useAppStore } from '@/lib/store'
 import { loadAppSettings } from '@/lib/app-settings'
+import { useT } from '@/lib/localization'
 
 function getDocumentHref(document: ReturnType<typeof useAppStore.getState>['documents'][number]) {
   return document.documentType === 'my_work'
@@ -27,7 +28,7 @@ type DashboardActivity = {
   icon: LucideIcon
 }
 
-function formatRelativeTime(date: Date) {
+function formatRelativeTime(date: Date, t: ReturnType<typeof useT>) {
   const elapsed = Date.now() - date.getTime()
   const minute = 60_000
   const hour = 60 * minute
@@ -35,19 +36,20 @@ function formatRelativeTime(date: Date) {
 
   if (elapsed < hour) {
     const minutes = Math.max(1, Math.round(elapsed / minute))
-    return `${minutes}m ago`
+    return t('home.minutesAgo', { count: minutes })
   }
 
   if (elapsed < day) {
     const hours = Math.max(1, Math.round(elapsed / hour))
-    return `${hours}h ago`
+    return t('home.hoursAgo', { count: hours })
   }
 
   const days = Math.max(1, Math.round(elapsed / day))
-  return `${days}d ago`
+  return t('home.daysAgo', { count: days })
 }
 
 export default function HomePage() {
+  const t = useT()
   const router = useRouter()
   const { libraries, documents, notes, annotations, isDesktopApp, setActiveLibrary } = useAppStore()
   const [userName, setUserName] = useState('')
@@ -85,7 +87,7 @@ export default function HomePage() {
 
     const libraryActivities = libraries.map((library) => ({
       id: `library-${library.id}`,
-      title: 'Library created',
+      title: t('home.libraryCreated'),
       detail: library.name,
       href: '/libraries',
       occurredAt: library.createdAt,
@@ -94,8 +96,8 @@ export default function HomePage() {
 
     const addedDocumentActivities = documents.map((document) => ({
       id: `document-added-${document.id}`,
-      title: 'Document added to library',
-      detail: `${document.title} · ${librariesById.get(document.libraryId)?.name ?? 'Library'}`,
+      title: t('home.documentAdded'),
+      detail: `${document.title} - ${librariesById.get(document.libraryId)?.name ?? t('home.libraryFallback')}`,
       href: getDocumentHref(document),
       occurredAt: document.createdAt,
       icon: FilePlus2,
@@ -103,11 +105,11 @@ export default function HomePage() {
 
     const noteActivities = notes.map((note) => ({
       id: `note-${note.id}`,
-      title: 'Note created',
+      title: t('home.noteCreated'),
       detail: (() => {
-        const noteTitle = note.title.trim() || 'Untitled note'
+        const noteTitle = note.title.trim() || t('home.untitledNote')
         const documentTitle = note.documentId ? documentsById.get(note.documentId)?.title : null
-        return documentTitle ? `${noteTitle} · ${documentTitle}` : noteTitle
+        return documentTitle ? `${noteTitle} - ${documentTitle}` : noteTitle
       })(),
       href: note.documentId ? (documentsById.get(note.documentId) ? getDocumentHref(documentsById.get(note.documentId)!) : '/notes') : '/notes',
       occurredAt: new Date(note.createdAt),
@@ -120,11 +122,11 @@ export default function HomePage() {
         if (!document) return null
 
         const isHighlight = annotation.kind === 'highlight' || annotation.kind === 'area'
-        const pageLabel = annotation.pageNumber ? ` · Page ${annotation.pageNumber}` : ''
+        const pageLabel = annotation.pageNumber ? ` - ${t('home.page', { page: annotation.pageNumber })}` : ''
 
         return {
           id: `annotation-${annotation.id}`,
-          title: isHighlight ? 'Highlight created' : 'Annotation created',
+          title: isHighlight ? t('home.highlightCreated') : t('home.annotationCreated'),
           detail: `${document.title}${pageLabel}`,
           href: getDocumentHref(document),
           occurredAt: new Date(annotation.createdAt),
@@ -137,7 +139,7 @@ export default function HomePage() {
       .filter((document) => document.readingStage === 'finished')
       .map((document) => ({
         id: `finished-${document.id}`,
-        title: 'Finished reading',
+        title: t('home.finishedReading'),
         detail: document.title,
         href: getDocumentHref(document),
         occurredAt: document.updatedAt,
@@ -147,49 +149,49 @@ export default function HomePage() {
     return [...libraryActivities, ...addedDocumentActivities, ...noteActivities, ...annotationActivities, ...finishedActivities]
       .sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime())
       .slice(0, 10)
-  }, [annotations, documents, libraries, notes])
+  }, [annotations, documents, libraries, notes, t])
 
   const greeting = useMemo(() => {
     const greetings = userName
       ? [
           {
-            title: `Welcome back, ${userName}`,
-            subtitle: `What are your ideas today, ${userName}?`,
+            title: t('home.welcomeBackNamed', { name: userName }),
+            subtitle: t('home.ideasTodayNamed', { name: userName }),
           },
           {
-            title: `Good to see you again, ${userName}`,
-            subtitle: `What are you exploring today, ${userName}?`,
+            title: t('home.goodToSeeNamed', { name: userName }),
+            subtitle: t('home.exploringTodayNamed', { name: userName }),
           },
           {
-            title: `Back at it, ${userName}`,
-            subtitle: `What deserves your attention today, ${userName}?`,
+            title: t('home.backAtItNamed', { name: userName }),
+            subtitle: t('home.attentionTodayNamed', { name: userName }),
           },
           {
-            title: `Welcome back, ${userName}`,
-            subtitle: `What would you like to move forward today, ${userName}?`,
+            title: t('home.welcomeBackNamed', { name: userName }),
+            subtitle: t('home.moveForwardNamed', { name: userName }),
           },
         ]
       : [
           {
-            title: 'Welcome back',
-            subtitle: 'What are your ideas today?',
+            title: t('home.welcomeBack'),
+            subtitle: t('home.ideasToday'),
           },
           {
-            title: 'Good to see you again',
-            subtitle: 'What are you exploring today?',
+            title: t('home.goodToSee'),
+            subtitle: t('home.exploringToday'),
           },
           {
-            title: 'Back at it',
-            subtitle: 'What deserves your attention today?',
+            title: t('home.backAtIt'),
+            subtitle: t('home.attentionToday'),
           },
           {
-            title: 'Welcome back',
-            subtitle: 'What would you like to move forward today?',
+            title: t('home.welcomeBack'),
+            subtitle: t('home.moveForwardToday'),
           },
         ]
 
     return greetings[greetingIndex % greetings.length]
-  }, [greetingIndex, userName])
+  }, [greetingIndex, t, userName])
 
   return (
     <div className="space-y-6 p-6">
@@ -201,13 +203,13 @@ export default function HomePage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Total Documents</CardTitle>
+            <CardTitle>{t('home.totalDocuments')}</CardTitle>
           </CardHeader>
           <CardContent className="text-3xl font-bold">{documents.length}</CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Quick Actions</CardTitle>
+            <CardTitle>{t('home.quickActions')}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {libraries.map((library) => (
@@ -234,7 +236,7 @@ export default function HomePage() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Clock className="h-4 w-4" />
-            Recent Activity
+            {t('home.recentActivity')}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -260,7 +262,7 @@ export default function HomePage() {
                             <div className="truncate text-sm text-muted-foreground">{activity.detail}</div>
                           </div>
                           <span className="shrink-0 text-xs text-muted-foreground">
-                            {formatRelativeTime(activity.occurredAt)}
+                            {formatRelativeTime(activity.occurredAt, t)}
                           </span>
                         </div>
                       </div>
@@ -272,11 +274,11 @@ export default function HomePage() {
           ) : (
             <EmptyState
               icon={Clock}
-              title="No activity yet"
-              description="Import documents, add notes, or create highlights to build your activity feed."
+              title={t('home.noActivity')}
+              description={t('home.noActivityDescription')}
               action={
                 <Button asChild>
-                  <Link href="/libraries">Open Libraries</Link>
+                  <Link href="/libraries">{t('home.openLibraries')}</Link>
                 </Button>
               }
             />

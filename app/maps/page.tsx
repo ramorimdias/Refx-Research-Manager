@@ -42,12 +42,14 @@ import 'reactflow/dist/style.css'
 import {
   Check,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
   GitBranch,
   Pin,
   Plus,
   Save,
   Trash2,
-  WandSparkles,
+  Waypoints,
   ChevronsUpDown,
 } from 'lucide-react'
 import { DocumentGraphControls } from '@/components/refx/document-graph-controls'
@@ -101,6 +103,7 @@ import {
 } from '@/lib/services/document-relation-service'
 import type { GraphView } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/localization'
 
 type ConnectionDirection = 'outbound' | 'inbound'
 
@@ -292,6 +295,7 @@ function RelationshipEdge({
 }
 
 function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
+  const t = useT()
   const {
     document,
     fillColor,
@@ -310,7 +314,7 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
   } = data
   const authorText = document.authors.length > 0
     ? document.authors.slice(0, 2).join(', ')
-    : 'Unknown author'
+    : t('searchPage.unknownAuthor')
   const canCreateInboundLinks = document.documentType !== 'my_work'
 
   return (
@@ -383,7 +387,7 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
                   <Plus className="h-4 w-4" />
                 </div>
               </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8}>Add or connect linked documents</TooltipContent>
+              <TooltipContent side="top" sideOffset={8}>{t('mapsPage.addOrConnect')}</TooltipContent>
             </Tooltip>
             <div
               className={cn(
@@ -408,11 +412,11 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
                         : 'border-sky-500 bg-sky-500 text-white hover:border-sky-600 hover:bg-sky-600',
                     )}
                   >
-                    Add reference
+                    {t('mapsPage.addReference')}
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={8}>
-                  Link this document to one it references
+                  {t('mapsPage.addReferenceHelp')}
                 </TooltipContent>
               </Tooltip>
               {canCreateInboundLinks ? (
@@ -431,11 +435,11 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
                           : 'border-rose-500 bg-rose-500 text-white hover:border-rose-600 hover:bg-rose-600',
                       )}
                     >
-                      Add citation
+                      {t('mapsPage.addCitation')}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="top" sideOffset={8}>
-                    Link a document that cites this one
+                    {t('mapsPage.addCitationHelp')}
                   </TooltipContent>
                 </Tooltip>
               ) : null}
@@ -512,6 +516,7 @@ function writeWorkingMapLayouts(value: WorkingMapLayouts) {
 }
 
 function MapsPageContent() {
+  const t = useT()
   const params = useSearchParams()
   const focusDocumentId = params.get('focus')
   const reactFlow = useReactFlow<GraphNodeData>()
@@ -558,6 +563,7 @@ function MapsPageContent() {
   const [isDeletingRelation, setIsDeletingRelation] = useState(false)
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null)
   const [isReheatingLayout, setIsReheatingLayout] = useState(false)
+  const [isTopBarCollapsed, setIsTopBarCollapsed] = useState(false)
   const [isSaveViewDialogOpen, setIsSaveViewDialogOpen] = useState(false)
   const [isEditingViewDialogOpen, setIsEditingViewDialogOpen] = useState(false)
   const [graphViewDraft, setGraphViewDraft] = useState<GraphViewDraft>(DEFAULT_GRAPH_VIEW_DRAFT)
@@ -757,14 +763,6 @@ function MapsPageContent() {
     setContextMenu(null)
     setActiveDocument(null)
   }
-
-  const yearOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(libraryDocuments.map((document) => document.year).filter((year): year is number => typeof year === 'number')),
-      ).sort((left, right) => left - right),
-    [libraryDocuments],
-  )
 
   const searchResults = useMemo(
     () =>
@@ -1480,23 +1478,40 @@ function MapsPageContent() {
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2 xl:flex-row xl:items-end xl:justify-between">
             <div className="space-y-1">
-              <h1 className="text-2xl font-semibold tracking-tight">Maps</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">{t('mapsPage.title')}</h1>
               <p className="text-sm text-muted-foreground">
                 {activeLibrary ? `${activeLibrary.name} - ` : ''}
-                Explore relationships, shape saved views, and build links directly on the canvas.
+                {t('mapsPage.subtitle')}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsTopBarCollapsed((current) => !current)}
+              >
+                {isTopBarCollapsed ? (
+                  <>
+                    <ChevronDown className="mr-2 h-4 w-4" />
+                    {t('mapsPage.showControls')}
+                  </>
+                ) : (
+                  <>
+                    <ChevronUp className="mr-2 h-4 w-4" />
+                    {t('mapsPage.hideControls')}
+                  </>
+                )}
+              </Button>
               {activeGraphView ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button size="sm" variant="outline" onClick={() => void persistActiveViewSnapshot()}>
                       <Save className="mr-2 h-4 w-4" />
-                      Save changes
+                      {t('mapsPage.saveCurrentView')}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top" sideOffset={8}>
-                    Update the currently selected saved view
+                    {t('mapsPage.saveCurrentViewHelp')}
                   </TooltipContent>
                 </Tooltip>
               ) : null}
@@ -1504,11 +1519,11 @@ function MapsPageContent() {
                 <TooltipTrigger asChild>
                   <Button size="sm" onClick={handleOpenSaveViewDialog}>
                     <Save className="mr-2 h-4 w-4" />
-                    {activeGraphView ? 'Save as new view' : 'Save view'}
+                    {activeGraphView ? t('mapsPage.saveAsNewView') : t('mapsPage.saveView')}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={8}>
-                  Save this layout and filter setup as a reusable map view
+                  {t('mapsPage.saveNewViewHelp')}
                 </TooltipContent>
               </Tooltip>
               <Tooltip>
@@ -1519,74 +1534,74 @@ function MapsPageContent() {
                     onClick={handleReheatLayout}
                     disabled={isReheatingLayout || visibleDocuments.length === 0}
                   >
-                    <WandSparkles className={cn('mr-2 h-4 w-4', isReheatingLayout && 'animate-pulse')} />
-                    Rebuild layout
+                    <Waypoints className={cn('mr-2 h-4 w-4', isReheatingLayout && 'animate-pulse')} />
+                    {t('mapsPage.rebuildLayout')}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={8}>
-                  Re-space the visible nodes to improve the layout
+                  {t('mapsPage.rebuildLayoutHelp')}
                 </TooltipContent>
               </Tooltip>
             </div>
           </div>
 
-          <div className="grid gap-2 xl:grid-cols-[minmax(0,1.05fr)_minmax(240px,300px)_minmax(0,1.2fr)]">
+          {!isTopBarCollapsed ? (
+          <div className="grid gap-2 xl:grid-cols-[minmax(0,0.72fr)_minmax(360px,520px)_minmax(0,0.95fr)]">
             <Card className="border-border/70 bg-card/92 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Workspace
-                </p>
-                <h2 className="text-sm font-semibold text-foreground">
-                  {activeGraphView?.name ?? 'Working map'}
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  {activeGraphView?.description?.trim()
-                    || 'Choose a saved view or keep arranging the current working map.'}
-                </p>
-              </div>
-              <div className="mt-3 space-y-2.5">
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Map view</Label>
-                  <Select
-                    value={activeGraphViewId ?? '__working__'}
-                    onValueChange={(value) => setActiveGraphViewId(value === '__working__' ? null : value)}
-                  >
-                    <SelectTrigger className="bg-white/90">
-                      <SelectValue placeholder="Working map" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__working__">Working map</SelectItem>
-                      {activeLibraryGraphViews.map((view) => (
-                        <SelectItem key={view.id} value={view.id}>
-                          {view.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    {t('mapsPage.workspace')}
+                  </p>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="min-w-[220px] flex-1">
+                        <Select
+                          value={activeGraphViewId ?? '__working__'}
+                          onValueChange={(value) => setActiveGraphViewId(value === '__working__' ? null : value)}
+                        >
+                          <SelectTrigger className="bg-background/90">
+                            <SelectValue placeholder={t('mapsPage.workingMap')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__working__">{t('mapsPage.workingMap')}</SelectItem>
+                            {activeLibraryGraphViews.map((view) => (
+                              <SelectItem key={view.id} value={view.id}>
+                                {view.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>
+                      {activeGraphView?.description?.trim() || t('mapsPage.workingMapDescription')}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
                 {activeGraphView ? (
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={handleOpenEditViewDialog}>
-                      Rename view
+                      {t('mapsPage.renameView')}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => void handleDuplicateGraphView()}>
                       <Plus className="mr-2 h-4 w-4" />
-                      Duplicate
+                      {t('mapsPage.duplicateView')}
                     </Button>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button size="sm" variant="outline" onClick={() => void handleResetCurrentViewPositions()}>
                           <Pin className="mr-2 h-4 w-4" />
-                          Reset layout
+                          {t('mapsPage.resetLayout')}
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="top" sideOffset={8}>
-                        Reset node positions in this saved view
+                        {t('mapsPage.resetLayoutHelp')}
                       </TooltipContent>
                     </Tooltip>
                     <Button size="sm" variant="outline" onClick={() => void handleDeleteActiveGraphView()}>
                       <Trash2 className="mr-2 h-4 w-4" />
-                      Delete
+                      {t('mapsPage.delete')}
                     </Button>
                   </div>
                 ) : null}
@@ -1594,24 +1609,12 @@ function MapsPageContent() {
             </Card>
 
             <Card className="border-border/70 bg-card/92 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
-              <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Canvas editor
-                </p>
-                <h2 className="text-sm font-semibold text-foreground">
-                  {pendingConnectionDirection
-                    ? pendingConnectionDirection === 'outbound'
-                      ? 'Add referenced document'
-                      : 'Add citing document'
-                    : 'Add a document'}
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  {pendingConnectionDirection
-                    ? 'Search the library, add the document to the canvas, and connect it in one step.'
-                    : 'Search the current library and bring another document into this map.'}
-                </p>
-              </div>
-              <div className="mt-3">
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    {t('mapsPage.canvasEditor')}
+                  </p>
+                </div>
                 <div className="flex min-w-0 flex-wrap gap-2 sm:flex-nowrap">
                   <Popover open={isAddDocumentPopoverOpen} onOpenChange={setIsAddDocumentPopoverOpen}>
                     <PopoverTrigger asChild>
@@ -1623,19 +1626,19 @@ function MapsPageContent() {
                       >
                         {pendingConnectionDirection
                           ? pendingConnectionDirection === 'outbound'
-                            ? 'Find referenced document'
-                            : 'Find citing document'
-                          : 'Add document to map'}
+                            ? t('mapsPage.findReferencedDocument')
+                            : t('mapsPage.findCitingDocument')
+                          : t('mapsPage.addDocumentToMap')}
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-[320px] p-0" align="start">
                       <Command>
                         <CommandInput
-                          placeholder={pendingConnectionDirection ? 'Search and add a document to link...' : 'Search documents...'}
+                          placeholder={pendingConnectionDirection ? t('mapsPage.searchAndLinkPlaceholder') : t('mapsPage.searchDocumentsPlaceholder')}
                         />
                         <CommandList>
-                          <CommandEmpty>No matching document found.</CommandEmpty>
+                          <CommandEmpty>{t('mapsPage.noMatchingDocument')}</CommandEmpty>
                           <CommandGroup>
                             {addableDocuments.map((document) => (
                               <CommandItem
@@ -1650,7 +1653,7 @@ function MapsPageContent() {
                                 <div className="min-w-0 flex-1">
                                   <p className="truncate">{document.title}</p>
                                   <p className="truncate text-xs text-slate-500">
-                                    {document.authors.slice(0, 2).join(', ') || 'Unknown author'}
+                                    {document.authors.slice(0, 2).join(', ') || t('searchPage.unknownAuthor')}
                                     {document.year ? ` - ${document.year}` : ''}
                                   </p>
                                 </div>
@@ -1671,7 +1674,7 @@ function MapsPageContent() {
                       setIsCreateMyWorkDialogOpen(true)
                     }}
                   >
-                    My work
+                    {t('mapsPage.addMyWork')}
                   </Button>
                 </div>
               </div>
@@ -1690,17 +1693,13 @@ function MapsPageContent() {
               }))}
               hideOrphans={graphPreferences.hideOrphans}
               onHideOrphansChange={(value) => setGraphPreferences((current) => ({ ...current, hideOrphans: value }))}
-              yearMin={graphPreferences.yearMin}
-              yearMax={graphPreferences.yearMax}
-              yearOptions={yearOptions}
-              onYearMinChange={(value) => setGraphPreferences((current) => ({ ...current, yearMin: value }))}
-              onYearMaxChange={(value) => setGraphPreferences((current) => ({ ...current, yearMax: value }))}
               searchQuery={searchQuery}
               onSearchQueryChange={setSearchQuery}
               searchResults={searchResults}
               onJumpToDocument={handleJumpToDocument}
             />
           </div>
+          ) : null}
         </div>
       </div>
 
@@ -1724,7 +1723,7 @@ function MapsPageContent() {
             <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
               <Card className="border-dashed bg-card/92 p-4 shadow-sm">
                 <p className="text-sm text-muted-foreground">
-                  No documents match the current controls.
+                  {t('mapsPage.noDocumentsControls')}
                 </p>
               </Card>
             </div>
@@ -1732,7 +1731,7 @@ function MapsPageContent() {
             <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
               <Card className="border-dashed bg-card/92 p-4 shadow-sm">
                 <p className="text-sm text-muted-foreground">
-                  No links match the current controls.
+                  {t('mapsPage.noLinksControls')}
                 </p>
               </Card>
             </div>
@@ -1752,8 +1751,8 @@ function MapsPageContent() {
               }}
             >
               {pendingConnectionDirection === 'outbound'
-                ? 'Select the document this one makes reference to, or search to add it'
-                : 'Select the document that references this one, or search to add it'}
+                ? t('mapsPage.selectReferenceTarget')
+                : t('mapsPage.selectCitationTarget')}
             </div>
           ) : null}
 
@@ -1848,7 +1847,7 @@ function MapsPageContent() {
                       setContextMenu(null)
                     }}
                   >
-                    Delete node
+                    {t('mapsPage.deleteNode')}
                   </button>
                   <button
                     type="button"
@@ -1858,7 +1857,7 @@ function MapsPageContent() {
                       setContextMenu(null)
                     }}
                   >
-                    Delete all links
+                    {t('mapsPage.deleteAllLinks')}
                   </button>
                 </>
               ) : (
@@ -1871,7 +1870,7 @@ function MapsPageContent() {
                       setContextMenu(null)
                     }}
                   >
-                    Remove link
+                    {t('mapsPage.removeLinkMenu')}
                   </button>
                   <button
                     type="button"
@@ -1881,7 +1880,7 @@ function MapsPageContent() {
                       setContextMenu(null)
                     }}
                   >
-                    Invert link
+                    {t('mapsPage.invertLinkMenu')}
                   </button>
                 </>
               )}
@@ -1912,38 +1911,38 @@ function MapsPageContent() {
       <Dialog open={isSaveViewDialogOpen} onOpenChange={setIsSaveViewDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Save Graph View</DialogTitle>
+            <DialogTitle>{t('mapsPage.saveGraphView')}</DialogTitle>
             <DialogDescription>
-              Persist the current map as a reusable research workspace with its current filters, subset, and layout.
+              {t('mapsPage.saveGraphViewDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="space-y-2">
-              <Label htmlFor="graph-view-name">Name</Label>
+              <Label htmlFor="graph-view-name">{t('mapsPage.name')}</Label>
               <Input
                 id="graph-view-name"
                 value={graphViewDraft.name}
                 onChange={(event) => setGraphViewDraft((current) => ({ ...current, name: event.target.value }))}
-                placeholder="Thermal battery citations"
+                placeholder={t('mapsPage.saveGraphView')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="graph-view-description">Workspace note</Label>
+              <Label htmlFor="graph-view-description">{t('mapsPage.workspaceNote')}</Label>
               <Textarea
                 id="graph-view-description"
                 value={graphViewDraft.description}
                 onChange={(event) => setGraphViewDraft((current) => ({ ...current, description: event.target.value }))}
-                placeholder="Why this map exists, what this subset means, or what to review next."
+                placeholder={t('mapsPage.workspaceNotePlaceholder')}
                 className="min-h-24"
               />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsSaveViewDialogOpen(false)}>
-              Cancel
+              {t('mapsPage.cancel')}
             </Button>
             <Button onClick={() => void handleSaveCurrentView()}>
-              Save View
+              {t('mapsPage.saveView')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1952,14 +1951,14 @@ function MapsPageContent() {
       <Dialog open={isEditingViewDialogOpen} onOpenChange={setIsEditingViewDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Graph View</DialogTitle>
+            <DialogTitle>{t('mapsPage.editGraphView')}</DialogTitle>
             <DialogDescription>
-              Rename this workspace or update its description without changing the underlying document relations.
+              {t('mapsPage.editGraphViewDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4">
             <div className="space-y-2">
-              <Label htmlFor="edit-graph-view-name">Name</Label>
+              <Label htmlFor="edit-graph-view-name">{t('mapsPage.name')}</Label>
               <Input
                 id="edit-graph-view-name"
                 value={graphViewDraft.name}
@@ -1967,7 +1966,7 @@ function MapsPageContent() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-graph-view-description">Workspace note</Label>
+              <Label htmlFor="edit-graph-view-description">{t('mapsPage.workspaceNote')}</Label>
               <Textarea
                 id="edit-graph-view-description"
                 value={graphViewDraft.description}
@@ -1978,10 +1977,10 @@ function MapsPageContent() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsEditingViewDialogOpen(false)}>
-              Cancel
+              {t('mapsPage.cancel')}
             </Button>
             <Button onClick={() => void handleUpdateGraphViewMeta()}>
-              Save Changes
+              {t('mapsPage.saveChanges')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1998,26 +1997,26 @@ function MapsPageContent() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add My Work</DialogTitle>
+            <DialogTitle>{t('mapsPage.addMyWork')}</DialogTitle>
             <DialogDescription>
-              Create a map node for your own work. It is saved in the library and can make references to other documents.
+              {t('mapsPage.addMyWorkDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="my-work-title">Work name</Label>
+            <Label htmlFor="my-work-title">{t('mapsPage.workName')}</Label>
             <Input
               id="my-work-title"
               value={myWorkDraft.title}
               onChange={(event) => setMyWorkDraft({ title: event.target.value })}
-              placeholder="My article draft"
+              placeholder={t('mapsPage.workNamePlaceholder')}
             />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateMyWorkDialogOpen(false)}>
-              Cancel
+              {t('mapsPage.cancel')}
             </Button>
             <Button onClick={() => void handleCreateMyWork()} disabled={!myWorkDraft.title.trim()}>
-              Add to map
+              {t('mapsPage.addToMap')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -107,6 +107,7 @@ pub fn run() {
             commands::create_document,
             commands::update_document_metadata,
             commands::delete_document,
+            commands::merge_documents,
             commands::move_documents_to_library,
             commands::open_document_file_location,
             commands::import_book_cover,

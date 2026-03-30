@@ -27,8 +27,10 @@ import {
 import { useAppStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
 import { getBaseThemeMode, loadAppSettings, saveAppSettings, toggleStoredThemeVariant } from '@/lib/app-settings'
+import { useT } from '@/lib/localization'
 
 export function CommandBar() {
+  const t = useT()
   const router = useRouter()
   const {
     commandPaletteOpen,
@@ -75,59 +77,59 @@ export function CommandBar() {
 
   return (
     <CommandDialog open={commandPaletteOpen} onOpenChange={(open) => toggleCommandPalette(open)}>
-      <CommandInput placeholder="Type a command or search..." />
+      <CommandInput placeholder={t('commandBar.placeholder')} />
       <CommandList>
-        <CommandEmpty>No local results found.</CommandEmpty>
+        <CommandEmpty>{t('commandBar.empty')}</CommandEmpty>
 
-        <CommandGroup heading="Navigation">
+        <CommandGroup heading={t('commandBar.navigation')}>
           <CommandItem onSelect={() => runCommand(() => router.push('/'))}>
             <Home className="mr-2 h-4 w-4" />
-            <span>Home</span>
+            <span>{t('nav.home')}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/libraries'))}>
             <Library className="mr-2 h-4 w-4" />
-            <span>Libraries</span>
+            <span>{t('nav.libraries')}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/reader'))}>
             <BookOpen className="mr-2 h-4 w-4" />
-            <span>Reader</span>
+            <span>{t('nav.reader')}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/references'))}>
             <FileText className="mr-2 h-4 w-4" />
-            <span>References</span>
+            <span>{t('nav.references')}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/metadata'))}>
             <CloudDownload className="mr-2 h-4 w-4" />
-            <span>Metadata</span>
+            <span>{t('nav.metadata')}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/notes'))}>
             <StickyNote className="mr-2 h-4 w-4" />
-            <span>Notes</span>
+            <span>{t('nav.notes')}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => router.push('/settings'))}>
             <Settings className="mr-2 h-4 w-4" />
-            <span>Settings</span>
+            <span>{t('settings.title')}</span>
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Actions">
+        <CommandGroup heading={t('commandBar.actions')}>
           {mounted && (
             <CommandItem onSelect={() => runCommand(() => void toggleTheme())}>
               {resolvedTheme === 'dark' ? <Sun className="mr-2 h-4 w-4" /> : <Moon className="mr-2 h-4 w-4" />}
-              <span>Toggle theme</span>
+              <span>{t('commandBar.toggleTheme')}</span>
             </CommandItem>
           )}
           <CommandItem onSelect={() => runCommand(() => router.push('/settings'))}>
             <Keyboard className="mr-2 h-4 w-4" />
-            <span>Open settings</span>
+            <span>{t('commandBar.openSettings')}</span>
           </CommandItem>
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Libraries">
+        <CommandGroup heading={t('commandBar.libraries')}>
           {libraries.map((library) => (
             <CommandItem
               key={library.id}
@@ -140,14 +142,14 @@ export function CommandBar() {
             >
               <div className="mr-2 h-3 w-3 rounded-full" style={{ backgroundColor: library.color }} />
               <span>{library.name}</span>
-              <span className="ml-auto text-xs text-muted-foreground">{library.documentCount} docs</span>
+              <span className="ml-auto text-xs text-muted-foreground">{t('commandBar.docsCount', { count: library.documentCount })}</span>
             </CommandItem>
           ))}
         </CommandGroup>
 
         <CommandSeparator />
 
-        <CommandGroup heading="Recent Documents">
+        <CommandGroup heading={t('commandBar.recentDocuments')}>
           {documents.slice(0, 5).map((document) => (
             <CommandItem
               key={document.id}

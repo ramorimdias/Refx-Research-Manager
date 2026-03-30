@@ -6,6 +6,7 @@ const repoRoot = process.cwd()
 const packageJsonPath = join(repoRoot, 'package.json')
 const tauriConfigPath = join(repoRoot, 'src-tauri', 'tauri.conf.json')
 const cargoTomlPath = join(repoRoot, 'src-tauri', 'Cargo.toml')
+const appVersionPath = join(repoRoot, 'lib', 'app-version.ts')
 
 const nextVersion = process.argv[2]?.trim()
 
@@ -70,36 +71,42 @@ const branch = capture('git', ['rev-parse', '--abbrev-ref', 'HEAD'])
 const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
 const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, 'utf8'))
 const cargoToml = readFileSync(cargoTomlPath, 'utf8')
+const appVersionSource = readFileSync(appVersionPath, 'utf8')
 
 const currentPackageVersion = packageJson.version
 const currentTauriVersion = tauriConfig.version
 const cargoVersionMatch = cargoToml.match(/^version = "([^"]+)"$/m)
 const currentCargoVersion = cargoVersionMatch?.[1]
+const appVersionMatch = appVersionSource.match(/APP_VERSION = '([^']+)'/)
+const currentAppVersion = appVersionMatch?.[1]
 
-if (!currentCargoVersion) {
-  console.error('Release aborted: could not find version in src-tauri/Cargo.toml')
+if (!currentCargoVersion || !currentAppVersion) {
+  console.error('Release aborted: could not find version in one of the release-managed files')
   process.exit(1)
 }
 
 packageJson.version = nextVersion
 tauriConfig.version = nextVersion
 const nextCargoToml = cargoToml.replace(/^version = "([^"]+)"$/m, `version = "${nextVersion}"`)
+const nextAppVersionSource = appVersionSource.replace(/APP_VERSION = '([^']+)'/, `APP_VERSION = '${nextVersion}'`)
 
 writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
 writeFileSync(tauriConfigPath, `${JSON.stringify(tauriConfig, null, 2)}\n`)
 writeFileSync(cargoTomlPath, nextCargoToml)
+writeFileSync(appVersionPath, nextAppVersionSource)
 
 console.log(`Updated REFX version to ${nextVersion}`)
 console.log(`- package.json: ${currentPackageVersion} -> ${packageJson.version}`)
 console.log(`- src-tauri/tauri.conf.json: ${currentTauriVersion} -> ${tauriConfig.version}`)
 console.log(`- src-tauri/Cargo.toml: ${currentCargoVersion} -> ${nextVersion}`)
+console.log(`- lib/app-version.ts: ${currentAppVersion} -> ${nextVersion}`)
 console.log('')
 console.log('Building signed release...')
 
 run('pnpm.cmd', ['tauri:build'])
 
 console.log('')
-run('git', ['add', 'package.json', 'src-tauri/tauri.conf.json', 'src-tauri/Cargo.toml'])
+run('git', ['add', 'package.json', 'src-tauri/tauri.conf.json', 'src-tauri/Cargo.toml', 'lib/app-version.ts'])
 
 const stagedVersionChanges = capture('git', ['diff', '--cached', '--name-only'])
 if (stagedVersionChanges) {

@@ -8,8 +8,10 @@ import { Input } from '@/components/ui/input'
 import { useAppStore } from '@/lib/store'
 import { useTheme } from 'next-themes'
 import { getBaseThemeMode, loadAppSettings, saveAppSettings, toggleStoredThemeVariant } from '@/lib/app-settings'
+import { useT } from '@/lib/localization'
 
 export function TopBar() {
+  const t = useT()
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const {
@@ -56,14 +58,14 @@ export function TopBar() {
             }
           }}
           className="h-10 rounded-full border-border/80 bg-card pl-9 pr-4"
-          placeholder="Search"
+          placeholder={t('topBar.searchPlaceholder')}
         />
       </div>
 
       <div className="flex items-center gap-2">
         <Button variant="outline" size="sm" className="gap-2 rounded-full" onClick={() => toggleCommandPalette(true)}>
           <Command className="h-4 w-4" />
-          <span className="hidden lg:inline">Command</span>
+          <span className="hidden lg:inline">{t('topBar.command')}</span>
           <span className="hidden text-[11px] text-muted-foreground md:inline">Ctrl K</span>
         </Button>
 
@@ -73,13 +75,13 @@ export function TopBar() {
             size="icon"
             className="rounded-full"
             onClick={() => void toggleTheme()}
-            aria-label="Toggle theme"
+            aria-label={t('topBar.toggleTheme')}
           >
             {resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
         )}
 
-        <Button variant="outline" size="icon" className="rounded-full" onClick={() => router.push('/settings')} aria-label="Open settings">
+        <Button variant="outline" size="icon" className="rounded-full" onClick={() => router.push('/settings')} aria-label={t('topBar.openSettings')}>
           <Settings2 className="h-4 w-4" />
         </Button>
       </div>

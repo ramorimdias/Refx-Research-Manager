@@ -14,6 +14,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { useAppStore } from '@/lib/store'
 import type { MetadataStatus, ReadingStage } from '@/lib/types'
+import { useT } from '@/lib/localization'
 
 const readingStages: { value: ReadingStage; label: string }[] = [
   { value: 'unread', label: 'Unread' },
@@ -28,6 +29,7 @@ const metadataStatuses: { value: MetadataStatus; label: string }[] = [
 ]
 
 export function FilterPanel() {
+  const t = useT()
   const { documents, activeLibraryId, filters, setFilters } = useAppStore()
   const [isOpen] = useState(true)
 
@@ -79,7 +81,7 @@ export function FilterPanel() {
       <div className="flex items-center justify-between border-b border-border/80 px-4 py-3">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium">Filters</span>
+          <span className="font-medium">{t('libraries.filters')}</span>
           {activeFilterCount > 0 && (
             <Badge variant="secondary" className="h-5 rounded-full px-1.5 text-[11px]">
               {activeFilterCount}
@@ -88,7 +90,7 @@ export function FilterPanel() {
         </div>
         {activeFilterCount > 0 && (
           <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setFilters({})}>
-            Clear
+            {t('libraries.clearFilters')}
           </Button>
         )}
       </div>
@@ -103,7 +105,7 @@ export function FilterPanel() {
             />
             <Label htmlFor="favorite" className="flex cursor-pointer items-center gap-2">
               <Star className="h-3.5 w-3.5 text-amber-400" />
-              Favorites only
+              {t('searchPage.filterFavorites')}
             </Label>
           </div>
           <div className="flex items-center space-x-2">
@@ -114,7 +116,7 @@ export function FilterPanel() {
             />
             <Label htmlFor="hasComments" className="flex cursor-pointer items-center gap-2">
               <MessageSquare className="h-3.5 w-3.5" />
-              Has comments
+              {t('libraries.hasComments')}
             </Label>
           </div>
           <div className="flex items-center space-x-2">
@@ -125,7 +127,7 @@ export function FilterPanel() {
             />
             <Label htmlFor="hasNotes" className="flex cursor-pointer items-center gap-2">
               <StickyNote className="h-3.5 w-3.5" />
-              Has notes
+              {t('libraries.hasNotes')}
             </Label>
           </div>
         </div>
@@ -134,7 +136,7 @@ export function FilterPanel() {
 
         <Collapsible defaultOpen>
           <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium text-foreground">
-            Reading Stage
+            {t('searchPage.readingStage')}
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
@@ -146,7 +148,7 @@ export function FilterPanel() {
                   onCheckedChange={() => toggleReadingStage(stage.value)}
                 />
                 <Label htmlFor={`stage-${stage.value}`} className="cursor-pointer">
-                  {stage.label}
+                  {t(`common.${stage.value}`)}
                 </Label>
               </div>
             ))}
@@ -157,7 +159,7 @@ export function FilterPanel() {
 
         <Collapsible defaultOpen>
           <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium text-foreground">
-            Metadata Status
+            {t('searchPage.metadataQuality')}
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
@@ -169,7 +171,7 @@ export function FilterPanel() {
                   onCheckedChange={() => toggleMetadataStatus(status.value)}
                 />
                 <Label htmlFor={`meta-${status.value}`} className="cursor-pointer">
-                  {status.label}
+                  {t(`common.${status.value}`)}
                 </Label>
               </div>
             ))}
@@ -180,7 +182,7 @@ export function FilterPanel() {
 
         <Collapsible defaultOpen>
           <CollapsibleTrigger className="flex w-full items-center justify-between text-sm font-medium text-foreground">
-            Tags
+            {t('libraries.tags')}
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
           <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
@@ -199,7 +201,7 @@ export function FilterPanel() {
                 </div>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground">No local tags available.</p>
+              <p className="text-sm text-muted-foreground">{t('libraries.noLocalTags')}</p>
             )}
           </CollapsibleContent>
         </Collapsible>

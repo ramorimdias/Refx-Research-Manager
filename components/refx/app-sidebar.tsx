@@ -33,17 +33,18 @@ import {
 } from '@/components/ui/tooltip'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
+import { useT } from '@/lib/localization'
 
 const mainNavItems = [
-  { href: '/', label: 'Home', icon: Home },
-  { href: '/search', label: 'Search', icon: Search },
-  { href: '/libraries', label: 'Libraries', icon: Library },
-  { href: '/reader', label: 'Reader', icon: BookOpen },
-  { href: '/references', label: 'References', icon: FileText },
-  { href: '/notes', label: 'Notes', icon: StickyNote },
-  { href: '/maps', label: 'Maps', icon: GitBranch },
-  { href: '/metadata', label: 'Metadata', icon: CloudDownload },
-  { href: '/reports', label: 'Reports', icon: BarChart3 },
+  { href: '/', labelKey: 'nav.home', icon: Home },
+  { href: '/search', labelKey: 'nav.search', icon: Search },
+  { href: '/libraries', labelKey: 'nav.libraries', icon: Library },
+  { href: '/reader', labelKey: 'nav.reader', icon: BookOpen },
+  { href: '/references', labelKey: 'nav.references', icon: FileText },
+  { href: '/notes', labelKey: 'nav.notes', icon: StickyNote },
+  { href: '/maps', labelKey: 'nav.maps', icon: GitBranch },
+  { href: '/metadata', labelKey: 'nav.metadata', icon: CloudDownload },
+  { href: '/reports', labelKey: 'nav.reports', icon: BarChart3 },
 ]
 
 function BrandMark({ className }: { className?: string }) {
@@ -84,6 +85,7 @@ function BrandMark({ className }: { className?: string }) {
 }
 
 export function AppSidebar() {
+  const t = useT()
   const pathname = usePathname()
   const router = useRouter()
   const { sidebarCollapsed, toggleSidebar, activeLibraryId, setActiveLibrary, libraries } = useAppStore()
@@ -93,7 +95,7 @@ export function AppSidebar() {
       <aside
         className={cn(
           'flex h-full flex-col border-r border-sidebar-border/80 bg-sidebar/96 backdrop-blur transition-all duration-200',
-          sidebarCollapsed ? 'w-[72px]' : 'w-[13.5rem]'
+          sidebarCollapsed ? 'w-[72px]' : 'w-[15rem]'
         )}
       >
         <div className="flex h-16 items-center border-b border-sidebar-border/80 px-3">
@@ -105,11 +107,11 @@ export function AppSidebar() {
             <div
               className={cn(
                 'min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-200',
-                sidebarCollapsed ? 'max-w-0 -translate-x-1 opacity-0' : 'max-w-[8.5rem] translate-x-0 opacity-100',
+                sidebarCollapsed ? 'max-w-0 -translate-x-1 opacity-0' : 'max-w-[10rem] translate-x-0 opacity-100',
               )}
             >
               <span className="block text-base font-semibold tracking-tight text-neutral-950 dark:text-neutral-50">Refx</span>
-              <p className="truncate text-[11px] text-sidebar-foreground/55">Research workspace</p>
+              <p className="truncate text-[11px] text-sidebar-foreground/55">{t('nav.researchWorkspace')}</p>
             </div>
           </Link>
         </div>
@@ -124,12 +126,12 @@ export function AppSidebar() {
                       variant="ghost"
                       size="icon"
                       className="h-10 w-full rounded-xl text-sidebar-foreground/55 hover:bg-sidebar-accent/65 hover:text-sidebar-foreground"
-                      onClick={toggleSidebar}
-                    >
+                  onClick={toggleSidebar}
+                >
                       <ChevronRight className="h-4 w-4" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent side="right">Expand sidebar</TooltipContent>
+                  <TooltipContent side="right">{t('nav.expandSidebar')}</TooltipContent>
                 </Tooltip>
               ) : (
                 <Button
@@ -137,8 +139,7 @@ export function AppSidebar() {
                   size="icon"
                   className="h-10 w-full rounded-xl text-sidebar-foreground/62 hover:bg-sidebar-accent/65 hover:text-sidebar-foreground"
                   onClick={toggleSidebar}
-                  aria-label="Collapse sidebar"
-                  title="Collapse sidebar"
+                  aria-label={t('nav.collapseSidebar')}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
@@ -164,10 +165,10 @@ export function AppSidebar() {
                     <span
                       className={cn(
                         'min-w-0 overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform] duration-200',
-                        sidebarCollapsed ? 'max-w-0 -translate-x-1 opacity-0' : 'max-w-[8rem] translate-x-0 opacity-100',
+                        sidebarCollapsed ? 'max-w-0 -translate-x-1 opacity-0' : 'max-w-[10.25rem] translate-x-0 opacity-100',
                       )}
                     >
-                      {item.label}
+                      {t(item.labelKey)}
                     </span>
                   </Link>
                 )
@@ -177,7 +178,7 @@ export function AppSidebar() {
                     <Tooltip key={item.href}>
                       <TooltipTrigger asChild>{navLink}</TooltipTrigger>
                       <TooltipContent side="right" className="font-medium">
-                        {item.label}
+                        {t(item.labelKey)}
                       </TooltipContent>
                     </Tooltip>
                   )
@@ -192,7 +193,7 @@ export function AppSidebar() {
                 <Separator className="my-4" />
                 <Collapsible defaultOpen>
                   <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2 text-[11px] font-semibold tracking-[0.12em] text-sidebar-foreground/45 hover:text-sidebar-foreground/65">
-                    <span>Libraries</span>
+                    <span>{t('nav.libraryGroup')}</span>
                     <ChevronDown className="h-3 w-3" />
                   </CollapsibleTrigger>
                   <CollapsibleContent className="space-y-1.5">

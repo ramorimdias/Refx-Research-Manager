@@ -35,6 +35,7 @@ import { findDocumentPageHits } from '@/lib/services/document-search-service'
 import { DETACHED_READER_QUERY_VALUE, openDetachedReaderWindow } from '@/lib/services/reader-window-service'
 import { parseAreaNoteAnchor, serializeAreaNoteAnchor, type NoteAreaRect } from '@/lib/services/document-note-anchor-service'
 import { cn } from '@/lib/utils'
+import { useT } from '@/lib/localization'
 
 type ReaderAreaHighlight = {
   id: string
@@ -177,6 +178,7 @@ function ReaderToolbarIconButton({
 }
 
 export default function ReaderViewPage() {
+  const t = useT()
   const router = useRouter()
   const params = useSearchParams()
   const id = params.get('id') ?? ''
@@ -1908,7 +1910,7 @@ export default function ReaderViewPage() {
                           className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] whitespace-nowrap rounded-full border border-primary/25 bg-background/75 px-3 py-1.5 text-center text-xs font-medium text-foreground/85 shadow-md"
                           style={getFloatingHintStyle(notePlacementCursor, renderedPageSize, 232)}
                         >
-                          Click or draw a box to place a note
+                          {t('readerView.clickOrDrawNote')}
                         </div>
                       ) : null}
                       {isSelectingCommentPosition && commentDraftAreaRect ? (
@@ -1953,7 +1955,7 @@ export default function ReaderViewPage() {
                           className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] whitespace-nowrap rounded-full border border-primary/25 bg-background/75 px-3 py-1.5 text-center text-xs font-medium text-foreground/85 shadow-md"
                           style={getFloatingHintStyle(highlightPlacementCursor, renderedPageSize, 168)}
                         >
-                          Draw a box to highlight
+                          {t('readerView.drawHighlight')}
                         </div>
                       ) : null}
                       {currentPageAreaHighlights.map((highlight) => (
@@ -1993,7 +1995,7 @@ export default function ReaderViewPage() {
                   <div className="absolute inset-0 flex items-center justify-center bg-background/35 backdrop-blur-[1px]">
                     <div className="flex items-center gap-2 rounded-full border bg-background/95 px-3 py-2 text-sm shadow-sm">
                       <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      {isPdfLoading ? 'Loading PDF...' : `Rendering page ${page}...`}
+                      {isPdfLoading ? t('readerView.loadingPdf') : t('readerView.renderingPage', { page })}
                     </div>
                   </div>
                 )}
@@ -2004,7 +2006,7 @@ export default function ReaderViewPage() {
               <div className="flex min-h-[calc(100vh-13rem)] items-center justify-center">
                 <div className="flex items-center gap-2 rounded-full border bg-background/95 px-3 py-2 text-sm shadow-sm">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  Opening PDF...
+                  {t('readerView.openingPdf')}
                 </div>
               </div>
             ) : embeddedPdfUrl ? (
@@ -2030,11 +2032,11 @@ export default function ReaderViewPage() {
               </div>
             ) : (
               <div className="space-y-2 p-6">
-               <p>{hasViewerTimedOut ? 'PDF unavailable.' : viewerError ?? 'PDF unavailable.'}</p>
+               <p>{hasViewerTimedOut ? t('readerView.pdfUnavailable') : viewerError ?? t('readerView.pdfUnavailable')}</p>
                 {isDesktopApp && document.id && (
                   <div className="flex items-center gap-2">
                   <Button size="sm" onClick={() => void importPdfForDocument()}>
-                    Import PDF...
+                    {t('readerView.importPdf')}
                   </Button>
                   {!hasNativeTextLayer ? (
                     <Button
@@ -2043,7 +2045,7 @@ export default function ReaderViewPage() {
                       onClick={() => void runOcrForDocument()}
                       disabled={!document.filePath || isRunningOcr || document.ocrStatus === 'processing'}
                     >
-                      {isRunningOcr || document.ocrStatus === 'processing' ? 'Running OCR...' : 'Run OCR'}
+                      {isRunningOcr || document.ocrStatus === 'processing' ? t('readerView.runningOcr') : t('readerView.runOcr')}
                     </Button>
                   ) : null}
                 </div>
@@ -2060,10 +2062,10 @@ export default function ReaderViewPage() {
           <div className="space-y-2 rounded-lg border p-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Search className="h-4 w-4" />
-             Search
+             {t('readerView.search')}
             </div>
           <div className="space-y-2">
-            <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Keyword or phrase" />
+            <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('readerView.keywordOrPhrase')} />
             {searchQuery.trim() ? (
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{searchOccurrences.length} occurrence{searchOccurrences.length === 1 ? '' : 's'}</span>
@@ -2080,7 +2082,7 @@ export default function ReaderViewPage() {
                   disabled={searchOccurrences.length === 0}
                 >
                   <ChevronLeft className="mr-2 h-4 w-4" />
-                  Previous
+                  {t('readerView.previous')}
                 </Button>
                 <Button
                   type="button"
@@ -2089,7 +2091,7 @@ export default function ReaderViewPage() {
                   onClick={() => rotateOccurrence('next')}
                   disabled={searchOccurrences.length === 0}
                 >
-                  Next
+                  {t('readerView.next')}
                   <ChevronRight className="ml-2 h-4 w-4" />
                 </Button>
               </div>
@@ -2111,16 +2113,16 @@ export default function ReaderViewPage() {
                     }`}
                   >
                     <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>Occurrence {index + 1}</span>
-                      <span>{occurrence.rects?.length ? 'Page' : 'Approx page'} {occurrence.estimatedPage}</span>
+                      <span>{t('readerView.occurrence', { index: index + 1 })}</span>
+                      <span>{occurrence.rects?.length ? 'Page' : t('readerView.approxPage')} {occurrence.estimatedPage}</span>
                     </div>
                     {occurrence.rects?.length ? (
                       <Badge variant="outline" className="mb-2">
-                        Exact region highlight
+                        {t('readerView.exactRegion')}
                       </Badge>
                     ) : (
                       <Badge variant="outline" className="mb-2">
-                        Page-level fallback
+                        {t('readerView.pageFallback')}
                       </Badge>
                     )}
                     <div className="leading-6">{highlightText(occurrence.snippet, searchQuery)}</div>
@@ -2129,7 +2131,7 @@ export default function ReaderViewPage() {
               </div>
             ) : searchQuery.trim() ? (
               <div className="rounded-md bg-muted/50 p-2 text-sm text-muted-foreground">
-                No matches found for this keyword.
+                {t('readerView.noMatchesKeyword')}
               </div>
             ) : null}
           </div>
@@ -2139,15 +2141,15 @@ export default function ReaderViewPage() {
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <StickyNote className="h-4 w-4" />
-                 Notes
+                 {t('readerView.notes')}
                 </div>
               {isSelectingCommentPosition ? (
                 <Button variant="outline" size="sm" onClick={handleCancelCommentEditor}>
-                  Cancel
+                  {t('readerView.cancel')}
                 </Button>
               ) : !isNoteEditorOpen ? (
                 <Button size="sm" onClick={handleStartNewComment} disabled={!canUsePreciseViewer}>
-                  New Note
+                  {t('readerView.newNote')}
                 </Button>
               ) : null
               }
@@ -2172,19 +2174,19 @@ export default function ReaderViewPage() {
                     disabled={!canUsePreciseViewer}
                   >
                     <MapPin className="mr-2 h-4 w-4" />
-                    {commentDraftPosition ? 'Move Balloon' : 'Choose Position'}
+                    {commentDraftPosition ? t('readerView.moveBalloon') : t('readerView.choosePosition')}
                   </Button>
                 </div>
                 <Textarea
                   ref={noteEditorTextareaRef}
                   value={commentDraftContent}
                   onChange={(event) => setCommentDraftContent(event.target.value)}
-                  placeholder="Write your note"
+                  placeholder={t('readerView.writeNote')}
                   className="mt-3 min-h-32"
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={handleCancelCommentEditor}>
-                    Cancel
+                    {t('readerView.cancel')}
                   </Button>
                   <Button
                     size="sm"
@@ -2192,10 +2194,10 @@ export default function ReaderViewPage() {
                     disabled={!isDesktopApp || !commentDraftContent.trim() || !commentDraftPosition || isSavingComment}
                   >
                     {isSavingComment
-                      ? 'Saving...'
+                      ? t('readerView.saving')
                       : selectedComment
-                        ? 'Save Note'
-                        : 'Create Note'}
+                        ? t('readerView.saveNote')
+                        : t('readerView.createNote')}
                   </Button>
                 </div>
               </div>
@@ -2203,7 +2205,7 @@ export default function ReaderViewPage() {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{currentPageComments.length} note{currentPageComments.length === 1 ? '' : 's'} on this page</span>
+                <span>{t('readerView.notesOnPage', { count: currentPageComments.length, suffix: currentPageComments.length === 1 ? '' : 's' })}</span>
               </div>
               {currentPageComments.length > 0 ? (
                 <div className="space-y-2">
@@ -2238,13 +2240,13 @@ export default function ReaderViewPage() {
                             </span>
                           </div>
                           <div className="mt-2 text-sm leading-6 text-foreground">
-                            {comment.content || 'No note text yet.'}
+                            {comment.content || t('readerView.noNoteText')}
                           </div>
                         </button>
                         {isActive ? (
                           <div className="mt-3 flex items-center justify-end gap-2 border-t pt-3">
                             <Button variant="outline" size="sm" onClick={handleOpenCommentEditor}>
-                              Edit
+                              {t('readerView.edit')}
                             </Button>
                             <Button
                               variant="destructive"
@@ -2253,7 +2255,7 @@ export default function ReaderViewPage() {
                               disabled={!isDesktopApp || isSavingComment}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
+                              {t('readerView.delete')}
                             </Button>
                           </div>
                         ) : null}
@@ -2263,7 +2265,7 @@ export default function ReaderViewPage() {
                 </div>
               ) : (
                 <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-                  No notes on this page yet.
+                  {t('readerView.noNotesPage')}
                 </div>
               )}
             </div>
@@ -2275,20 +2277,20 @@ export default function ReaderViewPage() {
       <AlertDialog open={isDeleteCommentDialogOpen} onOpenChange={setIsDeleteCommentDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete note?</AlertDialogTitle>
+            <AlertDialogTitle>{t('readerView.deleteNoteTitle')}</AlertDialogTitle>
             <AlertDialogDescription>
               {selectedComment
-                ? `This will permanently remove ${buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber)} from this document.`
-                : 'This will permanently remove this note from the document.'}
+                ? t('readerView.deleteNoteDescription', { label: buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber) })
+                : t('readerView.deleteNoteDescriptionFallback')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('readerView.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => void handleDeleteComment()}
             >
-              Delete
+              {t('readerView.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

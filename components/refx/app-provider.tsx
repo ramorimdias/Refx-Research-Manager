@@ -14,6 +14,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { APP_LOCALES, LocaleProvider, translate, type AppLocale } from '@/lib/localization'
+import {
   checkForAppUpdate,
   dismissPendingAppUpdate,
   downloadAndInstallAppUpdate,
@@ -164,6 +172,10 @@ export function AppProvider({ children }: AppProviderProps) {
     setIsNameDialogOpen(false)
   }
 
+  const handleWelcomeLocaleChange = (nextLocale: AppLocale) => {
+    setAppSettings((current) => (current ? { ...current, locale: nextLocale } : current))
+  }
+
   useEffect(() => {
     if (!initialized || typeof window === 'undefined') return
 
@@ -180,6 +192,7 @@ export function AppProvider({ children }: AppProviderProps) {
   }, [initialized, isUiPrefsReady, sidebarCollapsed])
 
   if (isLoading || !initialized || !isUiPrefsReady || !isSettingsReady) {
+    const locale = appSettings?.locale ?? 'en'
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
@@ -195,14 +208,16 @@ export function AppProvider({ children }: AppProviderProps) {
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm">Loading workspace...</span>
+            <span className="text-sm">{translate(locale, 'appProvider.loadingWorkspace')}</span>
           </div>
         </div>
       </div>
     )
   }
+
+  const locale = appSettings?.locale ?? 'en'
   return (
-    <>
+    <LocaleProvider initialLocale={locale}>
       {!isNameDialogOpen ? children : null}
       <AppUpdateDialog
         open={isUpdateDialogOpen}
@@ -215,16 +230,16 @@ export function AppProvider({ children }: AppProviderProps) {
       <Dialog open={isNameDialogOpen}>
         <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Welcome to REFX</DialogTitle>
-            <DialogDescription>Set your name so the workspace can personalize your dashboard.</DialogDescription>
+            <DialogTitle>{translate(locale, 'appProvider.welcomeTitle')}</DialogTitle>
+            <DialogDescription>{translate(locale, 'appProvider.welcomeDescription')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            <Label htmlFor="refx-user-name">Your name</Label>
+            <Label htmlFor="refx-user-name">{translate(locale, 'appProvider.yourName')}</Label>
             <Input
               id="refx-user-name"
               value={draftUserName}
               onChange={(event) => setDraftUserName(event.target.value)}
-              placeholder="Enter your name"
+              placeholder={translate(locale, 'appProvider.namePlaceholder')}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
                   event.preventDefault()
@@ -233,13 +248,28 @@ export function AppProvider({ children }: AppProviderProps) {
               }}
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="refx-welcome-locale">{translate(locale, 'settings.language')}</Label>
+            <Select value={locale} onValueChange={(value) => handleWelcomeLocaleChange(value as AppLocale)}>
+              <SelectTrigger id="refx-welcome-locale">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {APP_LOCALES.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {translate(option, `localeNames.${option}`)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex items-center space-x-2">
             <Checkbox
               id="refx-skip-name-prompt"
               checked={dontAskNameAgain}
               onCheckedChange={(checked) => setDontAskNameAgain(Boolean(checked))}
             />
-            <Label htmlFor="refx-skip-name-prompt">Don&apos;t ask me again</Label>
+            <Label htmlFor="refx-skip-name-prompt">{translate(locale, 'appProvider.dontAskAgain')}</Label>
           </div>
           <DialogFooter>
             <Button
@@ -247,14 +277,14 @@ export function AppProvider({ children }: AppProviderProps) {
               onClick={() => void handleSkipNamePrompt()}
               disabled={!dontAskNameAgain}
             >
-              Continue without a name
+              {translate(locale, 'appProvider.continueWithoutName')}
             </Button>
             <Button onClick={() => void handleSaveUserName()} disabled={!draftUserName.trim()}>
-              Continue
+              {translate(locale, 'appProvider.continue')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </LocaleProvider>
   )
 }

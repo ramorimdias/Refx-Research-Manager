@@ -109,6 +109,11 @@ export type DbCreateDocumentInput = {
   coverImagePath?: string
 }
 
+export type DbMergeDocumentsInput = {
+  primaryDocumentId: string
+  duplicateDocumentIds: string[]
+}
+
 export type DbUpdateDocumentMetadataInput = {
   documentType?: string
   title?: string
@@ -382,6 +387,10 @@ export async function updateDocumentMetadata(id: string, input: DbUpdateDocument
 
 export async function deleteDocument(id: string) {
   return invoke<boolean>('delete_document', { id })
+}
+
+export async function mergeDocuments(input: DbMergeDocumentsInput) {
+  return invoke<DbDocument | null>('merge_documents', { input })
 }
 
 export async function moveDocumentsToLibrary(documentIds: string[], targetLibraryId: string) {
