@@ -42,13 +42,14 @@ import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
-import { APP_LOCALES, useT } from '@/lib/localization'
+import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
 import { APP_VERSION } from '@/lib/app-version'
 
 type SettingsSection = 'general' | 'display' | 'processing' | 'data' | 'about'
 
 export default function SettingsPage() {
   const t = useT()
+  const { locale } = useLocale()
   const router = useRouter()
   const { setTheme } = useTheme()
   const { clearLocalData, refreshData, scanDocumentsOcr, documents, isDesktopApp } = useAppStore()
@@ -784,6 +785,7 @@ export default function SettingsPage() {
         isInstalling={isInstallingUpdate}
         installStatus={updateStatus}
         onInstall={() => void handleInstallUpdate()}
+        locale={locale}
       />
       <AlertDialog
         open={isRestoreWarningOpen}

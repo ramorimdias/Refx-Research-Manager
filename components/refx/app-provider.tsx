@@ -232,6 +232,7 @@ export function AppProvider({ children }: AppProviderProps) {
         isInstalling={isInstallingUpdate}
         installStatus={updateInstallStatus}
         onInstall={() => void handleInstallUpdate()}
+        locale={locale}
       />
       <Dialog open={isNameDialogOpen}>
         <DialogContent showCloseButton={false}>
