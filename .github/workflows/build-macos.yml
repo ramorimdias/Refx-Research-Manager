@@ -8,30 +8,43 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      # 1. Checkout repo
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 2. Setup Node (NO cache to avoid lockfile error)
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
+      # 3. Setup Rust (required for Tauri)
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # 4. Install system dependencies (Tauri needs these on macOS)
+      - name: Install Tauri dependencies
+        run: |
+          brew update
+          brew install cmake pkg-config
+
+      # 5. Install JS dependencies (no lockfile → npm install)
       - name: Install dependencies
         run: npm install
 
-    
-      - name: Build app
+      # 6. Build app (OPTION A: inject secrets directly)
+      - name: Build macOS app
         env:
           NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: npm run tauri build
 
-      - name: Upload build
+      # 7. Upload artifacts
+      - name: Upload macOS build
         uses: actions/upload-artifact@v4
         with:
           name: macos-build
-          path: src-tauri/target/release/bundle/
+          path: |
+            src-tauri/target/release/bundle/**/*.app
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.app.tar.gz
