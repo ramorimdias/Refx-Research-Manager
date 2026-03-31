@@ -104,7 +104,7 @@ function parseAuthorsValue(value?: string) {
   if (!value) return []
 
   try {
-    const parsed = JSON.parse(value)
+    const parsed = JSON.parse(value.trim())
     return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : []
   } catch {
     return value ? [value] : []

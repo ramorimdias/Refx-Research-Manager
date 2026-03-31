@@ -5,7 +5,20 @@ import type { AppLocale } from '@/lib/localization'
 
 const ENV_SEMANTIC_SCHOLAR_API_KEY = process.env.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY ?? ''
 const ENV_GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? process.env.GEMINI_API_KEY ?? ''
-export const GEMINI_UNLIMITED_MODEL = 'gemini-3.1-flash-lite'
+
+export const GEMINI_MODEL_OPTIONS = [
+  {
+    value: 'gemini-2.5-flash',
+    label: 'Gemini 2.5 Flash',
+    description: 'Best balance (recommended)',
+    recommended: true,
+  },
+  {
+    value: 'gemini-3-flash',
+    label: 'Gemini 3 Flash',
+    description: 'Newer model, slightly better reasoning',
+  },
+] as const
 
 export type StoredAppSettings = {
   userName: string
@@ -33,10 +46,13 @@ export type StoredAppSettings = {
   advancedClassificationMode: 'off' | 'local_heuristic'
   crossrefContactEmail: string
   semanticScholarApiKey: string
+  keywordEngine: 'local_keybert' | 'gemini'
+  autoKeywordExtractionOnImport: boolean
+  autoGeminiOnImport: boolean
   geminiApiKey: string
   geminiModel: string
   keywordExtractionMode: 'page1' | 'full'
-  autoFetchTagsWithAiOnImport: boolean
+  dailyAiAutoLimit: string
 }
 
 export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
@@ -56,10 +72,13 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   advancedClassificationMode: 'off',
   crossrefContactEmail: '',
   semanticScholarApiKey: ENV_SEMANTIC_SCHOLAR_API_KEY,
+  keywordEngine: 'local_keybert',
+  autoKeywordExtractionOnImport: true,
+  autoGeminiOnImport: false,
   geminiApiKey: '',
   geminiModel: 'gemini-2.5-flash',
   keywordExtractionMode: 'page1',
-  autoFetchTagsWithAiOnImport: false,
+  dailyAiAutoLimit: '3',
 }
 
 export function getBaseThemeMode(theme: StoredAppSettings['theme']): 'light' | 'dark' | 'system' {
@@ -139,31 +158,30 @@ export function getResolvedGeminiApiKey(settings: Pick<StoredAppSettings, 'gemin
   return settings.geminiApiKey.trim() || ENV_GEMINI_API_KEY
 }
 
-export function getResolvedGeminiModel(settings: Pick<StoredAppSettings, 'geminiApiKey' | 'geminiModel'>) {
-  return hasCustomGeminiApiKey(settings) ? settings.geminiModel : GEMINI_UNLIMITED_MODEL
-}
-
 export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppSettings> {
   if (!isDesktopApp) {
     if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
     if (!raw) return DEFAULT_APP_SETTINGS
-    const parsed = parseValue<Partial<StoredAppSettings>>(raw, {})
+    const parsed = parseValue<Partial<StoredAppSettings> & { autoFetchTagsWithAiOnImport?: boolean }>(raw, {})
     return {
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
       locale: parsed.locale ?? DEFAULT_APP_SETTINGS.locale,
       semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() || ENV_SEMANTIC_SCHOLAR_API_KEY,
+      keywordEngine: parsed.keywordEngine ?? DEFAULT_APP_SETTINGS.keywordEngine,
+      autoKeywordExtractionOnImport:
+        parsed.autoKeywordExtractionOnImport ?? DEFAULT_APP_SETTINGS.autoKeywordExtractionOnImport,
+      autoGeminiOnImport: parsed.autoGeminiOnImport ?? parsed.autoFetchTagsWithAiOnImport ?? DEFAULT_APP_SETTINGS.autoGeminiOnImport,
       geminiApiKey: parsed.geminiApiKey?.trim() ?? DEFAULT_APP_SETTINGS.geminiApiKey,
       geminiModel: parsed.geminiModel ?? DEFAULT_APP_SETTINGS.geminiModel,
       keywordExtractionMode: parsed.keywordExtractionMode ?? DEFAULT_APP_SETTINGS.keywordExtractionMode,
-      autoFetchTagsWithAiOnImport:
-        (parsed.autoFetchTagsWithAiOnImport ?? DEFAULT_APP_SETTINGS.autoFetchTagsWithAiOnImport) &&
-        hasCustomGeminiApiKey(parsed.geminiApiKey),
+      dailyAiAutoLimit: parsed.dailyAiAutoLimit ?? DEFAULT_APP_SETTINGS.dailyAiAutoLimit,
     }
   }
 
   const stored = await repo.getSettings()
+  const legacyAutoGeminiValue = stored.autoGeminiOnImport ?? stored.autoFetchTagsWithAiOnImport
   return {
     userName: parseValue(stored.userName, DEFAULT_APP_SETTINGS.userName),
     skipNamePrompt: parseValue(stored.skipNamePrompt, DEFAULT_APP_SETTINGS.skipNamePrompt),
@@ -187,17 +205,22 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     ),
     crossrefContactEmail: parseValue(stored.crossrefContactEmail, DEFAULT_APP_SETTINGS.crossrefContactEmail),
     semanticScholarApiKey: resolveSemanticScholarApiKey(stored.semanticScholarApiKey),
+    keywordEngine: parseValue(stored.keywordEngine, DEFAULT_APP_SETTINGS.keywordEngine),
+    autoKeywordExtractionOnImport: parseValue(
+      stored.autoKeywordExtractionOnImport,
+      DEFAULT_APP_SETTINGS.autoKeywordExtractionOnImport,
+    ),
+    autoGeminiOnImport: parseValue(
+      legacyAutoGeminiValue,
+      DEFAULT_APP_SETTINGS.autoGeminiOnImport,
+    ),
     geminiApiKey: parseValue(stored.geminiApiKey, DEFAULT_APP_SETTINGS.geminiApiKey).trim(),
     geminiModel: parseValue(stored.geminiModel, DEFAULT_APP_SETTINGS.geminiModel),
     keywordExtractionMode: parseValue(
       stored.keywordExtractionMode,
       DEFAULT_APP_SETTINGS.keywordExtractionMode,
     ),
-    autoFetchTagsWithAiOnImport:
-      parseValue(
-        stored.autoFetchTagsWithAiOnImport,
-        DEFAULT_APP_SETTINGS.autoFetchTagsWithAiOnImport,
-      ) && hasCustomGeminiApiKey(parseValue(stored.geminiApiKey, DEFAULT_APP_SETTINGS.geminiApiKey)),
+    dailyAiAutoLimit: parseValue(stored.dailyAiAutoLimit, DEFAULT_APP_SETTINGS.dailyAiAutoLimit),
   }
 }
 
@@ -227,10 +250,13 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     advancedClassificationMode: JSON.stringify(settings.advancedClassificationMode),
     crossrefContactEmail: JSON.stringify(settings.crossrefContactEmail),
     semanticScholarApiKey: JSON.stringify(settings.semanticScholarApiKey),
+    keywordEngine: JSON.stringify(settings.keywordEngine),
+    autoKeywordExtractionOnImport: JSON.stringify(settings.autoKeywordExtractionOnImport),
+    autoGeminiOnImport: JSON.stringify(settings.autoGeminiOnImport),
     geminiApiKey: JSON.stringify(settings.geminiApiKey),
     geminiModel: JSON.stringify(settings.geminiModel),
     keywordExtractionMode: JSON.stringify(settings.keywordExtractionMode),
-    autoFetchTagsWithAiOnImport: JSON.stringify(settings.autoFetchTagsWithAiOnImport),
+    dailyAiAutoLimit: JSON.stringify(settings.dailyAiAutoLimit),
   })
 
   if (typeof window !== 'undefined') {

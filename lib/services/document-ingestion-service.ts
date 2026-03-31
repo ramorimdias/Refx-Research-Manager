@@ -52,7 +52,7 @@ export type DocumentIngestionResult = {
 
 const DEFAULT_PIPELINE_OPTIONS: ResolvedDocumentIngestionOptions = {
   enableOcrFallback: true,
-  enableKeywordExtraction: false,
+  enableKeywordExtraction: true,
   enableOnlineMetadataEnrichment: false,
   enableSemanticClassification: false,
   semanticClassificationMode: 'off',
@@ -520,7 +520,7 @@ async function runKeywordExtractionStage(
 
   try {
     await updateStageStart(context.documentId, stage)
-    const result = await detectAndStoreDocumentKeywords(context.documentId)
+    const result = await detectAndStoreDocumentKeywords(context.documentId, { autoMode: true })
     await refreshContextDocument(context)
 
     if (result.keywords.length === 0) {
@@ -529,6 +529,10 @@ async function runKeywordExtractionStage(
 
     if (result.source === 'author_list') {
       return stageCompleted(stage, startedAt, 'Stored author-provided keywords from the first page.')
+    }
+
+    if (result.source === 'keybert_local') {
+      return stageCompleted(stage, startedAt, 'Generated local keywords with the built-in extractor.')
     }
 
     if (result.source === 'gemini_page1') {

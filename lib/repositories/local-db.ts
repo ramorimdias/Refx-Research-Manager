@@ -184,19 +184,24 @@ export type DbDocumentKeyword = {
   id: number
   documentId: string
   keyword: string
+  score?: number
   summary?: string
   source: string
-  confidence?: number
-  apiTier: string
+  apiMode: string
   createdAt: string
 }
 
 export type DbInsertDocumentKeywordInput = {
   keyword: string
+  score?: number
   summary?: string
   source: string
-  confidence?: number
-  apiTier: string
+  apiMode: string
+}
+
+export type DbUsageCounter = {
+  key: string
+  value: string
 }
 
 export type DbReplaceDocumentDoiReferencesInput = {
@@ -504,6 +509,18 @@ export async function replaceDocumentKeywords(
   keywords: DbInsertDocumentKeywordInput[],
 ) {
   return invoke<void>('replace_document_keywords', { documentId, keywords })
+}
+
+export async function getUsageCounter(key: string) {
+  return invoke<DbUsageCounter | null>('get_usage_counter', { key })
+}
+
+export async function setUsageCounter(key: string, value: string) {
+  return invoke<void>('set_usage_counter', { key, value })
+}
+
+export async function ensureKeybertServiceRunning() {
+  return invoke<void>('ensure_keybert_service_running')
 }
 
 export async function replaceDocumentDoiReferences(input: DbReplaceDocumentDoiReferencesInput) {

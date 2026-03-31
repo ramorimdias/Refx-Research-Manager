@@ -64,6 +64,7 @@ import { convertFileSrc, isTauri, open as openFileDialog, readFile } from '@/lib
 import type { Document as RefxDocument, ReadingStage } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import * as repo from '@/lib/repositories/local-db'
+import { normalizeErrorMessage } from '@/lib/utils/error'
 
 const readingStages: Array<{ value: ReadingStage; label: string }> = [
   { value: 'unread', label: 'Unread' },
@@ -818,7 +819,28 @@ export default function DocumentDetailPage() {
           : 'No AI keywords were returned for this document.',
       )
     } catch (error) {
-      setAiTagStatus(error instanceof Error ? error.message : 'Could not fetch AI tags.')
+      setAiTagStatus(normalizeErrorMessage(error, 'Could not fetch AI tags.'))
+    } finally {
+      setIsFetchingAiTags(false)
+    }
+  }
+
+  const handleRefreshLocalTags = async () => {
+    if (!document) return
+
+    setTagsExpanded(true)
+    setIsFetchingAiTags(true)
+    setAiTagStatus('')
+    try {
+      const result = await detectAndStoreDocumentKeywords(document.id, { forceLocal: true })
+      await refreshData()
+      setAiTagStatus(
+        result.keywords.length > 0
+          ? `Stored ${result.keywords.length} local keyword suggestion${result.keywords.length === 1 ? '' : 's'}.`
+          : 'No local keywords were returned for this document.',
+      )
+    } catch (error) {
+      setAiTagStatus(normalizeErrorMessage(error, 'Could not refresh local tags.'))
     } finally {
       setIsFetchingAiTags(false)
     }
@@ -1542,6 +1564,15 @@ export default function DocumentDetailPage() {
                   </div>
                 </CollapsibleTrigger>
                 <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleRefreshLocalTags()}
+                    disabled={isFetchingAiTags || !isDesktopApp}
+                  >
+                    Refresh local tags
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"

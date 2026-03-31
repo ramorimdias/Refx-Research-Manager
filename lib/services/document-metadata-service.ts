@@ -206,7 +206,7 @@ function provenanceEntry(source: MetadataFieldSource, detail?: string, confidenc
 function parseAuthorsValue(value: string) {
   if (!value) return []
   try {
-    const parsed = JSON.parse(value)
+    const parsed = JSON.parse(value.trim())
     return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : []
   } catch {
     return splitAuthors(value)
@@ -217,7 +217,7 @@ export function parseMetadataProvenance(value?: string | DocumentMetadataProvena
   if (!value) return {} as DocumentMetadataProvenance
   let parsed: unknown
   try {
-    parsed = typeof value === 'string' ? JSON.parse(value) : value
+    parsed = typeof value === 'string' ? JSON.parse(value.trim()) : value
   } catch {
     return {} as DocumentMetadataProvenance
   }
@@ -242,7 +242,7 @@ export function parseMetadataUserEditedFields(value?: string | DocumentMetadataU
   if (!value) return {} as DocumentMetadataUserEditedFields
   let parsed: unknown
   try {
-    parsed = typeof value === 'string' ? JSON.parse(value) : value
+    parsed = typeof value === 'string' ? JSON.parse(value.trim()) : value
   } catch {
     return {} as DocumentMetadataUserEditedFields
   }

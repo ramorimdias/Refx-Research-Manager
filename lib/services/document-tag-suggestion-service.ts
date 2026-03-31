@@ -38,14 +38,19 @@ function normalizeTagName(input: string) {
   return normalizeWhitespace(input.toLowerCase().replace(/[^\p{L}\p{N}\s-]+/gu, ' ').replace(/[-_]+/g, ' '))
 }
 
+function safeParseJson(value: string): unknown {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  try {
+    return JSON.parse(trimmed) as unknown
+  } catch {
+    return null
+  }
+}
+
 function parseSuggestedTags(value?: string | SuggestedTag[]) {
   if (!value) return []
-  let parsed: unknown
-  try {
-    parsed = typeof value === 'string' ? JSON.parse(value) as unknown : value
-  } catch {
-    return []
-  }
+  const parsed: unknown = typeof value === 'string' ? safeParseJson(value) : value
   if (!Array.isArray(parsed)) return []
 
   return parsed
@@ -58,12 +63,7 @@ function parseSuggestedTags(value?: string | SuggestedTag[]) {
 
 function parseRejectedSuggestedTags(value?: string | string[]) {
   if (!value) return []
-  let parsed: unknown
-  try {
-    parsed = typeof value === 'string' ? JSON.parse(value) as unknown : value
-  } catch {
-    return []
-  }
+  const parsed: unknown = typeof value === 'string' ? safeParseJson(value) : value
   if (!Array.isArray(parsed)) return []
 
   return Array.from(
@@ -232,14 +232,29 @@ export async function generateDocumentTagSuggestions(documentId: string): Promis
     }
   }
 
+  const storedKeywords = await repo.listDocumentKeywords(documentId)
   const suggestedTags = buildSuggestedTags(text, {
     existingTags: document.tags,
     rejectedTags: parseRejectedSuggestedTags(document.rejectedTagSuggestions),
   })
+  const keywordSuggestions = storedKeywords
+    .map((entry) => ({
+      name: normalizeTagName(entry.keyword),
+      confidence: typeof entry.score === 'number' ? Number(Math.max(0.6, Math.min(1, entry.score)).toFixed(2)) : 0.92,
+    }))
+    .filter((entry) => entry.name)
+
+  const mergedSuggestions = Array.from(
+    new Map(
+      [...keywordSuggestions, ...suggestedTags].map((entry) => [entry.name, entry]),
+    ).values(),
+  ).filter((entry) => !document.tags.map((tag) => normalizeTagName(tag)).includes(entry.name))
+    .filter((entry) => !parseRejectedSuggestedTags(document.rejectedTagSuggestions).includes(entry.name))
+    .slice(0, MAX_SUGGESTED_TAGS)
   const processedAt = new Date().toISOString()
 
   await repo.updateDocumentMetadata(documentId, {
-    tagSuggestions: serializeSuggestedTags(suggestedTags),
+    tagSuggestions: serializeSuggestedTags(mergedSuggestions),
     tagSuggestionStatus: 'complete',
     tagSuggestionTextHash: document.textHash,
     processingUpdatedAt: processedAt,
@@ -248,7 +263,7 @@ export async function generateDocumentTagSuggestions(documentId: string): Promis
 
   return {
     documentId,
-    suggestedTags,
+    suggestedTags: mergedSuggestions,
     textHash: document.textHash,
   }
 }

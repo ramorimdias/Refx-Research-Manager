@@ -4,8 +4,9 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use base64::Engine;
 
@@ -163,11 +164,18 @@ pub struct DocumentKeyword {
     pub id: i64,
     pub document_id: String,
     pub keyword: String,
+    pub score: Option<f64>,
     pub summary: Option<String>,
     pub source: String,
-    pub confidence: Option<f64>,
-    pub api_tier: String,
+    pub api_mode: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageCounter {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,10 +340,10 @@ pub struct ReplaceDocumentDoiReferencesInput {
 #[serde(rename_all = "camelCase")]
 pub struct InsertDocumentKeywordInput {
     pub keyword: String,
+    pub score: Option<f64>,
     pub summary: Option<String>,
     pub source: String,
-    pub confidence: Option<f64>,
-    pub api_tier: String,
+    pub api_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -659,6 +667,37 @@ fn detect_local_ip_addresses() -> Vec<String> {
 
     candidates.sort_by_key(|ip| (local_ip_priority(ip), ip.clone()));
     candidates
+}
+
+fn keybert_service_dir_candidates(app: &AppHandle) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(current_dir.join("tools").join("keybert_service"));
+        if let Some(parent) = current_dir.parent() {
+            candidates.push(parent.join("tools").join("keybert_service"));
+        }
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("tools").join("keybert_service"));
+    }
+
+    candidates
+}
+
+fn find_keybert_service_dir(app: &AppHandle) -> Option<PathBuf> {
+    keybert_service_dir_candidates(app)
+        .into_iter()
+        .find(|path| path.join("server.py").exists())
+}
+
+fn can_connect_to_keybert_service() -> bool {
+    TcpStream::connect_timeout(
+        &"127.0.0.1:8765".parse().expect("valid localhost socket"),
+        Duration::from_millis(350),
+    )
+    .is_ok()
 }
 
 fn write_http_response(
@@ -1212,12 +1251,17 @@ CREATE TABLE IF NOT EXISTS document_keywords (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   document_id TEXT NOT NULL,
   keyword TEXT NOT NULL,
+  score REAL,
   summary TEXT,
   source TEXT NOT NULL,
-  confidence REAL,
-  api_tier TEXT NOT NULL,
+  api_mode TEXT NOT NULL DEFAULT 'local',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS app_usage_counters (
+  counter_key TEXT PRIMARY KEY,
+  counter_value TEXT NOT NULL,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS graph_views (
   id TEXT PRIMARY KEY,
@@ -1299,6 +1343,8 @@ CREATE INDEX IF NOT EXISTS idx_graph_view_node_layouts_graph_view_id ON graph_vi
     ensure_column(&conn, "documents", "commentary_text", "TEXT")?;
     ensure_column(&conn, "documents", "commentary_updated_at", "TEXT")?;
     ensure_column(&conn, "documents", "cover_image_path", "TEXT")?;
+    ensure_column(&conn, "document_keywords", "score", "REAL")?;
+    ensure_column(&conn, "document_keywords", "api_mode", "TEXT NOT NULL DEFAULT 'local'")?;
     ensure_column(&conn, "document_relations", "match_method", "TEXT")?;
     ensure_column(&conn, "document_relations", "raw_reference_text", "TEXT")?;
     ensure_column(&conn, "document_relations", "relation_status", "TEXT DEFAULT 'confirmed'")?;
@@ -1952,10 +1998,10 @@ fn map_document_keyword_row(
         id: row.get(0)?,
         document_id: row.get(1)?,
         keyword: row.get(2)?,
-        summary: row.get(3)?,
-        source: row.get(4)?,
-        confidence: row.get(5)?,
-        api_tier: row.get(6)?,
+        score: row.get(3)?,
+        summary: row.get(4)?,
+        source: row.get(5)?,
+        api_mode: row.get(6)?,
         created_at: row.get(7)?,
     })
 }
@@ -2105,10 +2151,10 @@ fn list_document_keywords_for_document(
           id,
           document_id,
           keyword,
+          score,
           summary,
           source,
-          confidence,
-          api_tier,
+          api_mode,
           created_at
         FROM document_keywords
         WHERE document_id = ?1
@@ -3473,25 +3519,67 @@ pub fn replace_document_keywords(
             INSERT INTO document_keywords (
               document_id,
               keyword,
+              score,
               summary,
               source,
-              confidence,
+              api_mode,
               api_tier
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             "#,
             params![
                 document_id,
                 normalized_keyword,
+                keyword.score,
                 keyword.summary,
                 keyword.source,
-                keyword.confidence,
-                keyword.api_tier,
+                keyword.api_mode,
+                keyword.api_mode,
             ],
         )?;
     }
 
     tx.commit()?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_usage_counter(
+    app: AppHandle,
+    key: String,
+) -> Result<Option<UsageCounter>, AppError> {
+    let conn = open_db(&app)?;
+    conn.query_row(
+        "SELECT counter_key, counter_value FROM app_usage_counters WHERE counter_key = ?1",
+        params![key],
+        |row| {
+            Ok(UsageCounter {
+                key: row.get(0)?,
+                value: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub fn set_usage_counter(
+    app: AppHandle,
+    key: String,
+    value: String,
+) -> Result<(), AppError> {
+    let conn = open_db(&app)?;
+    conn.execute(
+        r#"
+        INSERT INTO app_usage_counters (counter_key, counter_value, updated_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(counter_key) DO UPDATE SET
+          counter_value = excluded.counter_value,
+          updated_at = excluded.updated_at
+        "#,
+        params![key, value, now_iso()],
+    )?;
     Ok(())
 }
 
@@ -4383,8 +4471,60 @@ pub fn get_default_gemini_api_key(app: AppHandle) -> String {
 }
 
 #[tauri::command]
+pub fn ensure_keybert_service_running(app: AppHandle) -> Result<(), AppError> {
+    if can_connect_to_keybert_service() {
+        return Ok(());
+    }
+
+    let service_dir = find_keybert_service_dir(&app).ok_or_else(|| {
+        AppError::Validation(
+            "Could not find the local KeyBERT service files in tools/keybert_service.".to_string(),
+        )
+    })?;
+
+    let launch_attempts = [
+        ("python", vec!["-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "8765"]),
+        ("py", vec!["-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "8765"]),
+    ];
+
+    let mut launched = false;
+    for (program, args) in launch_attempts {
+        let result = Command::new(program)
+            .args(args)
+            .current_dir(&service_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        if result.is_ok() {
+            launched = true;
+            break;
+        }
+    }
+
+    if !launched {
+        return Err(AppError::Validation(
+            "Could not start the local KeyBERT service. Make sure Python and the KeyBERT dependencies are installed.".to_string(),
+        ));
+    }
+
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(300));
+        if can_connect_to_keybert_service() {
+            return Ok(());
+        }
+    }
+
+    Err(AppError::Validation(
+        "The local KeyBERT service did not become ready. Make sure its Python dependencies are installed.".to_string(),
+    ))
+}
+
+#[tauri::command]
 pub fn clear_local_data(app: AppHandle) -> Result<(), AppError> {
     let conn = open_db(&app)?;
+    conn.execute("DELETE FROM app_usage_counters", [])?;
     conn.execute("DELETE FROM document_keywords", [])?;
     conn.execute("DELETE FROM document_tags", [])?;
     conn.execute("DELETE FROM graph_view_node_layouts", [])?;

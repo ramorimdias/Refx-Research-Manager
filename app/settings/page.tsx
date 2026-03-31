@@ -30,10 +30,9 @@ import {
 import { open, save } from '@/lib/tauri/client'
 import {
   DEFAULT_APP_SETTINGS,
-  getResolvedGeminiModel,
   getBaseThemeMode,
   getThemeAccentVariant,
-  hasCustomGeminiApiKey,
+  GEMINI_MODEL_OPTIONS,
   loadAppSettings,
   saveAppSettings,
   type StoredAppSettings,
@@ -44,7 +43,6 @@ import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
-import { GEMINI_MODEL_OPTIONS } from '@/lib/services/document-keyword-service'
 import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
 import { APP_VERSION } from '@/lib/app-version'
 
@@ -107,9 +105,6 @@ export default function SettingsPage() {
     () => sections.find((section) => section.id === activeSection) ?? sections[0],
     [activeSection, sections],
   )
-  const hasCustomGeminiKey = hasCustomGeminiApiKey(settings)
-  const effectiveGeminiModel = getResolvedGeminiModel(settings)
-
   const updateSettings = <K extends keyof StoredAppSettings>(key: K, value: StoredAppSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }))
   }
@@ -555,32 +550,63 @@ export default function SettingsPage() {
                     </div>
 
                     <div>
+                      <Label className="text-sm font-medium">Keyword Engine</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Local extraction is the default unlimited extractor. Gemini is an optional enhancement. Manual AI fetch from the details page is still available.
+                      </p>
+                      <Select
+                        value={settings.keywordEngine}
+                        onValueChange={(value) => updateSettings('keywordEngine', value as StoredAppSettings['keywordEngine'])}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="local_keybert">Local AI</SelectItem>
+                          <SelectItem value="gemini">Gemini</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-sm font-medium">Auto extract keywords on import</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">Use author keywords first, then local or Gemini extraction based on your settings.</p>
+                      </div>
+                      <Checkbox
+                        checked={settings.autoKeywordExtractionOnImport}
+                        onCheckedChange={(checked) => updateSettings('autoKeywordExtractionOnImport', !!checked)}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-sm font-medium">Auto request Gemini on import</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">Use Gemini only when the keyword engine is Gemini and the daily cap allows it.</p>
+                      </div>
+                      <Checkbox
+                        checked={settings.autoGeminiOnImport}
+                        onCheckedChange={(checked) => updateSettings('autoGeminiOnImport', !!checked)}
+                      />
+                    </div>
+
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_keybert' ? 'bg-muted/20' : 'bg-background')}>
                       <Label className="text-sm font-medium">Gemini API Key</Label>
                       <p className="mt-1 text-xs text-muted-foreground">Optional. Add your own Gemini key for AI keyword extraction.</p>
                       <Input
                         type="password"
                         value={settings.geminiApiKey}
-                        onChange={(event) => {
-                          const nextValue = event.target.value
-                          setSettings((current) => ({
-                            ...current,
-                            geminiApiKey: nextValue,
-                            autoFetchTagsWithAiOnImport: nextValue.trim()
-                              ? current.autoFetchTagsWithAiOnImport
-                              : false,
-                          }))
-                        }}
+                        onChange={(event) => updateSettings('geminiApiKey', event.target.value)}
                         className="mt-2"
-                        placeholder="Leave blank to use the local fallback key for manual fetches only"
+                        placeholder="Leave blank to keep Gemini disabled."
                       />
                     </div>
 
-                    <div>
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_keybert' ? 'bg-muted/20' : 'bg-background')}>
                       <Label className="text-sm font-medium">Gemini Model</Label>
                       <Select
-                        value={effectiveGeminiModel}
+                        value={settings.geminiModel}
                         onValueChange={(value) => updateSettings('geminiModel', value)}
-                        disabled={!hasCustomGeminiKey}
                       >
                         <SelectTrigger className="mt-2">
                           <SelectValue />
@@ -594,13 +620,11 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {hasCustomGeminiKey
-                          ? GEMINI_MODEL_OPTIONS.find((option) => option.value === settings.geminiModel)?.description ?? 'Choose the preferred Gemini model.'
-                          : 'Without your own Gemini key, REFX uses Gemini 3.1 Flash Lite for manual fetches only.'}
+                        {GEMINI_MODEL_OPTIONS.find((option) => option.value === settings.geminiModel)?.description ?? 'Choose the preferred Gemini model.'}
                       </p>
                     </div>
 
-                    <div>
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_keybert' ? 'bg-muted/20' : 'bg-background')}>
                       <Label className="text-sm font-medium">Gemini Extraction Scope</Label>
                       <Select
                         value={settings.keywordExtractionMode}
@@ -616,22 +640,22 @@ export default function SettingsPage() {
                       </Select>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-sm font-medium">Auto fetch tags with AI on import</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">After import, use author keywords first, then Gemini if needed.</p>
-                      </div>
-                      <Checkbox
-                        checked={settings.autoFetchTagsWithAiOnImport}
-                        disabled={!hasCustomGeminiKey}
-                        onCheckedChange={(checked) => updateSettings('autoFetchTagsWithAiOnImport', !!checked)}
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_keybert' ? 'bg-muted/20' : 'bg-background')}>
+                      <Label className="text-sm font-medium">Daily AI auto limit</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={settings.dailyAiAutoLimit}
+                        onChange={(event) =>
+                          updateSettings(
+                            'dailyAiAutoLimit',
+                            String(Math.max(0, Number.parseInt(event.target.value || '0', 10) || 0)),
+                          )
+                        }
+                        className="mt-2"
                       />
                     </div>
-                    {!hasCustomGeminiKey ? (
-                      <p className="text-xs text-muted-foreground">
-                        Automatic AI tag fetch is available only when you add your own Gemini API key.
-                      </p>
-                    ) : null}
                   </CardContent>
                 </Card>
 

@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+keybert
+sentence-transformers
+scikit-learn
+pydantic
