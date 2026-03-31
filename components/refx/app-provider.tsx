@@ -27,6 +27,7 @@ import {
   downloadAndInstallAppUpdate,
   type AppUpdateSummary,
 } from '@/lib/services/app-update-service'
+import { getCurrentWindow, isTauri } from '@/lib/tauri/client'
 
 interface AppProviderProps {
   children: React.ReactNode
@@ -126,6 +127,28 @@ export function AppProvider({ children }: AppProviderProps) {
       cancelled = true
     }
   }, [appSettings?.autoCheckForUpdates, initialized, isDesktopApp])
+
+  useEffect(() => {
+    if (!isUpdateDialogOpen || !isDesktopApp || !isTauri()) return
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const currentWindow = getCurrentWindow()
+          const isMinimized = await currentWindow.isMinimized().catch(() => false)
+          if (isMinimized) {
+            await currentWindow.unminimize().catch(() => undefined)
+          }
+          await currentWindow.show().catch(() => undefined)
+          await currentWindow.setFocus().catch(() => undefined)
+        } catch (error) {
+          console.warn('Failed to bring update dialog window to front:', error)
+        }
+      })()
+    }, 40)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [isDesktopApp, isUpdateDialogOpen])
 
   const handleUpdateDialogOpenChange = (open: boolean) => {
     setIsUpdateDialogOpen(open)
