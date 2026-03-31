@@ -162,6 +162,21 @@ export default function SettingsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsLoaded, settings.theme, settings.fontSize])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleThemeUpdated = (event: Event) => {
+      const nextTheme = (event as CustomEvent<{ theme?: StoredAppSettings['theme'] }>).detail?.theme
+      if (!nextTheme) return
+      setSettings((current) => ({ ...current, theme: nextTheme }))
+    }
+
+    window.addEventListener('refx-theme-updated', handleThemeUpdated as EventListener)
+    return () => {
+      window.removeEventListener('refx-theme-updated', handleThemeUpdated as EventListener)
+    }
+  }, [])
+
   const handleClearLocalData = async () => {
     const confirmed = window.confirm('Clear all local documents, notes, and imported files? This cannot be undone.')
     if (!confirmed) return
