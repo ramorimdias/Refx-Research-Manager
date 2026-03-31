@@ -17,7 +17,9 @@ import {
   Minus,
   Plus,
   Save,
+  Search,
   Smartphone,
+  Sparkles,
   Star,
   Tag,
   Trash2,
@@ -47,6 +49,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { EmptyState, StarRating, TagChip } from '@/components/refx/common'
 import {
   buildDocumentMetadataSeed,
@@ -1331,8 +1334,7 @@ export default function DocumentDetailPage() {
             </CardHeader>
             <CollapsibleContent>
               <CardContent>
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-                  <span>Try fetching cleaner metadata from Crossref or Semantic Scholar.</span>
+                <div className="mb-4 flex justify-end">
                     <Button variant="outline" size="sm" onClick={() => void handleFetchOnlineMetadata()} disabled={isFetchingOnlineMetadata}>
                       <Globe className="mr-2 h-4 w-4" />
                       {isFetchingOnlineMetadata ? 'Searchingâ€¦' : 'Find Metadata Online'}
@@ -1551,12 +1553,7 @@ export default function DocumentDetailPage() {
                 <CollapsibleTrigger className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left">
                   <div className="flex items-center gap-2">
                     <Tag className="h-4 w-4 text-muted-foreground" />
-                    <div>
-                      <CardTitle>Tags</CardTitle>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Manual tags, suggestions, and semantic classification
-                      </div>
-                    </div>
+                    <CardTitle>Tags</CardTitle>
                   </div>
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <span>{document.tags.length} tag{document.tags.length === 1 ? '' : 's'}</span>
@@ -1564,31 +1561,42 @@ export default function DocumentDetailPage() {
                   </div>
                 </CollapsibleTrigger>
                 <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleRefreshLocalTags()}
-                    disabled={isFetchingAiTags || !isDesktopApp}
-                  >
-                    Refresh local tags
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleFetchTagsWithAi()}
-                    disabled={isFetchingAiTags || !isDesktopApp}
-                  >
-                    {isFetchingAiTags ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Fetching...
-                      </>
-                    ) : (
-                      'Fetch tags with AI'
-                    )}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleRefreshLocalTags()}
+                        disabled={isFetchingAiTags || !isDesktopApp}
+                      >
+                        {isFetchingAiTags ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Search className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>Refresh local tags</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleFetchTagsWithAi()}
+                        disabled={isFetchingAiTags || !isDesktopApp}
+                      >
+                        {isFetchingAiTags ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>Fetch tags with AI</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             </CardHeader>
