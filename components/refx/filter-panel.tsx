@@ -193,15 +193,15 @@ export function FilterPanel() {
           <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
             {availableTags.length > 0 ? (
               availableTags.map((tag) => (
-                <div key={tag.name} className="flex items-center space-x-2">
+                <div key={tag.name} className="flex min-w-0 items-center space-x-2 overflow-hidden">
                   <Checkbox
                     id={`tag-${tag.name}`}
                     checked={filters.tags?.includes(tag.name) || false}
                     onCheckedChange={() => toggleTag(tag.name)}
                   />
-                  <Label htmlFor={`tag-${tag.name}`} className="flex w-full cursor-pointer items-center justify-between gap-2">
-                    <span className="truncate">{tag.name}</span>
-                    <span className="text-xs text-muted-foreground">{tag.count}</span>
+                  <Label htmlFor={`tag-${tag.name}`} className="flex min-w-0 w-full cursor-pointer items-center justify-between gap-2 overflow-hidden">
+                    <span className="min-w-0 truncate">{tag.name}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{tag.count}</span>
                   </Label>
                 </div>
               ))

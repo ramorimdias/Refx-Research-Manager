@@ -56,6 +56,7 @@ import {
   type MetadataCandidateProvider,
   type DocumentMetadataCandidate,
 } from '@/lib/services/document-enrichment-service'
+import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
 import { scanDocumentForDoiReferences } from '@/lib/services/document-doi-reference-service'
 import { loadPdfJsModule } from '@/lib/services/document-processing'
 import { useAppStore } from '@/lib/store'
@@ -361,6 +362,7 @@ export default function DocumentDetailPage() {
     deleteRelation,
     setActiveDocument,
     isDesktopApp,
+    refreshData,
   } = useAppStore()
 
   const document = useMemo(() => documents.find((entry) => entry.id === id) ?? null, [documents, id])
@@ -410,6 +412,10 @@ export default function DocumentDetailPage() {
   const [incomingDoiReferences, setIncomingDoiReferences] = useState<DocumentDoiReferenceItem[]>([])
   const [isFindingReferences, setIsFindingReferences] = useState(false)
   const [doiReferenceStatus, setDoiReferenceStatus] = useState('')
+  const [isFetchingAiTags, setIsFetchingAiTags] = useState(false)
+  const [aiTagStatus, setAiTagStatus] = useState('')
+  const [editingTagName, setEditingTagName] = useState('')
+  const [editingTagValue, setEditingTagValue] = useState('')
 
   const [detailsExpanded, setDetailsExpanded] = useState(true)
   const [tagsExpanded, setTagsExpanded] = useState(false)
@@ -452,7 +458,13 @@ export default function DocumentDetailPage() {
     setDoiReferenceStatus('')
     metadataAutoOpenHandledRef.current = null
     metadataAutoSearchPendingRef.current = null
+    setEditingTagName('')
+    setEditingTagValue('')
   }, [document, setActiveDocument])
+
+  useEffect(() => {
+    setAiTagStatus('')
+  }, [document?.id])
 
   useEffect(() => {
     if (!document) return
@@ -759,6 +771,57 @@ export default function DocumentDetailPage() {
     if (!document || !tagInput.trim()) return
     await addDocumentTag(document.id, tagInput)
     setTagInput('')
+  }
+
+  const handleStartEditTag = (tag: string) => {
+    setEditingTagName(tag)
+    setEditingTagValue(tag)
+  }
+
+  const handleSaveEditedTag = async () => {
+    if (!document || !editingTagName) return
+
+    const nextTag = editingTagValue.trim()
+    if (!nextTag) {
+      await removeDocumentTag(document.id, editingTagName)
+      setEditingTagName('')
+      setEditingTagValue('')
+      return
+    }
+
+    if (nextTag !== editingTagName) {
+      await removeDocumentTag(document.id, editingTagName)
+      await addDocumentTag(document.id, nextTag)
+    }
+
+    setEditingTagName('')
+    setEditingTagValue('')
+  }
+
+  const handleCancelEditTag = () => {
+    setEditingTagName('')
+    setEditingTagValue('')
+  }
+
+  const handleFetchTagsWithAi = async () => {
+    if (!document) return
+
+    setTagsExpanded(true)
+    setIsFetchingAiTags(true)
+    setAiTagStatus('')
+    try {
+      const result = await detectAndStoreDocumentKeywords(document.id, { forceAi: true })
+      await refreshData()
+      setAiTagStatus(
+        result.keywords.length > 0
+          ? `Stored ${result.keywords.length} AI tag suggestion${result.keywords.length === 1 ? '' : 's'}.`
+          : 'No AI keywords were returned for this document.',
+      )
+    } catch (error) {
+      setAiTagStatus(error instanceof Error ? error.message : 'Could not fetch AI tags.')
+    } finally {
+      setIsFetchingAiTags(false)
+    }
   }
 
   const runMetadataCandidateSearch = async () => {
@@ -1462,36 +1525,90 @@ export default function DocumentDetailPage() {
         <Card>
           <Collapsible open={tagsExpanded} onOpenChange={setTagsExpanded}>
             <CardHeader>
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
-                <div className="flex items-center gap-2">
-                  <Tag className="h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <CardTitle>Tags</CardTitle>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      Manual tags, suggestions, and semantic classification
+              <div className="flex items-start justify-between gap-3">
+                <CollapsibleTrigger className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left">
+                  <div className="flex items-center gap-2">
+                    <Tag className="h-4 w-4 text-muted-foreground" />
+                    <div>
+                      <CardTitle>Tags</CardTitle>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Manual tags, suggestions, and semantic classification
+                      </div>
                     </div>
                   </div>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{document.tags.length} tag{document.tags.length === 1 ? '' : 's'}</span>
+                    <ChevronDown className={`h-4 w-4 transition-transform ${tagsExpanded ? 'rotate-180' : ''}`} />
+                  </div>
+                </CollapsibleTrigger>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleFetchTagsWithAi()}
+                    disabled={isFetchingAiTags || !isDesktopApp}
+                  >
+                    {isFetchingAiTags ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Fetching...
+                      </>
+                    ) : (
+                      'Fetch tags with AI'
+                    )}
+                  </Button>
                 </div>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span>{document.tags.length} tag{document.tags.length === 1 ? '' : 's'}</span>
-                  <ChevronDown className={`h-4 w-4 transition-transform ${tagsExpanded ? 'rotate-180' : ''}`} />
-                </div>
-              </CollapsibleTrigger>
+              </div>
             </CardHeader>
             <CollapsibleContent>
               <CardContent className="space-y-4">
+                {aiTagStatus ? (
+                  <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                    {aiTagStatus}
+                  </div>
+                ) : null}
                 <section className="rounded-lg border border-border p-4">
                   <div className="space-y-2">
                     <Label className="text-sm font-medium">Manual Tags</Label>
                     <div className="flex flex-wrap gap-2">
                       {document.tags.length > 0 ? (
                         document.tags.map((tag) => (
-                          <TagChip
-                            key={tag}
-                            name={tag}
-                            removable
-                            onRemove={() => void removeDocumentTag(document.id, tag)}
-                          />
+                          editingTagName === tag ? (
+                            <div key={tag} className="flex items-center gap-2 rounded-full border border-border/70 bg-muted/40 px-2 py-1">
+                              <Input
+                                value={editingTagValue}
+                                onChange={(event) => setEditingTagValue(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    void handleSaveEditedTag()
+                                  }
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    handleCancelEditTag()
+                                  }
+                                }}
+                                className="h-7 w-44 border-0 bg-transparent px-1 text-xs shadow-none focus-visible:ring-0"
+                                autoFocus
+                              />
+                              <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void handleSaveEditedTag()}>
+                                Save
+                              </Button>
+                              <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={handleCancelEditTag}>
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : (
+                            <TagChip
+                              key={tag}
+                              name={tag}
+                              onClick={() => handleStartEditTag(tag)}
+                              removable
+                              onRemove={() => void removeDocumentTag(document.id, tag)}
+                              className="max-w-[220px]"
+                            />
+                          )
                         ))
                       ) : (
                         <p className="text-sm text-muted-foreground">No tags added yet.</p>
@@ -1523,17 +1640,17 @@ export default function DocumentDetailPage() {
                       <div className="space-y-2">
                         {document.suggestedTags.map((tag) => (
                           <div key={tag.name} className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2">
-                            <TagChip name={tag.name} />
+                            <Button size="sm" variant="outline" onClick={() => void acceptSuggestedTag(document.id, tag.name)}>
+                              Accept
+                            </Button>
+                            <TagChip name={tag.name} className="max-w-[260px]" />
                             {typeof tag.confidence === 'number' && (
                               <span className="text-xs text-muted-foreground">
                                 {Math.round(tag.confidence * 100)}%
                               </span>
                             )}
-                            <Button size="sm" variant="outline" onClick={() => void acceptSuggestedTag(document.id, tag.name)}>
-                              Accept
-                            </Button>
                             <Button size="sm" variant="ghost" onClick={() => void rejectSuggestedTag(document.id, tag.name)}>
-                              Reject
+                              Discard
                             </Button>
                           </div>
                         ))}

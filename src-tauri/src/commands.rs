@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Manager};
@@ -155,6 +155,19 @@ pub struct DocumentDoiReference {
     pub matched_document_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentKeyword {
+    pub id: i64,
+    pub document_id: String,
+    pub keyword: String,
+    pub summary: Option<String>,
+    pub source: String,
+    pub confidence: Option<f64>,
+    pub api_tier: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -313,6 +326,16 @@ pub struct UpdateDocumentInput {
 pub struct ReplaceDocumentDoiReferencesInput {
     pub source_document_id: String,
     pub dois: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsertDocumentKeywordInput {
+    pub keyword: String,
+    pub summary: Option<String>,
+    pub source: String,
+    pub confidence: Option<f64>,
+    pub api_tier: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,6 +509,53 @@ pub struct SetSettingsInput {
 
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+fn read_env_value_from_file(path: &Path, key: &str) -> Option<String> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let Some((raw_key, raw_value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if raw_key.trim() != key {
+            continue;
+        }
+
+        let value = raw_value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim()
+            .to_string();
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn read_env_value_from_local_files(app: &AppHandle, key: &str) -> Option<String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        candidates.push(current_dir.join(".env.local"));
+        if let Some(parent) = current_dir.parent() {
+            candidates.push(parent.join(".env.local"));
+        }
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join(".env.local"));
+    }
+
+    candidates
+        .into_iter()
+        .find_map(|path| read_env_value_from_file(&path, key))
 }
 
 fn db_path(app: &AppHandle) -> Result<std::path::PathBuf, AppError> {
@@ -1138,6 +1208,17 @@ CREATE TABLE IF NOT EXISTS document_doi_references (
   FOREIGN KEY (matched_document_id) REFERENCES documents(id) ON DELETE SET NULL,
   UNIQUE (source_document_id, doi)
 );
+CREATE TABLE IF NOT EXISTS document_keywords (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  summary TEXT,
+  source TEXT NOT NULL,
+  confidence REAL,
+  api_tier TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS graph_views (
   id TEXT PRIMARY KEY,
   library_id TEXT NOT NULL,
@@ -1185,6 +1266,8 @@ CREATE INDEX IF NOT EXISTS idx_document_relations_target_document_id ON document
 CREATE INDEX IF NOT EXISTS idx_document_relations_link_origin ON document_relations(link_origin);
 CREATE INDEX IF NOT EXISTS idx_document_doi_references_source_document_id ON document_doi_references(source_document_id);
 CREATE INDEX IF NOT EXISTS idx_document_doi_references_matched_document_id ON document_doi_references(matched_document_id);
+CREATE INDEX IF NOT EXISTS idx_document_keywords_document_id ON document_keywords(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_keywords_keyword ON document_keywords(keyword);
 CREATE INDEX IF NOT EXISTS idx_graph_views_library_id ON graph_views(library_id);
 CREATE INDEX IF NOT EXISTS idx_graph_view_node_layouts_graph_view_id ON graph_view_node_layouts(graph_view_id);
         "#,
@@ -1862,6 +1945,21 @@ fn map_document_doi_reference_row(
     })
 }
 
+fn map_document_keyword_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<DocumentKeyword> {
+    Ok(DocumentKeyword {
+        id: row.get(0)?,
+        document_id: row.get(1)?,
+        keyword: row.get(2)?,
+        summary: row.get(3)?,
+        source: row.get(4)?,
+        confidence: row.get(5)?,
+        api_tier: row.get(6)?,
+        created_at: row.get(7)?,
+    })
+}
+
 fn document_exists(conn: &Connection, id: &str) -> Result<bool, AppError> {
     let exists: Option<String> = conn
         .query_row("SELECT id FROM documents WHERE id = ?1", params![id], |row| row.get(0))
@@ -1994,6 +2092,30 @@ fn list_document_doi_references_pointing_to_target_document(
         "#,
     )?;
     let rows = stmt.query_map(params![document_id], map_document_doi_reference_row)?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
+fn list_document_keywords_for_document(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<Vec<DocumentKeyword>, AppError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          id,
+          document_id,
+          keyword,
+          summary,
+          source,
+          confidence,
+          api_tier,
+          created_at
+        FROM document_keywords
+        WHERE document_id = ?1
+        ORDER BY created_at ASC, id ASC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![document_id], map_document_keyword_row)?;
     Ok(rows.filter_map(Result::ok).collect())
 }
 
@@ -3318,6 +3440,62 @@ pub fn list_document_doi_references_pointing_to_document(
 }
 
 #[tauri::command]
+pub fn list_document_keywords(
+    app: AppHandle,
+    document_id: String,
+) -> Result<Vec<DocumentKeyword>, AppError> {
+    let conn = open_db(&app)?;
+    list_document_keywords_for_document(&conn, &document_id)
+}
+
+#[tauri::command]
+pub fn replace_document_keywords(
+    app: AppHandle,
+    document_id: String,
+    keywords: Vec<InsertDocumentKeywordInput>,
+) -> Result<(), AppError> {
+    let mut conn = open_db(&app)?;
+    let tx = conn.transaction()?;
+
+    tx.execute(
+        "DELETE FROM document_keywords WHERE document_id = ?1",
+        params![document_id.clone()],
+    )?;
+
+    for keyword in keywords {
+        let normalized_keyword = keyword.keyword.trim();
+        if normalized_keyword.is_empty() {
+            continue;
+        }
+
+        tx.execute(
+            r#"
+            INSERT INTO document_keywords (
+              document_id,
+              keyword,
+              summary,
+              source,
+              confidence,
+              api_tier
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                document_id,
+                normalized_keyword,
+                keyword.summary,
+                keyword.source,
+                keyword.confidence,
+                keyword.api_tier,
+            ],
+        )?;
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn replace_document_doi_references(
     app: AppHandle,
     input: ReplaceDocumentDoiReferencesInput,
@@ -4190,8 +4368,24 @@ pub fn set_settings(app: AppHandle, input: SetSettingsInput) -> Result<(), AppEr
 }
 
 #[tauri::command]
+pub fn get_default_gemini_api_key(app: AppHandle) -> String {
+    std::env::var("GEMINI_API_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("NEXT_PUBLIC_GEMINI_API_KEY")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .or_else(|| read_env_value_from_local_files(&app, "GEMINI_API_KEY"))
+        .or_else(|| read_env_value_from_local_files(&app, "NEXT_PUBLIC_GEMINI_API_KEY"))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
 pub fn clear_local_data(app: AppHandle) -> Result<(), AppError> {
     let conn = open_db(&app)?;
+    conn.execute("DELETE FROM document_keywords", [])?;
     conn.execute("DELETE FROM document_tags", [])?;
     conn.execute("DELETE FROM graph_view_node_layouts", [])?;
     conn.execute("DELETE FROM graph_views", [])?;

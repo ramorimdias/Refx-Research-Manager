@@ -1,7 +1,7 @@
 'use client'
 
 import { isTauri, open } from '@/lib/tauri/client'
-import { loadAppSettings } from '@/lib/app-settings'
+import { hasCustomGeminiApiKey, loadAppSettings } from '@/lib/app-settings'
 import * as repo from '@/lib/repositories/local-db'
 import { ingestImportedPdfDocument } from '@/lib/services/document-ingestion-service'
 import { normalizeErrorMessage } from '@/lib/utils/error'
@@ -54,6 +54,8 @@ export async function importPdfs(
       { libraryId, sourcePath: src },
       {
         enableOcrFallback: settings.autoOcr,
+        enableKeywordExtraction:
+          settings.autoFetchTagsWithAiOnImport && hasCustomGeminiApiKey(settings),
         enableOnlineMetadataEnrichment: settings.autoOnlineMetadataEnrichment,
         enableSemanticClassification: settings.advancedClassificationMode !== 'off',
         semanticClassificationMode: settings.advancedClassificationMode,

@@ -180,6 +180,25 @@ export type DbDocumentDoiReference = {
   updatedAt: string
 }
 
+export type DbDocumentKeyword = {
+  id: number
+  documentId: string
+  keyword: string
+  summary?: string
+  source: string
+  confidence?: number
+  apiTier: string
+  createdAt: string
+}
+
+export type DbInsertDocumentKeywordInput = {
+  keyword: string
+  summary?: string
+  source: string
+  confidence?: number
+  apiTier: string
+}
+
 export type DbReplaceDocumentDoiReferencesInput = {
   sourceDocumentId: string
   dois: string[]
@@ -476,6 +495,17 @@ export async function listDocumentDoiReferencesPointingToDocument(documentId: st
   return invoke<DbDocumentDoiReference[]>('list_document_doi_references_pointing_to_document', { documentId })
 }
 
+export async function listDocumentKeywords(documentId: string) {
+  return invoke<DbDocumentKeyword[]>('list_document_keywords', { documentId })
+}
+
+export async function replaceDocumentKeywords(
+  documentId: string,
+  keywords: DbInsertDocumentKeywordInput[],
+) {
+  return invoke<void>('replace_document_keywords', { documentId, keywords })
+}
+
 export async function replaceDocumentDoiReferences(input: DbReplaceDocumentDoiReferencesInput) {
   return invoke<DbDocumentDoiReference[]>('replace_document_doi_references', { input })
 }
@@ -567,6 +597,10 @@ export async function getSettings() {
 
 export async function setSettings(values: Record<string, string>) {
   return invoke<void>('set_settings', { input: { values } })
+}
+
+export async function getDefaultGeminiApiKey() {
+  return invoke<string>('get_default_gemini_api_key')
 }
 
 export async function clearLocalData() {

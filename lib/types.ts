@@ -44,6 +44,7 @@ export type DocumentProcessingStage =
   | 'ocr_fallback'
   | 'save_document'
   | 'indexing'
+  | 'keyword_extraction'
   | 'citation_linking'
   | 'tag_suggestion'
   | 'semantic_classification'

@@ -85,24 +85,27 @@ export function TagChip({
   onClick,
   removable,
   onRemove,
+  className,
 }: {
   name: string
   color?: string
   onClick?: () => void
   removable?: boolean
   onRemove?: () => void
+  className?: string
 }) {
   return (
     <Badge
       variant="secondary"
       className={cn(
-        'h-6 gap-1.5 rounded-full border border-border/70 bg-muted/60 px-2.5 text-[11px] font-medium text-foreground shadow-none',
+        'inline-flex h-6 max-w-full gap-1.5 rounded-full border border-border/70 bg-muted/60 px-2.5 text-[11px] font-medium text-foreground shadow-none',
         onClick && 'cursor-pointer hover:bg-muted',
+        className,
       )}
       onClick={onClick}
     >
       {color ? <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} /> : null}
-      {name}
+      <span className="min-w-0 truncate">{name}</span>
       {removable && onRemove ? (
         <button
           onClick={(event) => {
@@ -110,7 +113,7 @@ export function TagChip({
             event.stopPropagation()
             onRemove()
           }}
-          className="ml-0.5 rounded-full px-1 text-muted-foreground transition hover:bg-muted-foreground/10 hover:text-foreground"
+          className="ml-0.5 shrink-0 rounded-full px-1 text-muted-foreground transition hover:bg-muted-foreground/10 hover:text-foreground"
         >
           ×
         </button>

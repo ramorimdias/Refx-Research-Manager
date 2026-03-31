@@ -4,6 +4,8 @@ import * as repo from '@/lib/repositories/local-db'
 import type { AppLocale } from '@/lib/localization'
 
 const ENV_SEMANTIC_SCHOLAR_API_KEY = process.env.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY ?? ''
+const ENV_GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? process.env.GEMINI_API_KEY ?? ''
+export const GEMINI_UNLIMITED_MODEL = 'gemini-3.1-flash-lite'
 
 export type StoredAppSettings = {
   userName: string
@@ -31,6 +33,10 @@ export type StoredAppSettings = {
   advancedClassificationMode: 'off' | 'local_heuristic'
   crossrefContactEmail: string
   semanticScholarApiKey: string
+  geminiApiKey: string
+  geminiModel: string
+  keywordExtractionMode: 'page1' | 'full'
+  autoFetchTagsWithAiOnImport: boolean
 }
 
 export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
@@ -50,6 +56,10 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   advancedClassificationMode: 'off',
   crossrefContactEmail: '',
   semanticScholarApiKey: ENV_SEMANTIC_SCHOLAR_API_KEY,
+  geminiApiKey: '',
+  geminiModel: 'gemini-2.5-flash',
+  keywordExtractionMode: 'page1',
+  autoFetchTagsWithAiOnImport: false,
 }
 
 export function getBaseThemeMode(theme: StoredAppSettings['theme']): 'light' | 'dark' | 'system' {
@@ -115,6 +125,24 @@ function resolveSemanticScholarApiKey(value: string | undefined): string {
   return parsed || ENV_SEMANTIC_SCHOLAR_API_KEY
 }
 
+function resolveGeminiApiKey(value: string | undefined): string {
+  const parsed = parseValue(value, '').trim()
+  return parsed || ENV_GEMINI_API_KEY
+}
+
+export function hasCustomGeminiApiKey(value: Pick<StoredAppSettings, 'geminiApiKey'> | string | undefined) {
+  if (typeof value === 'string') return value.trim().length > 0
+  return (value?.geminiApiKey?.trim().length ?? 0) > 0
+}
+
+export function getResolvedGeminiApiKey(settings: Pick<StoredAppSettings, 'geminiApiKey'>) {
+  return settings.geminiApiKey.trim() || ENV_GEMINI_API_KEY
+}
+
+export function getResolvedGeminiModel(settings: Pick<StoredAppSettings, 'geminiApiKey' | 'geminiModel'>) {
+  return hasCustomGeminiApiKey(settings) ? settings.geminiModel : GEMINI_UNLIMITED_MODEL
+}
+
 export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppSettings> {
   if (!isDesktopApp) {
     if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS
@@ -126,6 +154,12 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       ...parsed,
       locale: parsed.locale ?? DEFAULT_APP_SETTINGS.locale,
       semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() || ENV_SEMANTIC_SCHOLAR_API_KEY,
+      geminiApiKey: parsed.geminiApiKey?.trim() ?? DEFAULT_APP_SETTINGS.geminiApiKey,
+      geminiModel: parsed.geminiModel ?? DEFAULT_APP_SETTINGS.geminiModel,
+      keywordExtractionMode: parsed.keywordExtractionMode ?? DEFAULT_APP_SETTINGS.keywordExtractionMode,
+      autoFetchTagsWithAiOnImport:
+        (parsed.autoFetchTagsWithAiOnImport ?? DEFAULT_APP_SETTINGS.autoFetchTagsWithAiOnImport) &&
+        hasCustomGeminiApiKey(parsed.geminiApiKey),
     }
   }
 
@@ -153,6 +187,17 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     ),
     crossrefContactEmail: parseValue(stored.crossrefContactEmail, DEFAULT_APP_SETTINGS.crossrefContactEmail),
     semanticScholarApiKey: resolveSemanticScholarApiKey(stored.semanticScholarApiKey),
+    geminiApiKey: parseValue(stored.geminiApiKey, DEFAULT_APP_SETTINGS.geminiApiKey).trim(),
+    geminiModel: parseValue(stored.geminiModel, DEFAULT_APP_SETTINGS.geminiModel),
+    keywordExtractionMode: parseValue(
+      stored.keywordExtractionMode,
+      DEFAULT_APP_SETTINGS.keywordExtractionMode,
+    ),
+    autoFetchTagsWithAiOnImport:
+      parseValue(
+        stored.autoFetchTagsWithAiOnImport,
+        DEFAULT_APP_SETTINGS.autoFetchTagsWithAiOnImport,
+      ) && hasCustomGeminiApiKey(parseValue(stored.geminiApiKey, DEFAULT_APP_SETTINGS.geminiApiKey)),
   }
 }
 
@@ -182,6 +227,10 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     advancedClassificationMode: JSON.stringify(settings.advancedClassificationMode),
     crossrefContactEmail: JSON.stringify(settings.crossrefContactEmail),
     semanticScholarApiKey: JSON.stringify(settings.semanticScholarApiKey),
+    geminiApiKey: JSON.stringify(settings.geminiApiKey),
+    geminiModel: JSON.stringify(settings.geminiModel),
+    keywordExtractionMode: JSON.stringify(settings.keywordExtractionMode),
+    autoFetchTagsWithAiOnImport: JSON.stringify(settings.autoFetchTagsWithAiOnImport),
   })
 
   if (typeof window !== 'undefined') {

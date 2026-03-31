@@ -222,10 +222,10 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
             </p>
           </Link>
 
-          <div className="flex flex-wrap gap-1 mb-3">
+          <div className="mb-3 flex flex-wrap gap-1 overflow-hidden">
             {doc.tags.slice(0, 3).map((tag) => (
-              <Badge key={tag} variant="secondary" className="text-xs">
-                {tag}
+              <Badge key={tag} variant="secondary" className="max-w-[120px] truncate text-xs">
+                <span className="truncate">{tag}</span>
               </Badge>
             ))}
           </div>

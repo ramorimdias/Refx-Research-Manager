@@ -6,6 +6,7 @@ import { loadAppSettings } from '@/lib/app-settings'
 import { buildDocumentMetadataSeed, enrichDocumentMetadataOnline } from '@/lib/services/document-enrichment-service'
 import { rebuildCitationRelationsForDocument } from '@/lib/services/document-citation-relation-service'
 import { classifyDocumentSemantics } from '@/lib/services/document-classification-service'
+import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
 import { extractLocalPdfMetadata, mergeExtractedMetadataIntoDocument, type LocalPdfMetadata } from '@/lib/services/document-metadata-service'
 import { runDocumentOcr } from '@/lib/services/document-ocr-service'
 import { generateDocumentTagSuggestions } from '@/lib/services/document-tag-suggestion-service'
@@ -23,6 +24,7 @@ type ProcessingContext = {
 
 export type DocumentIngestionOptions = {
   enableOcrFallback?: boolean
+  enableKeywordExtraction?: boolean
   enableOnlineMetadataEnrichment?: boolean
   enableSemanticClassification?: boolean
   semanticClassificationMode?: SemanticClassificationMode
@@ -50,6 +52,7 @@ export type DocumentIngestionResult = {
 
 const DEFAULT_PIPELINE_OPTIONS: ResolvedDocumentIngestionOptions = {
   enableOcrFallback: true,
+  enableKeywordExtraction: false,
   enableOnlineMetadataEnrichment: false,
   enableSemanticClassification: false,
   semanticClassificationMode: 'off',
@@ -65,6 +68,7 @@ export const DOCUMENT_INGESTION_STAGE_ORDER: DocumentProcessingStage[] = [
   'ocr_fallback',
   'save_document',
   'indexing',
+  'keyword_extraction',
   'citation_linking',
   'tag_suggestion',
   'semantic_classification',
@@ -486,6 +490,59 @@ async function runIndexingStage(
   }
 }
 
+async function runKeywordExtractionStage(
+  context: ProcessingContext,
+  options: ResolvedDocumentIngestionOptions,
+) {
+  const stage: DocumentProcessingStage = 'keyword_extraction'
+  const startedAt = new Date()
+  const document = context.document
+  const forced = isForced(stage, options)
+
+  if (!document || !context.documentId) {
+    return stageSkipped(stage, 'Document record is not available yet.')
+  }
+
+  if (!document.hasExtractedText && !document.hasOcrText) {
+    return stageSkipped(stage, 'Keyword extraction is waiting for extracted or OCR text.')
+  }
+
+  if (!options.enableKeywordExtraction && !forced) {
+    return stageSkipped(stage, 'Keyword extraction is disabled for this run.')
+  }
+
+  if (!forced) {
+    const existingKeywords = await repo.listDocumentKeywords(context.documentId)
+    if (existingKeywords.length > 0) {
+      return stageSkipped(stage, 'Document keywords already exist.')
+    }
+  }
+
+  try {
+    await updateStageStart(context.documentId, stage)
+    const result = await detectAndStoreDocumentKeywords(context.documentId)
+    await refreshContextDocument(context)
+
+    if (result.keywords.length === 0) {
+      return stageSkipped(stage, 'No author keywords were found and AI keyword extraction is not configured.')
+    }
+
+    if (result.source === 'author_list') {
+      return stageCompleted(stage, startedAt, 'Stored author-provided keywords from the first page.')
+    }
+
+    if (result.source === 'gemini_page1') {
+      return stageCompleted(stage, startedAt, 'Generated AI keywords from the first page.')
+    }
+
+    return stageCompleted(stage, startedAt, 'Generated AI keywords from the full document.')
+  } catch (error) {
+    const stageError = await updateStageFailure(context.documentId, stage, error)
+    await refreshContextDocument(context)
+    return stageFailed(stage, startedAt, stageError)
+  }
+}
+
 async function runTagSuggestionStage(
   context: ProcessingContext,
   options: ResolvedDocumentIngestionOptions,
@@ -693,6 +750,7 @@ async function runProcessingStages(
   pushStage(await runOcrFallbackStage(context, resolvedOptions))
   pushStage(await runSaveDocumentStage(context))
   pushStage(await runIndexingStage(context, resolvedOptions))
+  pushStage(await runKeywordExtractionStage(context, resolvedOptions))
   pushStage(await runCitationLinkingStage(context, resolvedOptions))
   pushStage(await runTagSuggestionStage(context, resolvedOptions))
   pushStage(await runSemanticClassificationStage(context, resolvedOptions))
