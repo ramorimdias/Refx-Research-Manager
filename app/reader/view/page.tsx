@@ -359,10 +359,17 @@ export default function ReaderViewPage() {
       }
     }
     initializedDocumentIdRef.current = document.id
-    if (document.readingStage === 'unread') {
+  }, [document?.id, document?.lastReadPage, pageFromRoute, setActiveDocument])
+
+  useEffect(() => {
+    if (!document || document.readingStage !== 'unread') return
+
+    const timeout = window.setTimeout(() => {
       void updateDocument(document.id, { readingStage: 'reading' })
-    }
-  }, [document?.id, document?.lastReadPage, document?.readingStage, pageFromRoute, setActiveDocument, updateDocument])
+    }, 120_000)
+
+    return () => window.clearTimeout(timeout)
+  }, [document?.id, document?.readingStage, updateDocument])
 
   useEffect(() => {
     if (!isDetachedReaderWindow || !isTauri() || !document?.title) return
@@ -456,9 +463,6 @@ export default function ReaderViewPage() {
   useEffect(() => {
     if (!id || !document) return
     const timeout = window.setTimeout(() => {
-      void updateDocument(id, {
-        readingStage: document.readingStage === 'unread' ? 'reading' : document.readingStage,
-      })
       void repo.updateDocumentMetadata(id, {
         lastReadPage: page,
         lastOpenedAt: new Date().toISOString(),

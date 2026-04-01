@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -39,6 +40,10 @@ function createKeywordGroup(operator: KeywordGroup['operator'] = 'AND', keywords
 
 function normalizeKeywords(keywords: string[]) {
   return Array.from(new Set(keywords.map((keyword) => keyword.trim()).filter(Boolean)))
+}
+
+function normalizeSelectedIds(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
 }
 
 function parseSimpleSearchTerms(query: string) {
@@ -136,6 +141,10 @@ function buildSearchQuery(groups: KeywordGroup[], groupJoinOperator: GroupJoinOp
   }
 }
 
+function parseSelectedLibraryIds(params: URLSearchParams) {
+  return normalizeSelectedIds(params.getAll('lib'))
+}
+
 function buildSimpleSearchQuery(query: string): DocumentSearchQuery | null {
   const terms = parseSimpleSearchTerms(query)
   if (terms.length === 0) return null
@@ -202,6 +211,7 @@ export default function SearchPage() {
   const initialMode = useMemo(() => parseQueryMode(new URLSearchParams(paramString)), [paramString])
   const initialGroupJoinOperator = useMemo(() => parseGroupJoinOperator(new URLSearchParams(paramString)), [paramString])
   const initialSimpleQuery = useMemo(() => parseInitialSimpleQuery(new URLSearchParams(paramString)), [paramString])
+  const initialSelectedLibraryIds = useMemo(() => parseSelectedLibraryIds(new URLSearchParams(paramString)), [paramString])
   const [queryMode, setQueryMode] = useState<'simple' | 'complex'>(initialMode)
   const [simpleQueryInput, setSimpleQueryInput] = useState(initialSimpleQuery)
   const [draftGroups, setDraftGroups] = useState<KeywordGroup[]>(initialGroups.length > 0 ? initialGroups : [createKeywordGroup('AND')])
@@ -214,11 +224,15 @@ export default function SearchPage() {
   const [searchStatus, setSearchStatus] = useState('')
   const searchRunId = useRef(0)
 
-  const selectedLibraryId = persistentSearch.selectedLibraryId
+  const selectedLibraryIds = persistentSearch.selectedLibraryIds
   const readingStage = persistentSearch.readingStage
   const metadataStatus = persistentSearch.metadataStatus
   const favoriteOnly = persistentSearch.favoriteOnly
   const flexibility = persistentSearch.flexibility
+  const effectiveSelectedLibraryIds = useMemo(
+    () => (selectedLibraryIds.length > 0 ? selectedLibraryIds : libraries.map((library) => library.id)),
+    [libraries, selectedLibraryIds],
+  )
   const executedGroups = useMemo(() => normalizeGroups(initialGroups), [initialGroups])
   const executedGroupJoinOperator = useMemo(() => initialGroupJoinOperator, [initialGroupJoinOperator])
   const executedSimpleQuery = useMemo(() => initialSimpleQuery.trim(), [initialSimpleQuery])
@@ -253,18 +267,19 @@ export default function SearchPage() {
       keywords: initialMode === 'simple' ? parseSimpleSearchTerms(initialSimpleQuery) : flattenKeywords(initialGroups),
       keywordGroups: initialMode === 'simple' ? [] : normalizeGroups(initialGroups),
       groupJoinOperator: initialMode === 'simple' ? 'AND' : initialGroupJoinOperator,
+      selectedLibraryIds: initialSelectedLibraryIds,
     })
-  }, [initialGroupJoinOperator, initialGroups, initialMode, initialSimpleQuery, setGlobalSearchQuery, setPersistentSearch])
+  }, [initialGroupJoinOperator, initialGroups, initialMode, initialSelectedLibraryIds, initialSimpleQuery, setGlobalSearchQuery, setPersistentSearch])
 
   const filteredDocuments = useMemo(() => {
     return documents.filter((document) => {
-      if (selectedLibraryId !== 'all' && document.libraryId !== selectedLibraryId) return false
+      if (effectiveSelectedLibraryIds.length > 0 && !effectiveSelectedLibraryIds.includes(document.libraryId)) return false
       if (readingStage !== 'all' && document.readingStage !== readingStage) return false
       if (metadataStatus !== 'all' && document.metadataStatus !== metadataStatus) return false
       if (favoriteOnly && !document.favorite) return false
       return true
     })
-  }, [documents, favoriteOnly, metadataStatus, readingStage, selectedLibraryId])
+  }, [documents, effectiveSelectedLibraryIds, favoriteOnly, metadataStatus, readingStage])
   const searchableDocumentIds = useMemo(() => filteredDocuments.map((document) => document.id), [filteredDocuments])
   const searchableDocumentsById = useMemo(() => new Map(filteredDocuments.map((document) => [document.id, document])), [filteredDocuments])
   const executedSearchQuery = useMemo(() => {
@@ -275,13 +290,47 @@ export default function SearchPage() {
     return buildSearchQuery(executedGroups, executedGroupJoinOperator)
   }, [executedGroupJoinOperator, executedGroups, executedSimpleQuery, queryMode])
 
+  const buildQueryParams = ({
+    mode,
+    query,
+    groups,
+    groupJoin,
+    libraryIds,
+  }: {
+    mode: 'simple' | 'complex'
+    query?: string
+    groups?: KeywordGroup[]
+    groupJoin?: GroupJoinOperator
+    libraryIds?: string[]
+  }) => {
+    const nextParams = new URLSearchParams()
+    nextParams.set('mode', mode)
+    const normalizedLibraryIds = normalizeSelectedIds(libraryIds ?? effectiveSelectedLibraryIds)
+    for (const libraryId of normalizedLibraryIds) {
+      nextParams.append('lib', libraryId)
+    }
+
+    if (mode === 'simple') {
+      const trimmedQuery = query?.trim() ?? ''
+      if (trimmedQuery) {
+        nextParams.set('q', trimmedQuery)
+      }
+      return nextParams
+    }
+
+    const preparedGroups = normalizeGroups(groups ?? [])
+    if (preparedGroups.length > 0) {
+      nextParams.set('go', groupJoin ?? draftGroupJoinOperator)
+      for (const group of preparedGroups) {
+        nextParams.append('g', encodeGroupParam(group))
+      }
+    }
+    return nextParams
+  }
+
   const applySimpleSearch = (nextQuery: string, navigation: 'push' | 'replace' = 'replace') => {
     const trimmedQuery = nextQuery.trim()
-    const nextParams = new URLSearchParams()
-    nextParams.set('mode', 'simple')
-    if (trimmedQuery) {
-      nextParams.set('q', trimmedQuery)
-    }
+    const nextParams = buildQueryParams({ mode: 'simple', query: trimmedQuery })
 
     setGlobalSearchQuery(trimmedQuery)
     setPersistentSearch({
@@ -454,13 +503,28 @@ export default function SearchPage() {
       return
     }
 
-    const nextParams = new URLSearchParams()
-    nextParams.set('mode', 'complex')
-    nextParams.set('go', draftGroupJoinOperator)
-    for (const group of preparedGroups) {
-      nextParams.append('g', encodeGroupParam(group))
-    }
+    const nextParams = buildQueryParams({
+      mode: 'complex',
+      groups: preparedGroups,
+      groupJoin: draftGroupJoinOperator,
+    })
     router.push(`/search?${nextParams.toString()}`)
+  }
+
+  const updateSelectedLibraries = (nextLibraryIds: string[]) => {
+    const normalizedLibraryIds = normalizeSelectedIds(nextLibraryIds)
+    setPersistentSearch({ selectedLibraryIds: normalizedLibraryIds })
+
+    const nextParams = queryMode === 'simple'
+      ? buildQueryParams({ mode: 'simple', query: executedSimpleQuery, libraryIds: normalizedLibraryIds })
+      : buildQueryParams({
+          mode: 'complex',
+          groups: executedGroups,
+          groupJoin: executedGroupJoinOperator,
+          libraryIds: normalizedLibraryIds,
+        })
+
+    router.replace(nextParams.toString() ? `/search?${nextParams.toString()}` : '/search')
   }
 
   const switchMode = (nextMode: 'simple' | 'complex') => {
@@ -664,19 +728,49 @@ export default function SearchPage() {
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">{t('searchPage.library')}</label>
-                <Select value={selectedLibraryId} onValueChange={(value) => setPersistentSearch({ selectedLibraryId: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder={t('notesPage.allLibraries')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t('notesPage.allLibraries')}</SelectItem>
-                    {libraries.map((library) => (
-                      <SelectItem key={library.id} value={library.id}>
-                        {library.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="space-y-2 rounded-xl bg-muted/55 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => updateSelectedLibraries(libraries.map((library) => library.id))}
+                    >
+                      Select all
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => updateSelectedLibraries([])}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {libraries.map((library) => {
+                      const checked = effectiveSelectedLibraryIds.includes(library.id)
+                      return (
+                        <label
+                          key={library.id}
+                          className="flex items-center gap-3 rounded-lg bg-background/70 px-3 py-2 text-sm"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(nextChecked) => {
+                              updateSelectedLibraries(
+                                nextChecked
+                                  ? [...effectiveSelectedLibraryIds, library.id]
+                                  : effectiveSelectedLibraryIds.filter((value) => value !== library.id),
+                              )
+                            }}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{library.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-2">

@@ -48,6 +48,17 @@ function normalizeWhitespace(input: string) {
   return input.replace(/\s+/g, ' ').trim()
 }
 
+export function hasUsableMetadataTitle(title?: string | null) {
+  const normalized = normalizeWhitespace(title ?? '')
+  if (!normalized) return false
+
+  const alphanumeric = normalized.replace(/[^a-z0-9]/gi, '')
+  if (!alphanumeric) return false
+
+  const digitCount = (alphanumeric.match(/\d/g) ?? []).length
+  return digitCount / alphanumeric.length < 0.7
+}
+
 function cleanPdfField(value: string) {
   return normalizeWhitespace(
     value
@@ -66,10 +77,30 @@ function splitAuthors(raw?: string) {
     .filter(Boolean)
 }
 
-function parseDoi(input?: string) {
+export function extractNormalizedDoi(input?: string) {
   if (!input) return undefined
-  const match = input.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/i)?.[0]
-  return match?.replace(/[).,;:\]}]+$/, '')
+  const match = input.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i)?.[0]
+  if (!match) return undefined
+
+  const cleaned = match
+    .replace(/[)\]}>,;:"']+$/g, '')
+    .replace(/(?:https?:\/\/\S+|www\.\S+)$/i, '')
+    .replace(/(?:fig|table|vol|issue|pages?)\.?$/i, '')
+    .trim()
+
+  const slashIndex = cleaned.indexOf('/')
+  if (slashIndex <= 0) return undefined
+
+  const prefix = cleaned.slice(0, slashIndex)
+  let suffix = cleaned.slice(slashIndex + 1)
+  suffix = suffix.replace(/[^A-Z0-9\-._;()/:]+$/i, '')
+  suffix = suffix.replace(/[-._;:/()]+$/g, '')
+  if (!/^10\.\d{4,9}$/i.test(prefix) || suffix.length < 3) return undefined
+  return `${prefix}/${suffix}`
+}
+
+function parseDoi(input?: string) {
+  return extractNormalizedDoi(input)
 }
 
 function parseYear(input?: string) {
@@ -264,7 +295,7 @@ export function deriveMetadataStatus(input: {
   doi?: string
 }): MetadataStatus {
   const signalCount = [
-    input.title ? 1 : 0,
+    hasUsableMetadataTitle(input.title) ? 1 : 0,
     input.authors && input.authors.length > 0 ? 1 : 0,
     input.year ? 1 : 0,
     input.doi ? 1 : 0,

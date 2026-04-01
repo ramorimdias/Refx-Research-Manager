@@ -843,7 +843,7 @@ export async function ingestImportedPdfDocument(input: ImportPdfDocumentInput, o
     stages.push(importStage)
     options?.onStageUpdate?.(importStage)
 
-    const pipelineResult = await runProcessingStages(
+    void runProcessingStages(
       {
         document: created,
         documentId: created.id,
@@ -851,11 +851,15 @@ export async function ingestImportedPdfDocument(input: ImportPdfDocumentInput, o
         sourcePath: input.sourcePath,
       },
       options,
-    )
+    ).catch((error) => {
+      console.error(`Background processing failed for "${input.sourcePath}":`, error)
+    })
 
     return {
-      ...pipelineResult,
-      stages: [...stages, ...pipelineResult.stages],
+      document: created,
+      documentId: created.id,
+      stages,
+      success: true,
     } satisfies DocumentIngestionResult
   } catch (error) {
     const message = normalizeErrorMessage(error)

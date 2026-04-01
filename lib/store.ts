@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import { isTauri } from '@/lib/tauri/client'
 import { bootstrapDesktop, importPdfs, type ImportProgressUpdate } from '@/lib/services/desktop-service'
-import { deriveMetadataStatus, markMetadataFieldProvenanceAsUser, markMetadataFieldsAsUserEdited, parseMetadataProvenance, parseMetadataUserEditedFields } from '@/lib/services/document-metadata-service'
+import { deriveMetadataStatus, hasUsableMetadataTitle, markMetadataFieldProvenanceAsUser, markMetadataFieldsAsUserEdited, parseMetadataProvenance, parseMetadataUserEditedFields } from '@/lib/services/document-metadata-service'
 import { mergeExtractedMetadataIntoDocument, type LocalPdfMetadata } from '@/lib/services/document-metadata-service'
 import { normalizeReadingStage } from '@/lib/services/document-reading-stage'
 import { parseDocumentClassification } from '@/lib/services/document-classification-service'
@@ -513,7 +513,7 @@ function compareValues(a: Document, b: Document, field: DocumentSort['field']) {
 }
 
 function getLibraryMetadataFilterState(document: Document): LibraryMetadataState {
-  const hasTitle = document.title.trim().length > 0
+  const hasTitle = hasUsableMetadataTitle(document.title)
   const hasAuthors = document.authors.length > 0
   const hasYear = typeof document.year === 'number'
   const hasDoi = (document.doi ?? '').trim().length > 0
@@ -530,7 +530,7 @@ function defaultPersistentSearch(): PersistentSearchState {
     keywords: [],
     keywordGroups: [],
     groupJoinOperator: 'AND',
-    selectedLibraryId: 'all',
+    selectedLibraryIds: [],
     readingStage: 'all',
     metadataStatus: 'all',
     favoriteOnly: false,
@@ -657,7 +657,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const targetLibraryId = activeLibraryId ?? libraries[0]?.id ?? null
     if (!isDesktopApp || !targetLibraryId) return 0
 
-    const imported = await importPdfs(targetLibraryId, paths, onProgress)
+    const imported = await importPdfs(targetLibraryId, paths, async (update) => {
+      onProgress?.(update)
+      if (update.status === 'completed') {
+        await get().refreshData()
+      }
+    })
     await get().refreshData()
     return imported.length
   },

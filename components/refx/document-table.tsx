@@ -33,6 +33,7 @@ import { DocumentBulkActions } from './document-bulk-actions'
 import { useAppStore } from '@/lib/store'
 import { DocumentActions, DocumentContextMenu } from './document-actions'
 import { useT } from '@/lib/localization'
+import { hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
 
 interface DocumentTableProps {
   documents: Document[]
@@ -76,7 +77,7 @@ const READING_STAGE_OPTIONS: Array<{ value: ReadingStage; label: string }> = [
 ]
 
 function getTableMetadataState(document: Document) {
-  const hasTitle = document.title.trim().length > 0
+  const hasTitle = hasUsableMetadataTitle(document.title)
   const hasAuthors = document.authors.length > 0
   const hasYear = typeof document.year === 'number'
   const hasDoi = (document.doi ?? '').trim().length > 0

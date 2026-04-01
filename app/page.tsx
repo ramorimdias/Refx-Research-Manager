@@ -12,6 +12,14 @@ import { loadAppSettings } from '@/lib/app-settings'
 import { useT } from '@/lib/localization'
 
 function getDocumentHref(document: ReturnType<typeof useAppStore.getState>['documents'][number]) {
+  if (document.documentType === 'pdf') {
+    const params = new URLSearchParams({ id: document.id })
+    if (document.lastReadPage && document.lastReadPage > 0) {
+      params.set('page', String(document.lastReadPage))
+    }
+    return `/reader/view?${params.toString()}`
+  }
+
   return document.documentType === 'my_work'
     ? `/documents?id=${document.id}`
     : document.documentType === 'physical_book'
@@ -151,6 +159,15 @@ export default function HomePage() {
       .slice(0, 10)
   }, [annotations, documents, libraries, notes, t])
 
+  const recentlyOpened = useMemo(
+    () =>
+      [...documents]
+        .filter((document) => document.lastOpenedAt)
+        .sort((left, right) => (right.lastOpenedAt?.getTime() ?? 0) - (left.lastOpenedAt?.getTime() ?? 0))
+        .slice(0, 8),
+    [documents],
+  )
+
   const greeting = useMemo(() => {
     const greetings = userName
       ? [
@@ -232,59 +249,102 @@ export default function HomePage() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Clock className="h-4 w-4" />
-            {t('home.recentActivity')}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {activities.length > 0 ? (
-            <div className="space-y-2">
-              {activities.map((activity) => {
-                const Icon = activity.icon
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Clock className="h-4 w-4" />
+              {t('home.recentActivity')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {activities.length > 0 ? (
+              <div className="space-y-2">
+                {activities.map((activity) => {
+                  const Icon = activity.icon
 
-                return (
-                  <Link
-                    key={activity.id}
-                    href={activity.href}
-                    className="block rounded-xl border border-border/70 p-3 transition hover:bg-muted/30"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground">
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="font-medium text-foreground">{activity.title}</div>
-                            <div className="truncate text-sm text-muted-foreground">{activity.detail}</div>
+                  return (
+                    <Link
+                      key={activity.id}
+                      href={activity.href}
+                      className="block rounded-xl border border-border/70 p-3 transition hover:bg-muted/30"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground">
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium text-foreground">{activity.title}</div>
+                              <div className="truncate text-sm text-muted-foreground">{activity.detail}</div>
+                            </div>
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {formatRelativeTime(activity.occurredAt, t)}
+                            </span>
                           </div>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {formatRelativeTime(activity.occurredAt, t)}
-                          </span>
                         </div>
                       </div>
+                    </Link>
+                  )
+                })}
+              </div>
+            ) : (
+              <EmptyState
+                icon={Clock}
+                title={t('home.noActivity')}
+                description={t('home.noActivityDescription')}
+                action={
+                  <Button asChild>
+                    <Link href="/libraries">{t('home.openLibraries')}</Link>
+                  </Button>
+                }
+              />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ArrowRight className="h-4 w-4" />
+              {t('readerIndex.recentlyOpened')}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {recentlyOpened.length > 0 ? (
+              <div className="space-y-2">
+                {recentlyOpened.map((document) => (
+                  <Link
+                    key={`recent-opened-${document.id}`}
+                    href={getDocumentHref(document)}
+                    className="block rounded-xl border border-border/70 p-3 transition hover:bg-muted/30"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-foreground">{document.title}</div>
+                        <div className="truncate text-sm text-muted-foreground">
+                          {document.authors[0] || t('searchPage.unknownAuthor')}
+                          {document.lastReadPage ? ` - ${t('searchPage.page', { page: document.lastReadPage })}` : ''}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {document.lastOpenedAt ? formatRelativeTime(document.lastOpenedAt, t) : ''}
+                      </span>
                     </div>
                   </Link>
-                )
-              })}
-            </div>
-          ) : (
-            <EmptyState
-              icon={Clock}
-              title={t('home.noActivity')}
-              description={t('home.noActivityDescription')}
-              action={
-                <Button asChild>
-                  <Link href="/libraries">{t('home.openLibraries')}</Link>
-                </Button>
-              }
-            />
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                icon={ArrowRight}
+                title={t('readerIndex.recentlyOpened')}
+                description={t('home.noActivityDescription')}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

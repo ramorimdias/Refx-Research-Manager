@@ -2,8 +2,7 @@
 
 import * as repo from '@/lib/repositories/local-db'
 import { getDocumentPlainText } from '@/lib/services/document-text-service'
-
-const DOI_PATTERN = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi
+import { extractNormalizedDoi } from '@/lib/services/document-metadata-service'
 
 function normalizeDoi(input: string) {
   return input
@@ -41,8 +40,8 @@ export async function scanDocumentForDoiReferences(
   const ownDoi = normalizeDoi(document.doi ?? '')
   const found = new Set<string>()
 
-  for (const match of text.matchAll(DOI_PATTERN)) {
-    const normalized = normalizeDoi(match[0] ?? '')
+  for (const match of text.matchAll(/10\.\d{4,9}\/[-._;()/:A-Z0-9]+/gi)) {
+    const normalized = normalizeDoi(extractNormalizedDoi(match[0] ?? '') ?? '')
     if (!normalized || normalized === ownDoi || !isCompleteDoi(normalized)) continue
     found.add(normalized)
   }

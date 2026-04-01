@@ -9,6 +9,14 @@ import { EmptyState } from '@/components/refx/common'
 import { useAppStore } from '@/lib/store'
 import { useT } from '@/lib/localization'
 
+function buildReaderHref(document: ReturnType<typeof useAppStore.getState>['documents'][number]) {
+  const params = new URLSearchParams({ id: document.id })
+  if (document.lastReadPage && document.lastReadPage > 0) {
+    params.set('page', String(document.lastReadPage))
+  }
+  return `/reader/view?${params.toString()}`
+}
+
 export default function ReaderIndexPage() {
   const t = useT()
   const { documents } = useAppStore()
@@ -63,7 +71,7 @@ export default function ReaderIndexPage() {
           </h2>
           <div className="space-y-3">
             {continueReading.map((document) => (
-              <Link key={document.id} href={`/reader/view?id=${document.id}`}>
+              <Link key={document.id} href={buildReaderHref(document)}>
                 <Card className="transition-colors hover:border-primary/50">
                   <CardContent className="flex items-center gap-4 p-4">
                     <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-primary/10">
@@ -77,7 +85,9 @@ export default function ReaderIndexPage() {
                       </p>
                     </div>
                     <span className="shrink-0 text-sm text-muted-foreground">
-                      {t('readerIndex.continueLabel')}
+                      {document.lastReadPage
+                        ? `${t('readerIndex.continueLabel')}, ${t('searchPage.page', { page: document.lastReadPage })}`
+                        : t('readerIndex.continueLabel')}
                     </span>
                     <ArrowRight className="h-5 w-5 text-muted-foreground" />
                   </CardContent>
@@ -96,7 +106,7 @@ export default function ReaderIndexPage() {
           </h2>
           <div className="grid gap-3 sm:grid-cols-2">
             {recentDocs.map((document) => (
-              <Link key={document.id} href={`/reader/view?id=${document.id}`}>
+              <Link key={document.id} href={buildReaderHref(document)}>
                 <Card className="h-full transition-colors hover:border-primary/50">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-3">
@@ -110,6 +120,11 @@ export default function ReaderIndexPage() {
                           {document.authors.length > 1 && ' et al.'}
                           {document.year && ` (${document.year})`}
                         </p>
+                        {document.lastReadPage ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {`${t('readerIndex.continueLabel')}, ${t('searchPage.page', { page: document.lastReadPage })}`}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                   </CardContent>

@@ -50,7 +50,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { EmptyState, StarRating, TagChip } from '@/components/refx/common'
+import { EmptyState, MetadataStatusBadge, StarRating, TagChip } from '@/components/refx/common'
 import {
   buildDocumentMetadataSeed,
   createMetadataCandidateFromBibtex,
@@ -61,6 +61,7 @@ import {
 } from '@/lib/services/document-enrichment-service'
 import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
 import { scanDocumentForDoiReferences } from '@/lib/services/document-doi-reference-service'
+import { hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
 import { loadPdfJsModule } from '@/lib/services/document-processing'
 import { useAppStore } from '@/lib/store'
 import { convertFileSrc, isTauri, open as openFileDialog, readFile } from '@/lib/tauri/client'
@@ -669,6 +670,18 @@ export default function DocumentDetailPage() {
     return false
   }, [document, savePayload])
 
+  const libraryMetadataState = useMemo(() => {
+    const hasTitle = hasUsableMetadataTitle(savePayload.title)
+    const hasAuthors = savePayload.authors.length > 0
+    const hasYear = typeof savePayload.year === 'number'
+    const hasDoi = (savePayload.doi ?? '').trim().length > 0
+
+    if (hasTitle && hasAuthors && hasYear && hasDoi) return 'complete'
+    if (hasTitle && hasAuthors && hasYear && !hasDoi) return 'partial'
+    if (hasDoi) return 'partial'
+    return 'missing'
+  }, [savePayload])
+
   if (!id) {
     return <div className="p-6">Missing document id.</div>
   }
@@ -696,6 +709,15 @@ export default function DocumentDetailPage() {
     setIsSaving(true)
     try {
       await updateDocument(document.id, savePayload)
+      setTitle(savePayload.title)
+      setAuthors(savePayload.authors.join(', '))
+      setYear(savePayload.year ? String(savePayload.year) : '')
+      setDoi(savePayload.doi ?? '')
+      setIsbn(savePayload.isbn ?? '')
+      setPublisher(savePayload.publisher ?? '')
+      setCitationKey(savePayload.citationKey)
+      setAbstract(savePayload.abstract ?? '')
+      setCoverImagePath(savePayload.coverImagePath ?? '')
     } finally {
       setIsSaving(false)
     }
@@ -1336,7 +1358,10 @@ export default function DocumentDetailPage() {
           <Collapsible open={detailsExpanded} onOpenChange={setDetailsExpanded}>
             <CardHeader>
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
-                <CardTitle>Edit Details</CardTitle>
+                <div className="flex items-center gap-3">
+                  <CardTitle>Edit Details</CardTitle>
+                  <MetadataStatusBadge status={libraryMetadataState} />
+                </div>
                 <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${detailsExpanded ? 'rotate-180' : ''}`} />
               </CollapsibleTrigger>
             </CardHeader>

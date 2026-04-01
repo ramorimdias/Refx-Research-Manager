@@ -155,7 +155,7 @@ export function AppSidebar() {
                     key={item.href}
                     href={item.href}
                     className={cn(
-                      'grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors',
+                      'grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors',
                       isActive
                         ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]'
                         : 'text-sidebar-foreground/62 hover:bg-sidebar-accent/65 hover:text-sidebar-foreground'
@@ -205,7 +205,7 @@ export function AppSidebar() {
                           router.push('/libraries')
                         }}
                         className={cn(
-                          'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors',
+                          'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors',
                           activeLibraryId === library.id
                             ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                             : 'text-sidebar-foreground/62 hover:bg-sidebar-accent/65 hover:text-sidebar-foreground'

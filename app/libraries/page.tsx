@@ -355,6 +355,17 @@ export default function LibrariesPage() {
   }, [activeLibraryId, loadLibraryDocuments])
 
   useEffect(() => {
+    if (!activeLibraryId && libraries.length > 0) {
+      setActiveLibrary(libraries[0]?.id ?? null)
+      return
+    }
+
+    if (activeLibraryId && libraries.every((library) => library.id !== activeLibraryId)) {
+      setActiveLibrary(libraries[0]?.id ?? null)
+    }
+  }, [activeLibraryId, libraries, setActiveLibrary])
+
+  useEffect(() => {
     setCurrentPage(1)
   }, [paginationSessionKey, setCurrentPage])
 
@@ -736,14 +747,13 @@ export default function LibrariesPage() {
               </Button>
 
               <Select
-                value={activeLibraryId || 'all'}
-                onValueChange={(val) => setActiveLibrary(val === 'all' ? null : val)}
+                value={activeLibraryId || libraries[0]?.id || ''}
+                onValueChange={(val) => setActiveLibrary(val)}
               >
                 <SelectTrigger className="w-60">
-                  <SelectValue placeholder={t('libraries.allLibraries')} />
+                  <SelectValue placeholder={activeLibrary?.name ?? libraries[0]?.name ?? ''} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">{t('libraries.allLibraries')}</SelectItem>
                   {libraries.map((lib) => (
                     <SelectItem key={lib.id} value={lib.id}>
                       <div className="flex items-center gap-2">
