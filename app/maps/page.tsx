@@ -564,6 +564,7 @@ function MapsPageContent() {
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null)
   const [isReheatingLayout, setIsReheatingLayout] = useState(false)
   const [isTopBarCollapsed, setIsTopBarCollapsed] = useState(false)
+  const [isDarkMode, setIsDarkMode] = useState(false)
   const [isSaveViewDialogOpen, setIsSaveViewDialogOpen] = useState(false)
   const [isEditingViewDialogOpen, setIsEditingViewDialogOpen] = useState(false)
   const [graphViewDraft, setGraphViewDraft] = useState<GraphViewDraft>(DEFAULT_GRAPH_VIEW_DRAFT)
@@ -576,6 +577,18 @@ function MapsPageContent() {
 
   useEffect(() => {
     setGraphPreferences(readStoredGraphPreferences())
+  }, [])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    const root = document.documentElement
+    const updateTheme = () => setIsDarkMode(root.classList.contains('dark'))
+    updateTheme()
+
+    const observer = new MutationObserver(updateTheme)
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
@@ -1718,7 +1731,7 @@ function MapsPageContent() {
           setPendingConnectionCursor(null)
         }}
       >
-        <div className="relative h-full min-h-0 overflow-hidden">
+        <div className="relative h-full min-h-0 overflow-hidden bg-muted/55 dark:bg-[#141821]">
           {visibleDocuments.length === 0 ? (
             <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
               <Card className="border-dashed bg-card/92 p-4 shadow-sm">
@@ -1819,7 +1832,7 @@ function MapsPageContent() {
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             connectionRadius={72}
-            className="h-full"
+            className="h-full bg-transparent"
             proOptions={{ hideAttribution: true }}
           >
             <MiniMap
@@ -1827,10 +1840,15 @@ function MapsPageContent() {
               zoomable
               nodeStrokeColor={(node) => node.data?.borderColor ?? '#cbd5e1'}
               nodeColor={(node) => node.data?.fillColor ?? '#ffffff'}
-              maskColor="rgba(241,245,249,0.72)"
+              maskColor={isDarkMode ? 'rgba(20,24,33,0.78)' : 'rgba(241,245,249,0.72)'}
             />
             <Controls />
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#cbd5e1" />
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={20}
+              size={1}
+              color={isDarkMode ? '#334155' : '#cbd5e1'}
+            />
           </ReactFlow>
           {contextMenu ? (
             <div

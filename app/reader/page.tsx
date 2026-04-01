@@ -69,13 +69,13 @@ export default function ReaderIndexPage() {
             <Clock className="h-5 w-5 text-primary" />
             {t('readerIndex.continueReading')}
           </h2>
-          <div className="space-y-3">
+          <div className="space-y-5">
             {continueReading.map((document) => (
-              <Link key={document.id} href={buildReaderHref(document)}>
+              <Link key={document.id} href={buildReaderHref(document)} className="block">
                 <Card className="transition-colors hover:border-primary/50">
-                  <CardContent className="flex items-center gap-4 p-4">
-                    <div className="flex h-14 w-14 items-center justify-center rounded-lg bg-primary/10">
-                      <FileText className="h-7 w-7 text-primary" />
+                  <CardContent className="flex items-center gap-4 p-3.5">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10">
+                      <FileText className="h-5 w-5 text-primary" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <h3 className="truncate font-medium">{document.title}</h3>

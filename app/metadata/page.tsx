@@ -274,7 +274,7 @@ export default function MetadataWorkspacePage() {
                 setSelectedLibraryId(value)
                 setCurrentIndex(0)
               }}>
-                <SelectTrigger className="mt-1.5">
+                <SelectTrigger className="mt-1.5 border-transparent bg-card/90 shadow-sm">
                   <SelectValue placeholder={t('metadataPage.selectLibrary')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -289,7 +289,8 @@ export default function MetadataWorkspacePage() {
 
             <div className="flex items-center gap-2 self-end">
               <Button
-                variant={mode === 'fetch_possible' ? 'default' : 'outline'}
+                variant={mode === 'fetch_possible' ? 'secondary' : 'outline'}
+                className="rounded-full"
                 onClick={() => {
                   setMode('fetch_possible')
                   setCurrentIndex(0)
@@ -301,7 +302,8 @@ export default function MetadataWorkspacePage() {
                 </Badge>
               </Button>
               <Button
-                variant={mode === 'missing' ? 'default' : 'outline'}
+                variant={mode === 'missing' ? 'secondary' : 'outline'}
+                className="rounded-full"
                 onClick={() => {
                   setMode('missing')
                   setCurrentIndex(0)

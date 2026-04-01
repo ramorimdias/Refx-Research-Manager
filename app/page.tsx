@@ -270,13 +270,13 @@ export default function HomePage() {
                       className="block rounded-xl border border-border/70 p-3 transition hover:bg-muted/30"
                     >
                       <div className="flex items-start gap-3">
-                        <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground">
+                      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/70 text-muted-foreground">
                           <Icon className="h-4 w-4" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="font-medium text-foreground">{activity.title}</div>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate font-medium text-foreground">{activity.title}</div>
                               <div className="truncate text-sm text-muted-foreground">{activity.detail}</div>
                             </div>
                             <span className="shrink-0 text-xs text-muted-foreground">

@@ -78,8 +78,8 @@ export function FilterPanel() {
   if (!isOpen) return null
 
   return (
-    <div className="w-64 shrink-0 border-r border-border/80 bg-background/86 backdrop-blur">
-      <div className="flex items-center justify-between border-b border-border/80 px-4 py-3">
+    <div className="w-64 shrink-0 bg-muted/65 backdrop-blur">
+      <div className="flex items-center justify-between border-b border-transparent px-4 py-3">
         <div className="flex items-center gap-2">
           <Filter className="h-4 w-4 text-muted-foreground" />
           <span className="font-medium">{t('libraries.filters')}</span>
@@ -97,10 +97,11 @@ export function FilterPanel() {
       </div>
 
       <div className="space-y-4 p-4">
-        <div className="space-y-3 rounded-xl border border-border/70 bg-card/70 p-3">
+        <div className="space-y-3 rounded-xl border border-transparent bg-card/80 p-3 shadow-sm">
           <div className="flex items-center space-x-2">
             <Checkbox
               id="favorite"
+              className="dark:border-slate-500 dark:bg-slate-700/80 dark:data-[state=checked]:border-primary dark:data-[state=checked]:bg-primary"
               checked={filters.favorite || false}
               onCheckedChange={(checked) => setFilters({ ...filters, favorite: checked ? true : undefined })}
             />
@@ -112,6 +113,7 @@ export function FilterPanel() {
           <div className="flex items-center space-x-2">
             <Checkbox
               id="hasComments"
+              className="dark:border-slate-500 dark:bg-slate-700/80 dark:data-[state=checked]:border-primary dark:data-[state=checked]:bg-primary"
               checked={filters.hasComments || false}
               onCheckedChange={(checked) => setFilters({ ...filters, hasComments: checked ? true : undefined })}
             />
@@ -123,6 +125,7 @@ export function FilterPanel() {
           <div className="flex items-center space-x-2">
             <Checkbox
               id="hasNotes"
+              className="dark:border-slate-500 dark:bg-slate-700/80 dark:data-[state=checked]:border-primary dark:data-[state=checked]:bg-primary"
               checked={filters.hasNotes || false}
               onCheckedChange={(checked) => setFilters({ ...filters, hasNotes: checked ? true : undefined })}
             />
@@ -140,11 +143,12 @@ export function FilterPanel() {
             {t('searchPage.readingStage')}
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
+          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-transparent bg-card/80 p-3 shadow-sm">
             {readingStages.map((stage) => (
               <div key={stage.value} className="flex items-center space-x-2">
                 <Checkbox
                   id={`stage-${stage.value}`}
+                  className="dark:border-slate-500 dark:bg-slate-700/80 dark:data-[state=checked]:border-primary dark:data-[state=checked]:bg-primary"
                   checked={filters.readingStage?.includes(stage.value) || false}
                   onCheckedChange={() => toggleReadingStage(stage.value)}
                 />
@@ -163,11 +167,12 @@ export function FilterPanel() {
             {t('searchPage.metadataQuality')}
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
+          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-transparent bg-card/80 p-3 shadow-sm">
             {metadataStatuses.map((status) => (
               <div key={status.value} className="flex items-center space-x-2">
                 <Checkbox
                   id={`meta-${status.value}`}
+                  className="dark:border-slate-500 dark:bg-slate-700/80 dark:data-[state=checked]:border-primary dark:data-[state=checked]:bg-primary"
                   checked={filters.metadataStatus?.includes(status.value) || false}
                   onCheckedChange={() => toggleMetadataStatus(status.value)}
                 />
@@ -190,12 +195,13 @@ export function FilterPanel() {
             {t('libraries.tags')}
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-border/70 bg-card/70 p-3">
+          <CollapsibleContent className="mt-3 space-y-2 rounded-xl border border-transparent bg-card/80 p-3 shadow-sm">
             {availableTags.length > 0 ? (
               availableTags.map((tag) => (
                 <div key={tag.name} className="flex min-w-0 items-center space-x-2 overflow-hidden">
                   <Checkbox
                     id={`tag-${tag.name}`}
+                    className="dark:border-slate-500 dark:bg-slate-700/80 dark:data-[state=checked]:border-primary dark:data-[state=checked]:bg-primary"
                     checked={filters.tags?.includes(tag.name) || false}
                     onCheckedChange={() => toggleTag(tag.name)}
                   />

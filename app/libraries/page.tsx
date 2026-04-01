@@ -8,6 +8,7 @@ import {
   List,
   Table2,
   SortAsc,
+  SortDesc,
   Upload,
   FolderOpen,
   Pencil,
@@ -31,6 +32,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
@@ -63,7 +70,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useAppStore, useFilteredDocuments } from '@/lib/store'
-import { DocumentTable } from '@/components/refx/document-table'
+import { DocumentTable, DocumentTableColumnControls } from '@/components/refx/document-table'
 import { FilterPanel } from '@/components/refx/filter-panel'
 import { DocumentCard } from '@/components/refx/document-card'
 import { useDocumentViewFlags } from '@/lib/hooks/use-document-view-flags'
@@ -158,6 +165,15 @@ function buildPaginationItems(currentPage: number, totalPages: number) {
 function fileNameFromPath(path?: string) {
   if (!path) return ''
   return path.split(/[\\/]/).pop() ?? path
+}
+
+const SORT_FIELD_LABELS: Record<SortField, string> = {
+  addedAt: 'sortAdded',
+  lastOpenedAt: 'sortOpened',
+  title: 'sortTitle',
+  authors: 'sortAuthors',
+  year: 'sortYear',
+  rating: 'sortRating',
 }
 
 function buildDuplicateGroups(
@@ -585,6 +601,16 @@ export default function LibrariesPage() {
     }
   }
 
+  const handleSortFieldSelect = (field: SortField) => {
+    setSort({
+      field,
+      direction:
+        sort.field === field
+          ? (sort.direction === 'asc' ? 'desc' : 'asc')
+          : sort.direction,
+    })
+  }
+
   const handleCreatePhysicalBook = async () => {
     const title = physicalBookForm.title.trim()
     const libraryId = activeLibraryId ?? libraries[0]?.id
@@ -730,11 +756,11 @@ export default function LibrariesPage() {
 
   return (
     <>
-      <div className="flex h-full">
+      <div className="flex h-full bg-muted/65">
         {!filtersCollapsed && <FilterPanel />}
 
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center justify-between gap-4 border-b border-border/80 bg-background/92 px-5 py-4 backdrop-blur">
+        <div className="flex-1 flex min-w-0 flex-col bg-transparent">
+          <div className="flex items-center justify-between gap-4 border-b border-transparent bg-muted/65 px-5 py-4 backdrop-blur">
             <div className="flex items-center gap-4 flex-1">
               <Button variant="outline" size="sm" className="rounded-full" onClick={() => setFiltersCollapsed((current) => !current)}>
                 {filtersCollapsed ? <PanelLeftOpen className="mr-2 h-4 w-4" /> : <PanelLeftClose className="mr-2 h-4 w-4" />}
@@ -750,7 +776,7 @@ export default function LibrariesPage() {
                 value={activeLibraryId || libraries[0]?.id || ''}
                 onValueChange={(val) => setActiveLibrary(val)}
               >
-                <SelectTrigger className="w-60">
+                <SelectTrigger className="w-60 border-transparent bg-card/90 shadow-sm">
                   <SelectValue placeholder={activeLibrary?.name ?? libraries[0]?.name ?? ''} />
                 </SelectTrigger>
                 <SelectContent>
@@ -784,7 +810,7 @@ export default function LibrariesPage() {
                 <Plus className="mr-2 h-4 w-4" />
                 {t('libraries.library')}
               </Button>
-              <Button size="sm" className="rounded-full" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
+              <Button variant="outline" size="sm" className="rounded-full" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
                 <Upload className="mr-2 h-4 w-4" />
                 {isImporting ? t('libraries.importing') : t('libraries.import')}
               </Button>
@@ -810,7 +836,7 @@ export default function LibrariesPage() {
           </div>
 
           {filtersCollapsed && activeFilterCount > 0 && (
-            <div className="border-b border-border/70 bg-muted/30 px-5 py-2">
+            <div className="border-b border-transparent bg-card/75 px-5 py-2">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Filter className="h-4 w-4" />
                 <span>{t('libraries.activeFilters', { count: activeFilterCount, suffix: activeFilterCount > 1 ? 's' : '' })}</span>
@@ -819,7 +845,7 @@ export default function LibrariesPage() {
           )}
 
           {activeLibrary && (
-            <div className="flex items-center justify-between border-b border-border/70 bg-muted/25 px-5 py-3">
+            <div className="flex items-center justify-between border-0 !bg-transparent px-5 py-3 shadow-none">
               <div className="flex items-center gap-3">
                 <div
                   className="h-3 w-3 rounded-full"
@@ -832,23 +858,37 @@ export default function LibrariesPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant="secondary">{t('libraries.documentsCount', { count: documents.length })}</Badge>
-                <Select
-                  value={sort.field}
-                  onValueChange={(val) => setSort({ ...sort, field: val as SortField })}
-                >
-                  <SelectTrigger className="h-9 w-36">
-                    <SortAsc className="mr-2 h-4 w-4" />
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="addedAt">{t('libraries.sortAdded')}</SelectItem>
-                    <SelectItem value="lastOpenedAt">{t('libraries.sortOpened')}</SelectItem>
-                    <SelectItem value="title">{t('libraries.sortTitle')}</SelectItem>
-                    <SelectItem value="authors">{t('libraries.sortAuthors')}</SelectItem>
-                    <SelectItem value="year">{t('libraries.sortYear')}</SelectItem>
-                    <SelectItem value="rating">{t('libraries.sortRating')}</SelectItem>
-                  </SelectContent>
-                </Select>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 min-w-[11rem] max-w-[16rem] justify-start rounded-full">
+                      {sort.direction === 'asc' ? (
+                        <SortDesc className="mr-2 h-4 w-4 shrink-0" />
+                      ) : (
+                        <SortAsc className="mr-2 h-4 w-4 shrink-0" />
+                      )}
+                      <span className="truncate">{t(`libraries.${SORT_FIELD_LABELS[sort.field]}`)}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    {(Object.entries(SORT_FIELD_LABELS) as Array<[SortField, keyof typeof SORT_FIELD_LABELS]>).map(([field, labelKey]) => (
+                      <DropdownMenuItem
+                        key={field}
+                        onClick={() => handleSortFieldSelect(field)}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <span>{t(`libraries.${labelKey}`)}</span>
+                        {sort.field === field ? (
+                          sort.direction === 'asc' ? (
+                            <SortDesc className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <SortAsc className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          )
+                        ) : null}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {viewMode === 'table' ? <DocumentTableColumnControls /> : null}
                 <Button variant="outline" size="sm" className="rounded-full" onClick={() => void openDuplicateDialog()}>
                   <CopyX className="mr-2 h-4 w-4" />
                   {t('libraries.deduplicate')}
@@ -870,7 +910,7 @@ export default function LibrariesPage() {
           >
             {isImporting && (
               <div className="absolute inset-x-5 top-5 z-10 flex items-start justify-center">
-                <div className="w-full max-w-xl rounded-2xl border border-border/80 bg-background/96 px-4 py-3 shadow-lg backdrop-blur">
+                <div className="w-full max-w-xl rounded-2xl border border-transparent bg-card/95 px-4 py-3 shadow-lg backdrop-blur">
                   <div className="flex items-center gap-3">
                     <Spinner className="size-4" />
                     <div className="min-w-0 flex-1">
@@ -944,7 +984,7 @@ export default function LibrariesPage() {
               </div>
 
               {documents.length > 0 && totalPages > 1 && (
-                <div className="sticky bottom-0 mt-6 -mx-5 border-t border-border/80 bg-background px-5 py-4">
+                <div className="sticky bottom-0 mt-6 -mx-5 border-t border-transparent bg-muted px-5 py-4">
                 <div className="flex flex-col gap-3">
                 <div className="text-sm text-muted-foreground">
                   {t('libraries.showingRange', {

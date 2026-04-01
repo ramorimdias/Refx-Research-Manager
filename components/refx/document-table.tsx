@@ -40,7 +40,7 @@ interface DocumentTableProps {
   ephemeralFlagsById?: Record<string, DocumentEphemeralUiFlags>
 }
 
-type ColumnKey = 'favorite' | 'title' | 'authors' | 'year' | 'status' | 'metadata' | 'comments' | 'rating'
+type ColumnKey = 'favorite' | 'title' | 'authors' | 'tags' | 'year' | 'status' | 'metadata' | 'comments' | 'rating'
 
 type ColumnDefinition = {
   key: ColumnKey
@@ -53,13 +53,13 @@ type ColumnDefinition = {
 const TABLE_WIDTHS_KEY = 'refx-library-table-widths'
 const TABLE_VISIBILITY_KEY = 'refx-library-table-visibility'
 const TABLE_ORDER_KEY = 'refx-library-table-order'
+const TABLE_CONFIG_EVENT = 'refx-library-table-config-changed'
 const SELECTION_IGNORE_SELECTOR = 'a, button, input, textarea, select, [role="checkbox"], [data-selection-ignore="true"]'
-const STICKY_HEADER_CLASS_NAME = 'sticky top-0 z-10 bg-background/95 shadow-[inset_0_-1px_0_hsl(var(--border))] backdrop-blur supports-[backdrop-filter]:bg-background/90'
-
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
   { key: 'favorite', label: 'favorite', defaultWidth: 56, minWidth: 48, hideable: true },
   { key: 'title', label: 'title', defaultWidth: 360, minWidth: 220 },
   { key: 'authors', label: 'authors', defaultWidth: 220, minWidth: 140, hideable: true },
+  { key: 'tags', label: 'tags', defaultWidth: 170, minWidth: 140, hideable: true },
   { key: 'year', label: 'year', defaultWidth: 80, minWidth: 70, hideable: true },
   { key: 'status', label: 'status', defaultWidth: 150, minWidth: 120, hideable: true },
   { key: 'metadata', label: 'metadata', defaultWidth: 160, minWidth: 130, hideable: true },
@@ -97,6 +97,180 @@ function getTableMetadataState(document: Document) {
   return { label: 'Missing', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
 }
 
+function loadStoredColumnVisibility() {
+  if (typeof window === 'undefined') return DEFAULT_VISIBILITY
+
+  try {
+    const storedVisibility = window.localStorage.getItem(TABLE_VISIBILITY_KEY)
+    if (!storedVisibility) return DEFAULT_VISIBILITY
+    const parsed = JSON.parse(storedVisibility) as Partial<Record<ColumnKey, boolean>>
+    return { ...DEFAULT_VISIBILITY, ...parsed }
+  } catch {
+    return DEFAULT_VISIBILITY
+  }
+}
+
+function loadStoredColumnOrder() {
+  if (typeof window === 'undefined') return DEFAULT_ORDER
+
+  try {
+    const storedOrder = window.localStorage.getItem(TABLE_ORDER_KEY)
+    if (!storedOrder) return DEFAULT_ORDER
+    const parsed = JSON.parse(storedOrder) as ColumnKey[]
+    const allowedKeys = new Set(DEFAULT_ORDER)
+    const nextOrder = parsed.filter((key) => allowedKeys.has(key))
+    const missing = DEFAULT_ORDER.filter((key) => !nextOrder.includes(key))
+    return nextOrder.length > 0 ? [...nextOrder, ...missing] : DEFAULT_ORDER
+  } catch {
+    return DEFAULT_ORDER
+  }
+}
+
+function loadStoredColumnWidths() {
+  if (typeof window === 'undefined') return DEFAULT_WIDTHS
+
+  try {
+    const storedWidths = window.localStorage.getItem(TABLE_WIDTHS_KEY)
+    if (!storedWidths) return DEFAULT_WIDTHS
+    const parsed = JSON.parse(storedWidths) as Partial<Record<ColumnKey, number>>
+    return { ...DEFAULT_WIDTHS, ...parsed }
+  } catch {
+    return DEFAULT_WIDTHS
+  }
+}
+
+function emitTableConfigChanged() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(TABLE_CONFIG_EVENT))
+}
+
+export function DocumentTableColumnControls() {
+  const t = useT()
+  const [columnVisibility, setColumnVisibility] = useState<Record<ColumnKey, boolean>>(DEFAULT_VISIBILITY)
+  const [columnOrder, setColumnOrder] = useState<ColumnKey[]>(DEFAULT_ORDER)
+
+  useEffect(() => {
+    const syncFromStorage = () => {
+      setColumnVisibility(loadStoredColumnVisibility())
+      setColumnOrder(loadStoredColumnOrder())
+    }
+
+    syncFromStorage()
+    window.addEventListener(TABLE_CONFIG_EVENT, syncFromStorage)
+
+    return () => window.removeEventListener(TABLE_CONFIG_EVENT, syncFromStorage)
+  }, [])
+
+  useEffect(() => {
+    window.localStorage.setItem(TABLE_VISIBILITY_KEY, JSON.stringify(columnVisibility))
+  }, [columnVisibility])
+
+  useEffect(() => {
+    window.localStorage.setItem(TABLE_ORDER_KEY, JSON.stringify(columnOrder))
+  }, [columnOrder])
+
+  const visibleColumns = useMemo(
+    () => columnOrder
+      .map((key) => COLUMN_DEFINITIONS.find((column) => column.key === key))
+      .filter((column): column is ColumnDefinition => Boolean(column))
+      .filter((column) => columnVisibility[column.key]),
+    [columnOrder, columnVisibility],
+  )
+
+  const orderedColumns = useMemo(
+    () => columnOrder
+      .map((key) => COLUMN_DEFINITIONS.find((column) => column.key === key))
+      .filter((column): column is ColumnDefinition => Boolean(column)),
+    [columnOrder],
+  )
+
+  const setColumnVisible = (key: ColumnKey, visible: boolean) => {
+    if (!visible && visibleColumns.length <= 1) return
+    setColumnVisibility((current) => ({
+      ...current,
+      [key]: visible,
+    }))
+    emitTableConfigChanged()
+  }
+
+  const moveColumn = (key: ColumnKey, direction: 'up' | 'down') => {
+    setColumnOrder((current) => {
+      const index = current.indexOf(key)
+      if (index === -1) return current
+      const targetIndex = direction === 'up' ? index - 1 : index + 1
+      if (targetIndex < 0 || targetIndex >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[targetIndex]] = [next[targetIndex], next[index]]
+      return next
+    })
+    emitTableConfigChanged()
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" variant="outline" className="rounded-full">
+          <Settings2 className="mr-2 h-4 w-4" />
+          {t('documentTable.columns')}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuLabel>{t('documentTable.visibleColumns')}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {COLUMN_DEFINITIONS.map((column) => (
+          <DropdownMenuCheckboxItem
+            key={column.key}
+            checked={columnVisibility[column.key]}
+            disabled={!column.hideable}
+            onCheckedChange={(checked) => setColumnVisible(column.key, Boolean(checked))}
+          >
+            {t(`documentTable.${column.label}`)}
+          </DropdownMenuCheckboxItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>{t('documentTable.columnOrder')}</DropdownMenuLabel>
+        <div className="space-y-1 p-1">
+          {orderedColumns.map((column, index) => (
+            <div key={column.key} className="flex items-center justify-between rounded-md px-2 py-1 text-sm">
+              <span className="truncate">{t(`documentTable.${column.label}`)}</span>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="h-7 w-7 rounded-full"
+                  disabled={index === 0}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    moveColumn(column.key, 'up')
+                  }}
+                >
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="h-7 w-7 rounded-full"
+                  disabled={index === orderedColumns.length - 1}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    moveColumn(column.key, 'down')
+                  }}
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTableProps) {
   const t = useT()
   const [columnWidths, setColumnWidths] = useState<Record<ColumnKey, number>>(DEFAULT_WIDTHS)
@@ -107,41 +281,16 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
   const selection = useDocumentListSelection(documents.map((document) => document.id))
 
   useEffect(() => {
-    const storedWidths = window.localStorage.getItem(TABLE_WIDTHS_KEY)
-    const storedVisibility = window.localStorage.getItem(TABLE_VISIBILITY_KEY)
-    const storedOrder = window.localStorage.getItem(TABLE_ORDER_KEY)
-
-    if (storedWidths) {
-      try {
-        const parsed = JSON.parse(storedWidths) as Partial<Record<ColumnKey, number>>
-        setColumnWidths((current) => ({ ...current, ...parsed }))
-      } catch {
-        // Ignore malformed session state.
-      }
+    const syncFromStorage = () => {
+      setColumnWidths(loadStoredColumnWidths())
+      setColumnVisibility(loadStoredColumnVisibility())
+      setColumnOrder(loadStoredColumnOrder())
     }
 
-    if (storedVisibility) {
-      try {
-        const parsed = JSON.parse(storedVisibility) as Partial<Record<ColumnKey, boolean>>
-        setColumnVisibility((current) => ({ ...current, ...parsed }))
-      } catch {
-        // Ignore malformed session state.
-      }
-    }
+    syncFromStorage()
+    window.addEventListener(TABLE_CONFIG_EVENT, syncFromStorage)
 
-    if (storedOrder) {
-      try {
-        const parsed = JSON.parse(storedOrder) as ColumnKey[]
-        const allowedKeys = new Set(DEFAULT_ORDER)
-        const nextOrder = parsed.filter((key) => allowedKeys.has(key))
-        const missing = DEFAULT_ORDER.filter((key) => !nextOrder.includes(key))
-        if (nextOrder.length > 0) {
-          setColumnOrder([...nextOrder, ...missing])
-        }
-      } catch {
-        // Ignore malformed session state.
-      }
-    }
+    return () => window.removeEventListener(TABLE_CONFIG_EVENT, syncFromStorage)
   }, [])
 
   useEffect(() => {
@@ -168,6 +317,7 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
         ...current,
         [resizingColumn.key]: nextWidth,
       }))
+      emitTableConfigChanged()
     }
 
     const handlePointerUp = () => {
@@ -197,13 +347,6 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
     [columnOrder, columnVisibility],
   )
 
-  const orderedColumns = useMemo(
-    () => columnOrder
-      .map((key) => COLUMN_DEFINITIONS.find((column) => column.key === key))
-      .filter((column): column is ColumnDefinition => Boolean(column)),
-    [columnOrder],
-  )
-
   const beginResize = (key: ColumnKey, event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault()
     event.stopPropagation()
@@ -211,26 +354,6 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
       key,
       startX: event.clientX,
       startWidth: columnWidths[key],
-    })
-  }
-
-  const setColumnVisible = (key: ColumnKey, visible: boolean) => {
-    if (!visible && visibleColumns.length <= 1) return
-    setColumnVisibility((current) => ({
-      ...current,
-      [key]: visible,
-    }))
-  }
-
-  const moveColumn = (key: ColumnKey, direction: 'up' | 'down') => {
-    setColumnOrder((current) => {
-      const index = current.indexOf(key)
-      if (index === -1) return current
-      const targetIndex = direction === 'up' ? index - 1 : index + 1
-      if (targetIndex < 0 || targetIndex >= current.length) return current
-      const next = [...current]
-      ;[next[index], next[targetIndex]] = [next[targetIndex], next[index]]
-      return next
     })
   }
 
@@ -250,11 +373,12 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
   const handleCheckboxClick = (id: string, event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
 
-    selection.selectWithModifiers(id, {
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-      shiftKey: event.shiftKey,
-    })
+    if (event.shiftKey) {
+      selection.selectWithModifiers(id, { shiftKey: true })
+      return
+    }
+
+    selection.toggleSelection(id)
   }
 
   const handleSelectAllChange = (checked: CheckedState) => {
@@ -282,16 +406,6 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
       className="absolute right-0 top-0 h-full w-2 cursor-col-resize select-none"
     />
   )
-
-  const renderHeaderCell = (column: ColumnDefinition) => {
-    const centered = column.key === 'year' || column.key === 'comments'
-    return (
-      <TableHead key={column.key} className={cn('relative', centered && 'text-center', STICKY_HEADER_CLASS_NAME)}>
-        {t(`documentTable.${column.label}`)}
-        {renderResizeHandle(column.key)}
-      </TableHead>
-    )
-  }
 
   const renderDocumentCell = (doc: Document, column: ColumnDefinition, ephemeralFlags?: DocumentEphemeralUiFlags) => {
     switch (column.key) {
@@ -324,20 +438,6 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                   </span>
                   {ephemeralFlags?.isNewlyAdded && <NewBadge />}
                 </div>
-                {doc.tags.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {doc.tags.slice(0, 3).map((tag) => (
-                      <Badge key={tag} variant="secondary" className="py-0 text-xs">
-                        {tag}
-                      </Badge>
-                    ))}
-                    {doc.tags.length > 3 && (
-                      <Badge variant="secondary" className="py-0 text-xs">
-                        +{doc.tags.length - 3}
-                      </Badge>
-                    )}
-                  </div>
-                )}
               </div>
             </Link>
           </TableCell>
@@ -349,6 +449,26 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
               {doc.authors.slice(0, 2).join(', ')}
               {doc.authors.length > 2 && ' et al.'}
             </span>
+          </TableCell>
+        )
+      case 'tags':
+        return (
+          <TableCell key={column.key}>
+            {doc.tags.length > 0 ? (
+              <div className="flex max-h-10 min-w-0 flex-wrap content-start gap-1 overflow-hidden">
+                {doc.tags.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant="secondary"
+                    className="h-4 min-w-0 max-w-full shrink-0 justify-start overflow-hidden px-2 py-0 text-[10px] leading-none"
+                  >
+                    <span className="truncate">{tag}</span>
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <span className="text-sm text-muted-foreground">—</span>
+            )}
           </TableCell>
         )
       case 'year':
@@ -449,9 +569,9 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/80 bg-background shadow-[0_10px_28px_rgba(15,23,42,0.04)]">
-      <div className="flex items-center justify-between border-b border-border/80 bg-muted/20 px-4 py-3">
-        {selection.hasSelection ? (
+    <div className="min-w-0 rounded-2xl bg-card/85 shadow-[0_10px_28px_rgba(15,23,42,0.04)]">
+      {selection.hasSelection ? (
+        <div className="px-4 py-3">
           <DocumentBulkActions
             selectedDocumentIds={selection.selectedDocumentIds}
             onClearSelection={selection.clearSelection}
@@ -460,74 +580,8 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
               {t('documentTable.generateSuggestions')}
             </Button>
           </DocumentBulkActions>
-        ) : (
-          <div />
-        )}
-
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className="rounded-full">
-                <Settings2 className="mr-2 h-4 w-4" />
-                {t('documentTable.columns')}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuLabel>{t('documentTable.visibleColumns')}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {COLUMN_DEFINITIONS.map((column) => (
-                <DropdownMenuCheckboxItem
-                  key={column.key}
-                  checked={columnVisibility[column.key]}
-                  disabled={!column.hideable}
-                  onCheckedChange={(checked) => setColumnVisible(column.key, Boolean(checked))}
-                >
-                  {t(`documentTable.${column.label}`)}
-                </DropdownMenuCheckboxItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel>{t('documentTable.columnOrder')}</DropdownMenuLabel>
-              <div className="space-y-1 p-1">
-                {orderedColumns.map((column, index) => (
-                  <div key={column.key} className="flex items-center justify-between rounded-md px-2 py-1 text-sm">
-                    <span className="truncate">{t(`documentTable.${column.label}`)}</span>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="h-7 w-7 rounded-full"
-                        disabled={index === 0}
-                        onClick={(event) => {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          moveColumn(column.key, 'up')
-                        }}
-                      >
-                        <ChevronUp className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="h-7 w-7 rounded-full"
-                        disabled={index === orderedColumns.length - 1}
-                        onClick={(event) => {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          moveColumn(column.key, 'down')
-                        }}
-                      >
-                        <ChevronDown className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
-      </div>
+      ) : null}
 
       <Table className="table-fixed">
         <colgroup>
@@ -538,15 +592,29 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
           <col style={{ width: 56 }} />
         </colgroup>
         <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className={cn('w-12', STICKY_HEADER_CLASS_NAME)}>
+          <TableRow>
+            <TableHead className="w-12">
               <Checkbox
                 checked={selection.isAllSelected || (selection.isPartiallySelected ? 'indeterminate' : false)}
                 onCheckedChange={handleSelectAllChange}
               />
             </TableHead>
-            {visibleColumns.map(renderHeaderCell)}
-            <TableHead className={cn('w-12', STICKY_HEADER_CLASS_NAME)} />
+            {visibleColumns.map((column) => {
+              const centered = column.key === 'year' || column.key === 'comments'
+              return (
+                <TableHead
+                  key={column.key}
+                  className={cn(
+                    'relative overflow-hidden border-r border-border/70 last:border-r-0',
+                    centered && 'text-center',
+                  )}
+                >
+                  <span className="block truncate pr-2">{t(`documentTable.${column.label}`)}</span>
+                  {renderResizeHandle(column.key)}
+                </TableHead>
+              )
+            })}
+            <TableHead className="w-12" />
           </TableRow>
         </TableHeader>
         <TableBody>
