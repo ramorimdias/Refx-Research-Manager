@@ -17,6 +17,7 @@ import {
   Controls,
   EdgeLabelRenderer,
   Handle,
+  MarkerType,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
@@ -45,6 +46,7 @@ import {
   ChevronDown,
   ChevronUp,
   GitBranch,
+  Loader2,
   Pin,
   Plus,
   Save,
@@ -86,6 +88,17 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { useAppStore } from '@/lib/store'
+import * as repo from '@/lib/repositories/local-db'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   buildNodeAppearance,
   deriveGraphView,
@@ -101,6 +114,7 @@ import {
   buildDocumentGraphNodes,
   type DocumentGraphNodeData,
 } from '@/lib/services/document-relation-service'
+import { formatReference } from '@/lib/services/work-reference-service'
 import type { GraphView } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/localization'
@@ -126,14 +140,17 @@ type GraphNodeExtraState = {
 }
 
 type GraphNodeData = DocumentGraphNodeData & GraphNodeExtraState
+type ReferenceGraphNodeData = {
+  workReference: repo.DbWorkReference
+  label: string
+  isSelected?: boolean
+  isHovered?: boolean
+}
+type AnyGraphNodeData = GraphNodeData | ReferenceGraphNodeData
 
 type GraphViewDraft = {
   name: string
   description: string
-}
-
-type MyWorkDraft = {
-  title: string
 }
 
 type GraphContextMenuState =
@@ -153,6 +170,8 @@ type GraphContextMenuState =
 
 const GRAPH_PREFERENCES_STORAGE_KEY = 'refx.maps.phase4.preferences'
 const WORKING_MAP_LAYOUT_STORAGE_KEY = 'refx.maps.working-layouts'
+const LAST_ACTIVE_MAP_STORAGE_KEY = 'refx.maps.last-active-map'
+const MY_WORK_HEXAGON_CLIP_PATH = 'polygon(25% 6%, 75% 6%, 98% 50%, 75% 94%, 25% 94%, 2% 50%)'
 const DEFAULT_GRAPH_PREFERENCES: GraphPreferences = {
   colorMode: 'density',
   confidenceThreshold: 0,
@@ -167,10 +186,6 @@ const DEFAULT_GRAPH_PREFERENCES: GraphPreferences = {
 const DEFAULT_GRAPH_VIEW_DRAFT: GraphViewDraft = {
   name: '',
   description: '',
-}
-
-const DEFAULT_MY_WORK_DRAFT: MyWorkDraft = {
-  title: '',
 }
 
 type WorkingMapLayouts = Record<string, Record<string, { x: number; y: number }>>
@@ -301,29 +316,28 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
     fillColor,
     borderColor,
     connectionDirection,
-    inboundCitationCount = 0,
     isCurrentDocument,
     isFocused,
     isHovered,
     isSearchMatch,
     isSelected,
     onStartConnection,
-    outboundCitationCount = 0,
     pendingConnectionDirection,
-    relationCount,
   } = data
   const authorText = document.authors.length > 0
     ? document.authors.slice(0, 2).join(', ')
     : t('searchPage.unknownAuthor')
   const canCreateInboundLinks = document.documentType !== 'my_work'
+  const isMyWork = document.documentType === 'my_work'
 
   return (
     <div
       data-document-node-id={document.id}
       className={cn(
-        'relative z-10 flex h-full w-full items-center justify-center overflow-visible rounded-full text-center shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur transition-all',
+        'relative z-10 flex h-full w-full items-center justify-center overflow-visible text-center shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur transition-all',
+        isMyWork ? 'rounded-none' : 'rounded-full',
         pendingConnectionDirection && 'ring-4 ring-teal-100',
-        isSelected && 'ring-4 ring-amber-300 shadow-[0_0_0_8px_rgba(251,191,36,0.22),0_16px_40px_rgba(15,23,42,0.12)]',
+        isSelected && 'ring-4 ring-yellow-300 shadow-[0_0_0_10px_rgba(250,204,21,0.26),0_16px_40px_rgba(15,23,42,0.12)]',
         connectionDirection === 'outgoing' && !isSelected && 'ring-[5px] ring-sky-300 shadow-[0_0_0_10px_rgba(59,130,246,0.22),0_18px_44px_rgba(15,23,42,0.12)]',
         connectionDirection === 'incoming' && !isSelected && 'ring-[5px] ring-rose-300 shadow-[0_0_0_10px_rgba(244,63,94,0.2),0_18px_44px_rgba(15,23,42,0.12)]',
         isFocused && !isSelected && 'ring-4 ring-violet-100',
@@ -335,19 +349,47 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
           ? `radial-gradient(circle at 30% 20%, rgba(255,255,255,0.98), ${fillColor})`
           : undefined,
         border: `2px solid ${borderColor ?? '#cbd5e1'}`,
+        clipPath: isMyWork ? MY_WORK_HEXAGON_CLIP_PATH : undefined,
       }}
     >
-      <div className="space-y-2 px-5">
-        <p className="line-clamp-3 text-sm font-semibold leading-5 text-slate-900">
+      {isMyWork && (isSelected || isHovered || isFocused || isSearchMatch || connectionDirection) ? (
+        <div
+          className={cn(
+            'pointer-events-none absolute inset-[-10px] z-0',
+            isSelected
+              ? 'opacity-100'
+              : isHovered || isFocused || isSearchMatch || connectionDirection
+                ? 'opacity-85'
+                : 'opacity-0',
+          )}
+          style={{
+            clipPath: MY_WORK_HEXAGON_CLIP_PATH,
+            background: isSelected
+              ? 'rgba(250, 204, 21, 0.24)'
+              : connectionDirection === 'outgoing'
+                ? 'rgba(59, 130, 246, 0.18)'
+                : connectionDirection === 'incoming'
+                  ? 'rgba(244, 63, 94, 0.18)'
+                  : isFocused
+                    ? 'rgba(124, 58, 237, 0.16)'
+                    : isSearchMatch
+                      ? 'rgba(245, 158, 11, 0.16)'
+                      : 'rgba(14, 165, 233, 0.14)',
+            filter: isSelected
+              ? 'drop-shadow(0 0 20px rgba(250, 204, 21, 0.48))'
+              : 'drop-shadow(0 0 12px rgba(15, 23, 42, 0.12))',
+          }}
+        />
+      ) : null}
+
+      <div className={cn('space-y-2', isMyWork ? 'px-14 py-6' : 'px-5')}>
+        <p className={cn('font-semibold text-slate-900', isMyWork ? 'line-clamp-4 text-[18px] leading-[1.05]' : 'line-clamp-3 text-sm leading-5')}>
           {document.title}
         </p>
-        <p className="line-clamp-2 text-xs leading-5 text-slate-600">{authorText}</p>
-        <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">
+        <p className={cn('text-slate-700', isMyWork ? 'line-clamp-2 text-[13px] leading-[1.2]' : 'line-clamp-2 text-xs leading-5')}>{authorText}</p>
+        <div className={cn('flex items-center justify-center gap-2 uppercase tracking-[0.18em] text-slate-600', isMyWork ? 'text-[11px]' : 'text-[10px]')}>
           {document.year ? <span>{document.year}</span> : null}
         </div>
-        <p className="text-[10px] text-slate-500">
-          {inboundCitationCount} in • {outboundCitationCount} out • {relationCount} total
-        </p>
       </div>
 
       <Handle
@@ -365,7 +407,7 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
         position={Position.Right}
         isConnectableStart={false}
         isConnectableEnd
-        className="!absolute !z-0 !h-full !w-full !rounded-full !border-0 !bg-transparent !opacity-0"
+        className="!absolute !z-0 !h-full !w-full !border-0 !bg-transparent !opacity-0"
         style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
       />
       <Handle
@@ -462,8 +504,48 @@ function DocumentGraphNode({ data, selected }: NodeProps<GraphNodeData>) {
   )
 }
 
+function ReferenceGraphNode({ data, selected }: NodeProps<ReferenceGraphNodeData>) {
+  return (
+    <div
+      className={cn(
+        'flex h-full w-full items-center justify-center rounded-full border-2 border-dashed bg-background/95 px-4 text-center shadow-sm backdrop-blur transition-all',
+        selected && 'ring-4 ring-amber-300 shadow-[0_0_0_8px_rgba(251,191,36,0.18)]',
+        data.isHovered && !selected && 'ring-2 ring-sky-100 shadow-[0_0_0_6px_rgba(14,165,233,0.12)]',
+      )}
+    >
+      <div className="space-y-2">
+        <p className="line-clamp-3 text-sm font-semibold leading-5 text-slate-900">
+          {data.workReference.reference.title}
+        </p>
+        <p className="line-clamp-2 text-xs leading-5 text-slate-600">
+          {data.label}
+        </p>
+      </div>
+      <Handle
+        id="center-target"
+        type="target"
+        position={Position.Left}
+        isConnectableStart={false}
+        isConnectableEnd={false}
+        className="!pointer-events-none !z-0 !h-1 !w-1 !border-0 !bg-transparent !opacity-0"
+        style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
+      />
+      <Handle
+        id="center-source"
+        type="source"
+        position={Position.Right}
+        isConnectableStart={false}
+        isConnectableEnd={false}
+        className="!pointer-events-none !z-0 !h-1 !w-1 !border-0 !bg-transparent !opacity-0"
+        style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
+      />
+    </div>
+  )
+}
+
 const nodeTypes = {
   document: DocumentGraphNode,
+  reference: ReferenceGraphNode,
 }
 
 const edgeTypes = {
@@ -471,8 +553,8 @@ const edgeTypes = {
 }
 
 function preserveNodePositions(
-  nextNodes: Node<GraphNodeData>[],
-  currentNodes: Node<GraphNodeData>[],
+  nextNodes: Node<AnyGraphNodeData>[],
+  currentNodes: Node<AnyGraphNodeData>[],
   lockedPositions?: Map<string, { x: number; y: number }>,
 ) {
   const positions = new Map(currentNodes.map((node) => [node.id, node.position]))
@@ -515,11 +597,28 @@ function writeWorkingMapLayouts(value: WorkingMapLayouts) {
   window.localStorage.setItem(WORKING_MAP_LAYOUT_STORAGE_KEY, JSON.stringify(value))
 }
 
+function readLastActiveMaps() {
+  if (typeof window === 'undefined') return {} as Record<string, string>
+
+  try {
+    const raw = window.localStorage.getItem(LAST_ACTIVE_MAP_STORAGE_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
+function writeLastActiveMaps(value: Record<string, string>) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(LAST_ACTIVE_MAP_STORAGE_KEY, JSON.stringify(value))
+}
+
 function MapsPageContent() {
   const t = useT()
   const params = useSearchParams()
   const focusDocumentId = params.get('focus')
-  const reactFlow = useReactFlow<GraphNodeData>()
+  const reactFlow = useReactFlow<AnyGraphNodeData>()
   const {
     activeDocumentId,
     activeLibraryId,
@@ -545,11 +644,13 @@ function MapsPageContent() {
   } = useAppStore()
 
   const [graphPreferences, setGraphPreferences] = useState<GraphPreferences>(DEFAULT_GRAPH_PREFERENCES)
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphNodeData>([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<AnyGraphNodeData>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [hoveredDocumentId, setHoveredDocumentId] = useState<string | null>(null)
+  const [hoveredWorkReferenceId, setHoveredWorkReferenceId] = useState<string | null>(null)
   const [hoveredRelationId, setHoveredRelationId] = useState<string | null>(null)
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(focusDocumentId)
+  const [selectedWorkReferenceId, setSelectedWorkReferenceId] = useState<string | null>(null)
   const [selectedRelationId, setSelectedRelationId] = useState<string | null>(null)
   const [manualVisibleDocumentIds, setManualVisibleDocumentIds] = useState<string[]>([])
   const [hiddenDocumentIds, setHiddenDocumentIds] = useState<string[]>([])
@@ -561,19 +662,26 @@ function MapsPageContent() {
   const [pendingConnectionCursor, setPendingConnectionCursor] = useState<{ x: number; y: number } | null>(null)
   const deferredSearchQuery = useDeferredValue(searchQuery)
   const [isDeletingRelation, setIsDeletingRelation] = useState(false)
+  const [pendingDeleteRelationId, setPendingDeleteRelationId] = useState<string | null>(null)
+  const [pendingDeleteAllLinksDocumentId, setPendingDeleteAllLinksDocumentId] = useState<string | null>(null)
+  const [isDeleteWorkspaceDialogOpen, setIsDeleteWorkspaceDialogOpen] = useState(false)
   const [contextMenu, setContextMenu] = useState<GraphContextMenuState>(null)
   const [isReheatingLayout, setIsReheatingLayout] = useState(false)
   const [isTopBarCollapsed, setIsTopBarCollapsed] = useState(false)
   const [isDarkMode, setIsDarkMode] = useState(false)
+  const [isCreateMapDialogOpen, setIsCreateMapDialogOpen] = useState(false)
   const [isSaveViewDialogOpen, setIsSaveViewDialogOpen] = useState(false)
   const [isEditingViewDialogOpen, setIsEditingViewDialogOpen] = useState(false)
   const [graphViewDraft, setGraphViewDraft] = useState<GraphViewDraft>(DEFAULT_GRAPH_VIEW_DRAFT)
-  const [isCreateMyWorkDialogOpen, setIsCreateMyWorkDialogOpen] = useState(false)
-  const [myWorkDraft, setMyWorkDraft] = useState<MyWorkDraft>(DEFAULT_MY_WORK_DRAFT)
+  const [selectedMyWorkPickerValue, setSelectedMyWorkPickerValue] = useState('')
+  const [workReferencesByDocumentId, setWorkReferencesByDocumentId] = useState<Record<string, repo.DbWorkReference[]>>({})
   const [workingLayoutPositions, setWorkingLayoutPositions] = useState<Record<string, { x: number; y: number }>>({})
+  const stableNodeTypes = useMemo(() => nodeTypes, [])
+  const stableEdgeTypes = useMemo(() => edgeTypes, [])
   const dragConnectionSourceIdRef = useRef<string | null>(null)
   const dragConnectionHandleIdRef = useRef<string | null>(null)
   const dragConnectionCompletedRef = useRef(false)
+  const lastAutoFitKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
     setGraphPreferences(readStoredGraphPreferences())
@@ -626,6 +734,14 @@ function MapsPageContent() {
     [activeLibraryId, libraries],
   )
 
+  const myWorkDocuments = useMemo(
+    () =>
+      documents
+        .filter((document) => document.documentType === 'my_work')
+        .sort((left, right) => left.title.localeCompare(right.title)),
+    [documents],
+  )
+
   const activeLibraryGraphViews = useMemo(
     () => graphViews.filter((view) => view.libraryId === activeLibrary?.id),
     [activeLibrary?.id, graphViews],
@@ -637,8 +753,37 @@ function MapsPageContent() {
   )
 
   useEffect(() => {
+    if (!activeLibraryId) return
+    const storedMapId = readLastActiveMaps()[activeLibraryId]
+    if (storedMapId === undefined) return
+
+    if (storedMapId === '__working__') {
+      if (activeGraphViewId !== null) {
+        setActiveGraphViewId(null)
+      }
+      return
+    }
+
+    if (storedMapId !== activeGraphViewId && activeLibraryGraphViews.some((view) => view.id === storedMapId)) {
+      setActiveGraphViewId(storedMapId)
+    }
+  }, [activeLibraryGraphViews, activeLibraryId])
+
+  useEffect(() => {
+    if (!activeLibraryId) return
+
+    const storedMapIds = readLastActiveMaps()
+    const nextMapId = activeGraphViewId ?? '__working__'
+    if (storedMapIds[activeLibraryId] === nextMapId) return
+
+    writeLastActiveMaps({
+      ...storedMapIds,
+      [activeLibraryId]: nextMapId,
+    })
+  }, [activeGraphViewId, activeLibraryId])
+
+  useEffect(() => {
     if (!activeGraphView) {
-      setHiddenDocumentIds([])
       return
     }
 
@@ -704,10 +849,31 @@ function MapsPageContent() {
     [deferredSearchQuery, graphPreferences, hiddenDocumentIds, libraryDocuments, libraryRelations, manualVisibleDocumentIds, selectedDocumentId],
   )
 
-  const visibleDocuments = derivedGraphView.documents
+  const visibleDocuments = useMemo(() => {
+    const scopedIds = new Set([
+      ...manualVisibleDocumentIds,
+      ...(selectedDocumentId ? [selectedDocumentId] : []),
+    ])
+    const documentsWithBibliography = libraryDocuments.filter((document) =>
+      document.documentType === 'my_work'
+      && scopedIds.has(document.id)
+      && (workReferencesByDocumentId[document.id]?.length ?? 0) > 0,
+    )
+
+    return [...derivedGraphView.documents, ...documentsWithBibliography].filter((document, index, documents) => (
+      documents.findIndex((candidate) => candidate.id === document.id) === index
+    ))
+  }, [derivedGraphView.documents, libraryDocuments, manualVisibleDocumentIds, selectedDocumentId, workReferencesByDocumentId])
   const visibleRelations = derivedGraphView.relations
   const visibleMetrics = derivedGraphView.metrics
   const searchMatches = derivedGraphView.searchMatches
+  const visibleWorkReferences = useMemo(
+    () =>
+      visibleDocuments
+        .filter((document) => document.documentType === 'my_work')
+        .flatMap((document) => workReferencesByDocumentId[document.id] ?? []),
+    [visibleDocuments, workReferencesByDocumentId],
+  )
 
   const addableDocuments = useMemo(
     () => libraryDocuments.filter((document) => !visibleDocuments.some((entry) => entry.id === document.id)),
@@ -719,9 +885,66 @@ function MapsPageContent() {
     [libraryDocuments, selectedDocumentId],
   )
 
+  useEffect(() => {
+    let cancelled = false
+
+    const loadWorkReferences = async () => {
+      const workDocumentsInLibrary = libraryDocuments.filter((document) => document.documentType === 'my_work')
+      if (workDocumentsInLibrary.length === 0) {
+        setWorkReferencesByDocumentId({})
+        return
+      }
+
+      try {
+        const results = await Promise.all(
+          workDocumentsInLibrary.map(async (document) => [document.id, await repo.listWorkReferences(document.id)] as const),
+        )
+        if (!cancelled) {
+          setWorkReferencesByDocumentId(Object.fromEntries(results))
+        }
+      } catch {
+        if (!cancelled) {
+          setWorkReferencesByDocumentId({})
+        }
+      }
+    }
+
+    void loadWorkReferences()
+    return () => {
+      cancelled = true
+    }
+  }, [libraryDocuments])
+
+  const selectedWorkReferences = useMemo(
+    () => (selectedDocument?.documentType === 'my_work' ? workReferencesByDocumentId[selectedDocument.id] ?? [] : []),
+    [selectedDocument, workReferencesByDocumentId],
+  )
+
   const selectedRelation = useMemo(
     () => libraryRelations.find((relation) => relation.id === selectedRelationId) ?? null,
     [libraryRelations, selectedRelationId],
+  )
+
+  const pendingDeleteRelation = useMemo(
+    () => libraryRelations.find((relation) => relation.id === pendingDeleteRelationId) ?? null,
+    [libraryRelations, pendingDeleteRelationId],
+  )
+
+  const pendingDeleteAllLinksCount = useMemo(
+    () =>
+      pendingDeleteAllLinksDocumentId
+        ? libraryRelations.filter(
+          (relation) =>
+            relation.sourceDocumentId === pendingDeleteAllLinksDocumentId
+            || relation.targetDocumentId === pendingDeleteAllLinksDocumentId,
+        ).length
+        : 0,
+    [libraryRelations, pendingDeleteAllLinksDocumentId],
+  )
+
+  const selectedWorkReference = useMemo(
+    () => selectedWorkReferences.find((reference) => reference.id === selectedWorkReferenceId) ?? null,
+    [selectedWorkReferenceId, selectedWorkReferences],
   )
 
   const graphViewLayoutMap = useMemo(
@@ -735,13 +958,11 @@ function MapsPageContent() {
   )
 
   const effectiveLayoutMap = useMemo(() => {
-    if (activeGraphViewId) return graphViewLayoutMap
-
-    return new Map(
-      Object.entries(workingLayoutPositions).map(([documentId, position]) => [
-        documentId,
+    const workingLayoutMap = new Map(
+      Object.entries(workingLayoutPositions).map(([nodeId, position]) => [
+        nodeId,
         {
-          documentId,
+          documentId: nodeId,
           graphViewId: '__working__',
           hidden: false,
           pinned: false,
@@ -751,6 +972,13 @@ function MapsPageContent() {
         },
       ]),
     )
+
+    if (!activeGraphViewId) return workingLayoutMap
+
+    return new Map([
+      ...workingLayoutMap.entries(),
+      ...graphViewLayoutMap.entries(),
+    ])
   }, [activeGraphViewId, graphViewLayoutMap, workingLayoutPositions])
 
   const sourceDocument = useMemo(
@@ -768,10 +996,11 @@ function MapsPageContent() {
         : null,
     [libraryDocuments, selectedRelation],
   )
-  const isSelectionPanelOpen = Boolean(selectedDocument || selectedRelation)
+  const isSelectionPanelOpen = Boolean(selectedDocument || selectedRelation || selectedWorkReference)
 
   const clearSelection = () => {
     setSelectedDocumentId(null)
+    setSelectedWorkReferenceId(null)
     setSelectedRelationId(null)
     setContextMenu(null)
     setActiveDocument(null)
@@ -799,16 +1028,35 @@ function MapsPageContent() {
     [libraryDocuments, libraryRelations, selectedDocument],
   )
   const selectedDocumentOutgoingDocuments = useMemo(
-    () =>
-      selectedDocument
-        ? libraryRelations
-          .filter((relation) => relation.sourceDocumentId === selectedDocument.id)
-          .map((relation) => libraryDocuments.find((document) => document.id === relation.targetDocumentId) ?? null)
-          .filter((document, index, documents): document is NonNullable<typeof document> => (
-            Boolean(document) && documents.findIndex((candidate) => candidate?.id === document?.id) === index
-          ))
-        : [],
-    [libraryDocuments, libraryRelations, selectedDocument],
+    () => {
+      if (!selectedDocument) return []
+
+      const linkedDocuments = libraryRelations
+        .filter((relation) => relation.sourceDocumentId === selectedDocument.id)
+        .map((relation) => libraryDocuments.find((document) => document.id === relation.targetDocumentId) ?? null)
+        .filter((document, index, documents): document is NonNullable<typeof document> => (
+          Boolean(document) && documents.findIndex((candidate) => candidate?.id === document?.id) === index
+        ))
+
+      if (selectedDocument.documentType !== 'my_work') {
+        return linkedDocuments
+      }
+
+      const referenceMatchedDocuments = selectedWorkReferences
+        .map((reference) => (
+          reference.matchedDocumentId
+            ? libraryDocuments.find((document) => document.id === reference.matchedDocumentId) ?? null
+            : null
+        ))
+        .filter((document, index, documents): document is NonNullable<typeof document> => (
+          Boolean(document) && documents.findIndex((candidate) => candidate?.id === document?.id) === index
+        ))
+
+      return [...linkedDocuments, ...referenceMatchedDocuments].filter((document, index, documents) => (
+        documents.findIndex((candidate) => candidate.id === document.id) === index
+      ))
+    },
+    [libraryDocuments, libraryRelations, selectedDocument, selectedWorkReferences],
   )
   const selectedDocumentIncomingIds = useMemo(
     () => new Set(selectedDocumentIncomingDocuments.map((document) => document.id)),
@@ -846,6 +1094,43 @@ function MapsPageContent() {
   }, [libraryRelations, selectedRelationId])
 
   useEffect(() => {
+    if (selectedWorkReferenceId && !selectedWorkReferences.some((reference) => reference.id === selectedWorkReferenceId)) {
+      setSelectedWorkReferenceId(null)
+    }
+  }, [selectedWorkReferenceId, selectedWorkReferences])
+
+  useEffect(() => {
+    if (visibleDocuments.length === 0) {
+      lastAutoFitKeyRef.current = null
+      return
+    }
+
+    const fitKey = [
+      activeLibrary?.id ?? '__none__',
+      activeGraphViewId ?? '__working__',
+      visibleDocuments.length,
+      visibleRelations.length,
+      visibleWorkReferences.length,
+    ].join(':')
+
+    if (lastAutoFitKeyRef.current === fitKey) return
+    lastAutoFitKeyRef.current = fitKey
+
+    const frame = window.requestAnimationFrame(() => {
+      reactFlow.fitView({ padding: 0.2, duration: 250 })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    activeGraphViewId,
+    activeLibrary?.id,
+    reactFlow,
+    visibleWorkReferences.length,
+    visibleDocuments.length,
+    visibleRelations.length,
+  ])
+
+  useEffect(() => {
     if (pendingConnectionDocumentId && !visibleDocuments.some((document) => document.id === pendingConnectionDocumentId)) {
       clearPendingConnection()
     }
@@ -865,8 +1150,34 @@ function MapsPageContent() {
   }, [pendingConnectionDirection])
 
   useEffect(() => {
+    const visibleWorkReferenceGroups = visibleDocuments
+      .filter((document) => document.documentType === 'my_work')
+      .map((document) => ({
+        workDocumentId: document.id,
+        references: workReferencesByDocumentId[document.id] ?? [],
+      }))
+      .filter((group) => group.references.length > 0)
+
+    const referenceMatchedDocuments = visibleWorkReferenceGroups
+      .flatMap((group) => group.references)
+      .map((reference) => (
+        reference.matchedDocumentId
+          ? libraryDocuments.find((document) => document.id === reference.matchedDocumentId) ?? null
+          : null
+      ))
+      .filter((document, index, documents): document is NonNullable<typeof document> => (
+        Boolean(document) && documents.findIndex((candidate) => candidate?.id === document?.id) === index
+      ))
+
+    const graphDocuments = [...visibleDocuments]
+    for (const referenceDocument of referenceMatchedDocuments) {
+      if (!graphDocuments.some((document) => document.id === referenceDocument.id)) {
+        graphDocuments.push(referenceDocument)
+      }
+    }
+
     const appearance = Object.fromEntries(
-      visibleDocuments.map((document) => {
+      graphDocuments.map((document) => {
         const metrics = visibleMetrics[document.id]
         const nodeAppearance = buildNodeAppearance({
           document,
@@ -883,6 +1194,8 @@ function MapsPageContent() {
 
         return [document.id, {
           ...nodeAppearance,
+          fillColor: document.documentType === 'my_work' ? '#fef08a' : nodeAppearance.fillColor,
+          borderColor: document.documentType === 'my_work' ? '#eab308' : nodeAppearance.borderColor,
           inboundCitationCount: metrics?.inboundCitationCount ?? 0,
           outboundCitationCount: metrics?.outboundCitationCount ?? 0,
           connectionDirection: selectedDocumentOutgoingIds.has(document.id)
@@ -899,12 +1212,14 @@ function MapsPageContent() {
           isHovered: hoveredDocumentId === document.id,
           isSearchMatch: searchMatches.has(document.id),
           isSelected: selectedDocumentId === document.id,
-          sizePx: nodeAppearance.sizePx,
+          sizePx: document.documentType === 'my_work'
+            ? (nodeAppearance.sizePx ?? 220) + 96
+            : nodeAppearance.sizePx,
         }]
       }),
     ) as Record<string, Partial<DocumentGraphNodeData>>
 
-    const nextNodes = buildDocumentGraphNodes(visibleDocuments, visibleRelations, appearance).map((node) => {
+    const nextDocumentNodes = buildDocumentGraphNodes(graphDocuments, visibleRelations, appearance).map((node) => {
       const savedLayout = effectiveLayoutMap.get(node.id)
 
       return {
@@ -936,12 +1251,84 @@ function MapsPageContent() {
       }
     })
 
-    const lockedPositions = new Map(
-      Array.from(effectiveLayoutMap.values()).map((layout) => [layout.documentId, { x: layout.x, y: layout.y }]),
+    const referenceNodes: Node<ReferenceGraphNodeData>[] = visibleWorkReferenceGroups.flatMap((group) => {
+      const workNode = nextDocumentNodes.find((node) => node.id === group.workDocumentId) ?? null
+
+      return group.references
+        .filter((reference) => !reference.matchedDocumentId)
+        .map((reference, index) => ({
+          id: `work-reference-node-${reference.id}`,
+          type: 'reference',
+          position: {
+            x: (workNode?.position.x ?? 340) + 320 + (index % 2) * 40,
+            y: (workNode?.position.y ?? 140) + index * 150,
+          },
+          draggable: true,
+          selectable: true,
+          data: {
+            workReference: reference,
+            label: formatReference(reference.reference, 'apa'),
+            isSelected: selectedWorkReferenceId === reference.id,
+            isHovered: hoveredWorkReferenceId === reference.id,
+          },
+          style: {
+            width: 220,
+            height: 220,
+            borderRadius: 9999,
+            border: '2px dashed oklch(0.72 0.01 250)',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.96) 100%)',
+            boxShadow: '0 14px 32px rgba(15, 23, 42, 0.08)',
+          },
+        }))
+    })
+
+    const syntheticReferenceEdges = visibleWorkReferenceGroups.flatMap((group) =>
+      group.references.map((reference) => {
+        const targetId = reference.matchedDocumentId
+          ? reference.matchedDocumentId
+          : `work-reference-node-${reference.id}`
+        const isUnmatched = !reference.matchedDocumentId
+
+        return {
+          id: `work-reference-edge-${reference.id}`,
+          source: group.workDocumentId,
+          target: targetId,
+          sourceHandle: 'center-source',
+          targetHandle: 'center-target',
+          type: 'relationship',
+          data: {
+            relationStatus: isUnmatched ? 'reference_only' : 'matched_reference',
+            isConnectedToSelectedDocument: selectedDocumentId === group.workDocumentId,
+            connectionDirection: 'outgoing',
+          },
+          style: {
+            stroke: isUnmatched ? '#64748b' : '#2563eb',
+            strokeWidth: isUnmatched ? 2.4 : 3.4,
+            opacity: 0.96,
+          },
+          markerStart: {
+            type: MarkerType.ArrowClosed,
+            width: isUnmatched ? 20 : 22,
+            height: isUnmatched ? 20 : 22,
+            color: isUnmatched ? '#64748b' : '#2563eb',
+          },
+          markerEnd: undefined,
+          label: isUnmatched ? 'reference' : 'matched reference',
+        }
+      }),
     )
 
-    setNodes((currentNodes) => preserveNodePositions(nextNodes, currentNodes, lockedPositions))
-    setEdges(buildDocumentGraphEdges(visibleRelations, selectedDocumentId, selectedRelationId, hoveredRelationId))
+    const lockedPositions = isReheatingLayout
+      ? undefined
+      : new Map(
+        Array.from(effectiveLayoutMap.values()).map((layout) => [layout.documentId, { x: layout.x, y: layout.y }]),
+      )
+
+    setNodes((currentNodes) => preserveNodePositions([...nextDocumentNodes, ...referenceNodes], currentNodes, lockedPositions))
+    setEdges([
+      ...buildDocumentGraphEdges(visibleRelations, selectedDocumentId, selectedRelationId, hoveredRelationId),
+      ...syntheticReferenceEdges,
+    ])
   }, [
     activeDocumentId,
     activeLibrary?.color,
@@ -949,6 +1336,7 @@ function MapsPageContent() {
     graphPreferences.focusMode,
     graphPreferences.sizeMode,
     hoveredDocumentId,
+    hoveredWorkReferenceId,
     hoveredRelationId,
     pendingConnectionDirection,
     pendingConnectionDocumentId,
@@ -957,9 +1345,13 @@ function MapsPageContent() {
     selectedDocumentIncomingIds,
     selectedDocumentOutgoingIds,
     selectedRelationId,
+    selectedWorkReferenceId,
+    workReferencesByDocumentId,
     setEdges,
     setNodes,
     effectiveLayoutMap,
+    libraryDocuments,
+    selectedDocument,
     visibleDocuments,
     visibleMetrics,
     visibleRelations,
@@ -1067,16 +1459,7 @@ function MapsPageContent() {
   }
 
   const handleDeleteRelation = async (relationId: string) => {
-    const confirmed = window.confirm('Delete this document relation?')
-    if (!confirmed) return
-
-    setIsDeletingRelation(true)
-    try {
-      const deleted = await deleteRelation(relationId)
-      if (deleted) setSelectedRelationId(null)
-    } finally {
-      setIsDeletingRelation(false)
-    }
+    setPendingDeleteRelationId(relationId)
   }
 
   const handleDeleteRelationWithoutPrompt = async (relationId: string) => {
@@ -1099,15 +1482,13 @@ function MapsPageContent() {
 
     if (connectedRelations.length === 0) return
 
-    const confirmed = window.confirm(`Delete ${connectedRelations.length} link(s) connected to this node?`)
-    if (!confirmed) return
-
     setIsDeletingRelation(true)
     try {
       await Promise.all(connectedRelations.map((relation) => deleteRelation(relation.id)))
       setSelectedRelationId((currentId) =>
         currentId && connectedRelations.some((relation) => relation.id === currentId) ? null : currentId,
       )
+      setPendingDeleteAllLinksDocumentId(null)
     } finally {
       setIsDeletingRelation(false)
     }
@@ -1147,11 +1528,43 @@ function MapsPageContent() {
   const handleNodesChange: OnNodesChange = (changes) => onNodesChange(changes)
   const handleEdgesChange: OnEdgesChange = (changes) => onEdgesChange(changes)
   const handleNodeDragStart: NodeMouseHandler = (_, node) => {
+    if (node.type === 'reference') {
+      setSelectedDocumentId(null)
+      setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
+      setSelectedRelationId(null)
+      setActiveDocument(null)
+      return
+    }
+
+    if (node.type !== 'document') return
     setSelectedDocumentId(node.id)
+    setSelectedWorkReferenceId(null)
     setSelectedRelationId(null)
     setActiveDocument(node.id)
   }
   const handleNodeDragStop: NodeDragHandler = async (_, node) => {
+    if (node.type === 'reference') {
+      if (!activeLibraryId) return
+
+      setWorkingLayoutPositions((currentLayouts) => {
+        const nextLayouts = {
+          ...currentLayouts,
+          [node.id]: { x: node.position.x, y: node.position.y },
+        }
+        const storedLayouts = readWorkingMapLayouts()
+        writeWorkingMapLayouts({
+          ...storedLayouts,
+          [activeLibraryId]: {
+            ...(storedLayouts[activeLibraryId] ?? {}),
+            ...nextLayouts,
+          },
+        })
+        return nextLayouts
+      })
+      return
+    }
+
+    if (node.type !== 'document') return
     if (activeGraphViewId) {
       const existingLayout = graphViewLayoutMap.get(node.id)
       await upsertGraphViewNodeLayout({
@@ -1175,7 +1588,10 @@ function MapsPageContent() {
       const storedLayouts = readWorkingMapLayouts()
       writeWorkingMapLayouts({
         ...storedLayouts,
-        [activeLibraryId]: nextLayouts,
+        [activeLibraryId]: {
+          ...(storedLayouts[activeLibraryId] ?? {}),
+          ...nextLayouts,
+        },
       })
       return nextLayouts
     })
@@ -1234,6 +1650,14 @@ function MapsPageContent() {
     setIsSaveViewDialogOpen(true)
   }
 
+  const handleOpenCreateMapDialog = () => {
+    setGraphViewDraft({
+      name: '',
+      description: '',
+    })
+    setIsCreateMapDialogOpen(true)
+  }
+
   const handleOpenEditViewDialog = () => {
     if (!activeGraphView) return
     setGraphViewDraft({
@@ -1243,27 +1667,25 @@ function MapsPageContent() {
     setIsEditingViewDialogOpen(true)
   }
 
-  const handleCreateMyWork = async () => {
-    if (!activeLibrary || !myWorkDraft.title.trim()) return
-
-    const created = await createDocumentRecord({
-      libraryId: activeLibrary.id,
-      title: myWorkDraft.title.trim(),
-      documentType: 'my_work',
-      authors: [],
-    })
-
-    if (!created) return
-
-    await handleAddDocumentToMap(created.id)
-    setMyWorkDraft(DEFAULT_MY_WORK_DRAFT)
-    setIsCreateMyWorkDialogOpen(false)
-  }
-
   const currentViewDocumentIds = useMemo(
     () => Array.from(new Set(visibleDocuments.map((document) => document.id))),
     [visibleDocuments],
   )
+
+  const persistCurrentNodeLayoutsToGraphView = async (graphViewId: string) => {
+    const documentNodes = nodes.filter((node) => node.type === 'document')
+    await Promise.all(
+      documentNodes.map((node) =>
+        upsertGraphViewNodeLayout({
+          graphViewId,
+          documentId: node.id,
+          x: node.position.x,
+          y: node.position.y,
+          pinned: graphViewLayoutMap.get(node.id)?.pinned ?? false,
+          hidden: false,
+        })),
+    )
+  }
 
   const persistActiveViewSnapshot = async (nextGraphView?: GraphView | null) => {
     const targetView = nextGraphView ?? activeGraphView
@@ -1288,7 +1710,7 @@ function MapsPageContent() {
   const handleSaveCurrentView = async () => {
     if (!activeLibrary) return
 
-    if (activeGraphView) {
+    if (activeGraphView && !isSaveViewDialogOpen) {
       await persistActiveViewSnapshot(activeGraphView)
       setIsEditingViewDialogOpen(false)
       return
@@ -1313,8 +1735,38 @@ function MapsPageContent() {
     })
 
     if (!created) return
+    await persistCurrentNodeLayoutsToGraphView(created.id)
     setActiveGraphViewId(created.id)
     setIsSaveViewDialogOpen(false)
+    setGraphViewDraft(DEFAULT_GRAPH_VIEW_DRAFT)
+  }
+
+  const handleCreateNewMap = async () => {
+    if (!activeLibrary) return
+
+    const created = await createGraphView({
+      libraryId: activeLibrary.id,
+      name: graphViewDraft.name.trim() || `Map ${activeLibraryGraphViews.length + 1}`,
+      description: graphViewDraft.description.trim() || undefined,
+      relationFilter: 'all',
+      colorMode: graphPreferences.colorMode,
+      sizeMode: graphPreferences.sizeMode,
+      scopeMode: 'mapped',
+      neighborhoodDepth: graphPreferences.neighborhoodDepth,
+      focusMode: graphPreferences.neighborhoodDepth !== 'full',
+      hideOrphans: graphPreferences.hideOrphans,
+      confidenceThreshold: 0,
+      yearMin: graphPreferences.yearMin,
+      yearMax: graphPreferences.yearMax,
+      selectedDocumentId: selectedDocumentId ?? undefined,
+      documentIds: currentViewDocumentIds,
+    })
+
+    if (!created) return
+
+    await persistCurrentNodeLayoutsToGraphView(created.id)
+    setActiveGraphViewId(created.id)
+    setIsCreateMapDialogOpen(false)
     setGraphViewDraft(DEFAULT_GRAPH_VIEW_DRAFT)
   }
 
@@ -1349,11 +1801,10 @@ function MapsPageContent() {
 
   const handleDeleteActiveGraphView = async () => {
     if (!activeGraphView) return
-    const confirmed = window.confirm(`Delete workspace "${activeGraphView.name}"?`)
-    if (!confirmed) return
     const deleted = await deleteGraphView(activeGraphView.id)
     if (!deleted) return
     setActiveGraphViewId(null)
+    setIsDeleteWorkspaceDialogOpen(false)
   }
 
   const centerOnDocument = (documentId: string) => {
@@ -1432,19 +1883,84 @@ function MapsPageContent() {
     })
   }
 
-  const handleReheatLayout = () => {
-    if (visibleDocuments.length === 0) return
+  const handleReheatLayout = async () => {
+    if (nodes.length === 0) return
 
     setIsReheatingLayout(true)
+    const nodeDimensions = new Map(
+      nodes.map((node) => [
+        node.id,
+        {
+          width: typeof node.width === 'number' ? node.width : typeof node.style?.width === 'number' ? node.style.width : 220,
+          height: typeof node.height === 'number' ? node.height : typeof node.style?.height === 'number' ? node.style.height : 220,
+        },
+      ]),
+    )
     const currentPositions = new Map(nodes.map((node) => [node.id, node.position]))
     const nextPositions = runReheatLayout({
-      nodeIds: visibleDocuments.map((document) => document.id),
-      relations: visibleRelations.map((relation) => ({
-        sourceDocumentId: relation.sourceDocumentId,
-        targetDocumentId: relation.targetDocumentId,
+      nodeIds: nodes.map((node) => node.id),
+      relations: edges.map((edge) => ({
+        sourceDocumentId: edge.source,
+        targetDocumentId: edge.target,
       })),
       currentPositions,
     })
+
+    const freeformReferenceTargetsByWork = new Map<string, string[]>()
+    for (const edge of edges) {
+      if (!edge.id.startsWith('work-reference-edge-')) continue
+      if (!edge.target.startsWith('work-reference-node-')) continue
+      const targets = freeformReferenceTargetsByWork.get(edge.source) ?? []
+      targets.push(edge.target)
+      freeformReferenceTargetsByWork.set(edge.source, targets)
+    }
+
+    for (const [workId, referenceNodeIds] of freeformReferenceTargetsByWork.entries()) {
+      const workPosition = nextPositions.get(workId)
+      if (!workPosition || referenceNodeIds.length === 0) continue
+
+      const baseRadius = Math.max(360, 280 + referenceNodeIds.length * 16)
+      const startAngle = -Math.PI / 2
+      const angleStep = (Math.PI * 1.4) / Math.max(1, referenceNodeIds.length - 1 || 1)
+
+      referenceNodeIds.forEach((referenceNodeId, index) => {
+        const baseAngle = referenceNodeIds.length === 1
+          ? startAngle
+          : startAngle - 0.7 * Math.PI + angleStep * index
+
+        const referenceSize = nodeDimensions.get(referenceNodeId) ?? { width: 220, height: 220 }
+        let placedPosition = {
+          x: workPosition.x + Math.cos(baseAngle) * baseRadius,
+          y: workPosition.y + Math.sin(baseAngle) * baseRadius,
+        }
+
+        for (let attempt = 0; attempt < 18; attempt += 1) {
+          const radius = baseRadius + attempt * 64
+          const angle = baseAngle + (attempt % 2 === 0 ? 1 : -1) * Math.floor(attempt / 2) * 0.22
+          const candidate = {
+            x: workPosition.x + Math.cos(angle) * radius,
+            y: workPosition.y + Math.sin(angle) * radius,
+          }
+
+          const overlapsExistingNode = Array.from(nextPositions.entries()).some(([otherNodeId, otherPosition]) => {
+            if (otherNodeId === referenceNodeId) return false
+            const otherSize = nodeDimensions.get(otherNodeId) ?? { width: 220, height: 220 }
+            const dx = candidate.x - otherPosition.x
+            const dy = candidate.y - otherPosition.y
+            const minDistanceX = (referenceSize.width + otherSize.width) * 0.5 + 36
+            const minDistanceY = (referenceSize.height + otherSize.height) * 0.5 + 36
+            return Math.abs(dx) < minDistanceX && Math.abs(dy) < minDistanceY
+          })
+
+          if (!overlapsExistingNode) {
+            placedPosition = candidate
+            break
+          }
+        }
+
+        nextPositions.set(referenceNodeId, placedPosition)
+      })
+    }
 
     setNodes((currentNodes) =>
       currentNodes.map((node) => ({
@@ -1453,15 +1969,43 @@ function MapsPageContent() {
       })),
     )
 
-    if (!activeGraphViewId && activeLibraryId) {
-      const nextWorkingLayouts = Object.fromEntries(
-        Array.from(nextPositions.entries()).map(([documentId, position]) => [documentId, position]),
+    if (activeGraphViewId) {
+      const currentPinnedById = new Map(
+        Array.from(graphViewLayoutMap.values()).map((layout) => [layout.documentId, layout.pinned]),
       )
-      setWorkingLayoutPositions(nextWorkingLayouts)
+
+      await Promise.all(
+        nodes
+          .filter((node) => node.type === 'document')
+          .map((node) => {
+            const nextPosition = nextPositions.get(node.id) ?? node.position
+            return upsertGraphViewNodeLayout({
+              graphViewId: activeGraphViewId,
+              documentId: node.id,
+              x: nextPosition.x,
+              y: nextPosition.y,
+              pinned: currentPinnedById.get(node.id) ?? false,
+              hidden: false,
+            })
+          }),
+      )
+    }
+
+    if (activeLibraryId) {
+      const nextWorkingLayouts = Object.fromEntries(
+        Array.from(nextPositions.entries()).map(([nodeId, position]) => [nodeId, position]),
+      )
+      setWorkingLayoutPositions((currentLayouts) => ({
+        ...currentLayouts,
+        ...nextWorkingLayouts,
+      }))
       const storedLayouts = readWorkingMapLayouts()
       writeWorkingMapLayouts({
         ...storedLayouts,
-        [activeLibraryId]: nextWorkingLayouts,
+        [activeLibraryId]: {
+          ...(storedLayouts[activeLibraryId] ?? {}),
+          ...nextWorkingLayouts,
+        },
       })
     }
 
@@ -1497,64 +2041,80 @@ function MapsPageContent() {
                 {t('mapsPage.subtitle')}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setIsTopBarCollapsed((current) => !current)}
-              >
-                {isTopBarCollapsed ? (
-                  <>
-                    <ChevronDown className="mr-2 h-4 w-4" />
-                    {t('mapsPage.showControls')}
-                  </>
-                ) : (
-                  <>
-                    <ChevronUp className="mr-2 h-4 w-4" />
-                    {t('mapsPage.hideControls')}
-                  </>
-                )}
-              </Button>
-              {activeGraphView ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsTopBarCollapsed((current) => !current)}
+                >
+                  {isTopBarCollapsed ? (
+                    <>
+                      <ChevronDown className="mr-2 h-4 w-4" />
+                      {t('mapsPage.showControls')}
+                    </>
+                  ) : (
+                    <>
+                      <ChevronUp className="mr-2 h-4 w-4" />
+                      {t('mapsPage.hideControls')}
+                    </>
+                  )}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleOpenCreateMapDialog}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t('mapsPage.newMap')}
+                </Button>
+                {activeGraphView ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button size="sm" variant="outline" onClick={() => void persistActiveViewSnapshot()}>
+                        <Save className="mr-2 h-4 w-4" />
+                        {t('mapsPage.saveCurrentView')}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>
+                      {t('mapsPage.saveCurrentViewHelp')}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button size="sm" variant="outline" onClick={() => void persistActiveViewSnapshot()}>
+                    <Button size="sm" onClick={handleOpenSaveViewDialog}>
                       <Save className="mr-2 h-4 w-4" />
-                      {t('mapsPage.saveCurrentView')}
+                      {activeGraphView ? t('mapsPage.saveAsNewView') : t('mapsPage.saveView')}
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top" sideOffset={8}>
-                    {t('mapsPage.saveCurrentViewHelp')}
+                    {t('mapsPage.saveNewViewHelp')}
                   </TooltipContent>
                 </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleReheatLayout()}
+                      disabled={isReheatingLayout || visibleDocuments.length === 0}
+                    >
+                      <Waypoints className={cn('mr-2 h-4 w-4', isReheatingLayout && 'animate-pulse')} />
+                      {t('mapsPage.rebuildLayout')}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={8}>
+                    {t('mapsPage.rebuildLayoutHelp')}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              {activeGraphView ? (
+                <Button size="sm" variant="outline" onClick={() => setIsDeleteWorkspaceDialogOpen(true)}>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  {t('mapsPage.deleteMap')}
+                </Button>
               ) : null}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" onClick={handleOpenSaveViewDialog}>
-                    <Save className="mr-2 h-4 w-4" />
-                    {activeGraphView ? t('mapsPage.saveAsNewView') : t('mapsPage.saveView')}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top" sideOffset={8}>
-                  {t('mapsPage.saveNewViewHelp')}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleReheatLayout}
-                    disabled={isReheatingLayout || visibleDocuments.length === 0}
-                  >
-                    <Waypoints className={cn('mr-2 h-4 w-4', isReheatingLayout && 'animate-pulse')} />
-                    {t('mapsPage.rebuildLayout')}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="top" sideOffset={8}>
-                  {t('mapsPage.rebuildLayoutHelp')}
-                </TooltipContent>
-              </Tooltip>
             </div>
           </div>
 
@@ -1608,14 +2168,10 @@ function MapsPageContent() {
                           {t('mapsPage.resetLayout')}
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent side="top" sideOffset={8}>
-                        {t('mapsPage.resetLayoutHelp')}
-                      </TooltipContent>
-                    </Tooltip>
-                    <Button size="sm" variant="outline" onClick={() => void handleDeleteActiveGraphView()}>
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      {t('mapsPage.delete')}
-                    </Button>
+                    <TooltipContent side="top" sideOffset={8}>
+                      {t('mapsPage.resetLayoutHelp')}
+                    </TooltipContent>
+                  </Tooltip>
                   </div>
                 ) : null}
               </div>
@@ -1677,18 +2233,35 @@ function MapsPageContent() {
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="shrink-0 whitespace-nowrap px-3"
-                    onClick={() => {
-                      setMyWorkDraft(DEFAULT_MY_WORK_DRAFT)
-                      setIsCreateMyWorkDialogOpen(true)
-                    }}
-                  >
-                    {t('mapsPage.addMyWork')}
-                  </Button>
+                  {myWorkDocuments.length > 0 ? (
+                    <Select
+                      value={selectedMyWorkPickerValue}
+                      onValueChange={(value) => {
+                        setSelectedMyWorkPickerValue(value)
+                        void handleAddDocumentToMap(value)
+                        setSelectedMyWorkPickerValue('')
+                      }}
+                    >
+                      <SelectTrigger className="w-[220px] shrink-0 bg-background/90">
+                        <SelectValue placeholder={t('mapsPage.selectWork')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {myWorkDocuments.map((document) => (
+                          <SelectItem key={document.id} value={document.id}>
+                            {document.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <p className="shrink-0 text-xs text-muted-foreground">
+                      No works registered, go to{' '}
+                      <Link href="/references" className="font-medium text-foreground underline underline-offset-4">
+                        My References
+                      </Link>{' '}
+                      to create a new work
+                    </p>
+                  )}
                 </div>
               </div>
             </Card>
@@ -1740,7 +2313,7 @@ function MapsPageContent() {
                 </p>
               </Card>
             </div>
-          ) : visibleRelations.length === 0 ? (
+          ) : edges.length === 0 ? (
             <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
               <Card className="border-dashed bg-card/92 p-4 shadow-sm">
                 <p className="text-sm text-muted-foreground">
@@ -1780,17 +2353,39 @@ function MapsPageContent() {
             onConnect={(connection) => void handleConnect(connection)}
             onConnectEnd={(event) => void handleConnectEnd(event)}
             onNodeClick={async (_, node) => {
+              if (node.type === 'reference') {
+                clearPendingConnection()
+                setSelectedDocumentId(null)
+                setSelectedRelationId(null)
+                setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
+                setContextMenu(null)
+                setActiveDocument(null)
+                return
+              }
               if (pendingConnectionDocumentId && pendingConnectionDocumentId !== node.id) {
                 await handleClickToConnect(node.id)
                 return
               }
               setSelectedDocumentId(node.id)
+              setSelectedWorkReferenceId(null)
               setSelectedRelationId(null)
               setActiveDocument(node.id)
             }}
             onNodeContextMenu={(event, node) => {
+              if (node.type === 'reference') {
+                event.preventDefault()
+                clearPendingConnection()
+                setSelectedDocumentId(null)
+                setSelectedRelationId(null)
+                setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
+                setContextMenu(null)
+                setActiveDocument(null)
+                return
+              }
+              if (node.type !== 'document') return
               event.preventDefault()
               setSelectedDocumentId(node.id)
+              setSelectedWorkReferenceId(null)
               setSelectedRelationId(null)
               setContextMenu({
                 kind: 'node',
@@ -1800,17 +2395,50 @@ function MapsPageContent() {
               })
               setActiveDocument(node.id)
             }}
-            onNodeMouseEnter={(_, node) => setHoveredDocumentId(node.id)}
-            onNodeMouseLeave={() => setHoveredDocumentId(null)}
+            onNodeMouseEnter={(_, node) => {
+              if (node.type === 'reference') {
+                setHoveredWorkReferenceId(node.id.replace('work-reference-node-', ''))
+                return
+              }
+              if (node.type !== 'document') return
+              setHoveredDocumentId(node.id)
+            }}
+            onNodeMouseLeave={(_, node) => {
+              if (node.type === 'reference') {
+                setHoveredWorkReferenceId(null)
+                return
+              }
+              if (node.type !== 'document') return
+              setHoveredDocumentId(null)
+            }}
             onEdgeClick={(_, edge) => {
+              if (edge.id.startsWith('work-reference-edge-')) {
+                setSelectedDocumentId(null)
+                setSelectedRelationId(null)
+                setSelectedWorkReferenceId(edge.id.replace('work-reference-edge-', ''))
+                clearPendingConnection()
+                setActiveDocument(null)
+                return
+              }
               setSelectedDocumentId(null)
+              setSelectedWorkReferenceId(null)
               clearPendingConnection()
               setSelectedRelationId(edge.id)
               setActiveDocument(null)
             }}
             onEdgeContextMenu={(event, edge) => {
+              if (edge.id.startsWith('work-reference-edge-')) {
+                event.preventDefault()
+                setSelectedDocumentId(null)
+                setSelectedRelationId(null)
+                setSelectedWorkReferenceId(edge.id.replace('work-reference-edge-', ''))
+                clearPendingConnection()
+                setActiveDocument(null)
+                return
+              }
               event.preventDefault()
               setSelectedDocumentId(null)
+              setSelectedWorkReferenceId(null)
               clearPendingConnection()
               setSelectedRelationId(edge.id)
               setActiveDocument(null)
@@ -1827,10 +2455,8 @@ function MapsPageContent() {
               clearSelection()
               clearPendingConnection()
             }}
-            fitView
-            fitViewOptions={{ padding: 0.2 }}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
+            nodeTypes={stableNodeTypes}
+            edgeTypes={stableEdgeTypes}
             connectionRadius={72}
             className="h-full bg-transparent"
             proOptions={{ hideAttribution: true }}
@@ -1871,7 +2497,7 @@ function MapsPageContent() {
                     type="button"
                     className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-slate-100"
                     onClick={() => {
-                      void handleDeleteAllLinksForDocument(contextMenu.documentId)
+                      setPendingDeleteAllLinksDocumentId(contextMenu.documentId)
                       setContextMenu(null)
                     }}
                   >
@@ -1911,6 +2537,7 @@ function MapsPageContent() {
             <aside className="pointer-events-auto h-full w-full overflow-hidden rounded-[28px] border border-border/80 bg-background/96 shadow-[0_24px_60px_rgba(15,23,42,0.18)] backdrop-blur">
               <DocumentGraphPanel
                 selectedDocument={selectedDocument}
+                selectedWorkReference={selectedWorkReference}
                 selectedRelation={selectedRelation}
                 sourceDocument={sourceDocument}
                 targetDocument={targetDocument}
@@ -1925,6 +2552,54 @@ function MapsPageContent() {
           </div>
         ) : null}
       </div>
+
+      <Dialog
+        open={isCreateMapDialogOpen}
+        onOpenChange={(open) => {
+          setIsCreateMapDialogOpen(open)
+          if (!open) {
+            setGraphViewDraft(DEFAULT_GRAPH_VIEW_DRAFT)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('mapsPage.newMap')}</DialogTitle>
+            <DialogDescription>
+              Create a named map from the current view without clearing the existing one.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="create-graph-view-name">{t('mapsPage.name')}</Label>
+              <Input
+                id="create-graph-view-name"
+                value={graphViewDraft.name}
+                onChange={(event) => setGraphViewDraft((current) => ({ ...current, name: event.target.value }))}
+                placeholder={t('mapsPage.newMap')}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-graph-view-description">{t('mapsPage.workspaceNote')}</Label>
+              <Textarea
+                id="create-graph-view-description"
+                value={graphViewDraft.description}
+                onChange={(event) => setGraphViewDraft((current) => ({ ...current, description: event.target.value }))}
+                placeholder={t('mapsPage.workspaceNotePlaceholder')}
+                className="min-h-24"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateMapDialogOpen(false)}>
+              {t('mapsPage.cancel')}
+            </Button>
+            <Button onClick={() => void handleCreateNewMap()}>
+              {t('mapsPage.newMap')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isSaveViewDialogOpen} onOpenChange={setIsSaveViewDialogOpen}>
         <DialogContent>
@@ -2005,40 +2680,85 @@ function MapsPageContent() {
       </Dialog>
 
       <Dialog
-        open={isCreateMyWorkDialogOpen}
+        open={Boolean(pendingDeleteRelation)}
         onOpenChange={(open) => {
-          setIsCreateMyWorkDialogOpen(open)
           if (!open) {
-            setMyWorkDraft(DEFAULT_MY_WORK_DRAFT)
+            setPendingDeleteRelationId(null)
           }
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t('mapsPage.addMyWork')}</DialogTitle>
+            <DialogTitle>{t('mapsPage.removeLink')}</DialogTitle>
             <DialogDescription>
-              {t('mapsPage.addMyWorkDescription')}
+              Delete this document relation?
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="my-work-title">{t('mapsPage.workName')}</Label>
-            <Input
-              id="my-work-title"
-              value={myWorkDraft.title}
-              onChange={(event) => setMyWorkDraft({ title: event.target.value })}
-              placeholder={t('mapsPage.workNamePlaceholder')}
-            />
-          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateMyWorkDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setPendingDeleteRelationId(null)}>
               {t('mapsPage.cancel')}
             </Button>
-            <Button onClick={() => void handleCreateMyWork()} disabled={!myWorkDraft.title.trim()}>
-              {t('mapsPage.addToMap')}
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!pendingDeleteRelationId) return
+                void handleDeleteRelationWithoutPrompt(pendingDeleteRelationId)
+                setPendingDeleteRelationId(null)
+              }}
+              disabled={isDeletingRelation}
+            >
+              {isDeletingRelation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              {t('mapsPage.removeLink')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <AlertDialog
+        open={Boolean(pendingDeleteAllLinksDocumentId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDeleteAllLinksDocumentId(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('mapsPage.deleteAllLinks')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`Delete ${pendingDeleteAllLinksCount} link(s) connected to this node?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingRelation}>{t('mapsPage.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isDeletingRelation}
+              onClick={() => {
+                if (!pendingDeleteAllLinksDocumentId) return
+                void handleDeleteAllLinksForDocument(pendingDeleteAllLinksDocumentId)
+              }}
+            >
+              {isDeletingRelation ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {t('mapsPage.deleteAllLinks')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={isDeleteWorkspaceDialogOpen} onOpenChange={setIsDeleteWorkspaceDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('mapsPage.delete')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activeGraphView ? `Delete workspace "${activeGraphView.name}"?` : 'Delete this workspace?'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('mapsPage.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleDeleteActiveGraphView()}>
+              {t('mapsPage.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

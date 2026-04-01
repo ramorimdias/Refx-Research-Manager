@@ -363,10 +363,11 @@ export function runReheatLayout(input: {
   const { nodeIds, relations, currentPositions } = input
   const positions = new Map<string, { x: number; y: number }>()
   const center = { x: 720, y: 420 }
-  const minSpacing = 260
+  const minSpacing = 320
+  const orderedNodeIds = [...nodeIds]
 
-  for (const [index, nodeId] of nodeIds.entries()) {
-    const seedAngle = (index / Math.max(1, nodeIds.length)) * Math.PI * 2
+  for (const [index, nodeId] of orderedNodeIds.entries()) {
+    const seedAngle = (index / Math.max(1, orderedNodeIds.length)) * Math.PI * 2
     const seedRadius = 180 + Math.floor(index / 10) * 110
     positions.set(nodeId, currentPositions.get(nodeId) ?? {
       x: center.x + Math.cos(seedAngle) * seedRadius,
@@ -376,13 +377,13 @@ export function runReheatLayout(input: {
 
   for (let iteration = 0; iteration < 96; iteration += 1) {
     const displacements = new Map<string, { x: number; y: number }>(
-      nodeIds.map((nodeId) => [nodeId, { x: 0, y: 0 }]),
+      orderedNodeIds.map((nodeId) => [nodeId, { x: 0, y: 0 }]),
     )
 
-    for (let i = 0; i < nodeIds.length; i += 1) {
-      for (let j = i + 1; j < nodeIds.length; j += 1) {
-        const left = positions.get(nodeIds[i])!
-        const right = positions.get(nodeIds[j])!
+    for (let i = 0; i < orderedNodeIds.length; i += 1) {
+      for (let j = i + 1; j < orderedNodeIds.length; j += 1) {
+        const left = positions.get(orderedNodeIds[i])!
+        const right = positions.get(orderedNodeIds[j])!
         const dx = left.x - right.x
         const dy = left.y - right.y
         const distance = Math.max(1, Math.hypot(dx, dy))
@@ -393,10 +394,10 @@ export function runReheatLayout(input: {
         const force = repulsion + collisionStrength
         const xForce = (dx / distance) * force
         const yForce = (dy / distance) * force
-        displacements.get(nodeIds[i])!.x += xForce
-        displacements.get(nodeIds[i])!.y += yForce
-        displacements.get(nodeIds[j])!.x -= xForce
-        displacements.get(nodeIds[j])!.y -= yForce
+        displacements.get(orderedNodeIds[i])!.x += xForce
+        displacements.get(orderedNodeIds[i])!.y += yForce
+        displacements.get(orderedNodeIds[j])!.x -= xForce
+        displacements.get(orderedNodeIds[j])!.y -= yForce
       }
     }
 
@@ -416,7 +417,7 @@ export function runReheatLayout(input: {
       displacements.get(relation.targetDocumentId)!.y -= yForce
     }
 
-    for (const nodeId of nodeIds) {
+    for (const nodeId of orderedNodeIds) {
       const current = positions.get(nodeId)!
       const displacement = displacements.get(nodeId)!
       const dxToCenter = center.x - current.x
@@ -432,10 +433,10 @@ export function runReheatLayout(input: {
   }
 
   for (let iteration = 0; iteration < 8; iteration += 1) {
-    for (let i = 0; i < nodeIds.length; i += 1) {
-      for (let j = i + 1; j < nodeIds.length; j += 1) {
-        const leftId = nodeIds[i]
-        const rightId = nodeIds[j]
+    for (let i = 0; i < orderedNodeIds.length; i += 1) {
+      for (let j = i + 1; j < orderedNodeIds.length; j += 1) {
+        const leftId = orderedNodeIds[i]
+        const rightId = orderedNodeIds[j]
         const left = positions.get(leftId)!
         const right = positions.get(rightId)!
         const dx = right.x - left.x

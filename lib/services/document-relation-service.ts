@@ -50,6 +50,7 @@ export function buildDocumentGraphNodes(
   return documents.map((document, index) => {
     const nodeAppearance = appearance?.[document.id] ?? {}
     const sizePx = nodeAppearance.sizePx ?? 220
+    const isMyWork = document.documentType === 'my_work'
 
     return {
       id: document.id,
@@ -65,12 +66,14 @@ export function buildDocumentGraphNodes(
       style: {
         width: sizePx,
         height: sizePx,
-        borderRadius: 9999,
-        border: `1px solid ${nodeAppearance.borderColor ?? 'oklch(0.88 0.01 264)'}`,
-        background: nodeAppearance.fillColor
-          ? `linear-gradient(180deg, ${nodeAppearance.fillColor} 0%, rgba(255,255,255,0.96) 100%)`
-          : 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(246,248,252,0.96) 100%)',
-        boxShadow: '0 14px 40px rgba(15, 23, 42, 0.08)',
+        borderRadius: isMyWork ? 0 : 9999,
+        border: isMyWork ? 'none' : `1px solid ${nodeAppearance.borderColor ?? 'oklch(0.88 0.01 264)'}`,
+        background: isMyWork
+          ? 'transparent'
+          : nodeAppearance.fillColor
+            ? `linear-gradient(180deg, ${nodeAppearance.fillColor} 0%, rgba(255,255,255,0.96) 100%)`
+            : 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(246,248,252,0.96) 100%)',
+        boxShadow: isMyWork ? 'none' : '0 14px 40px rgba(15, 23, 42, 0.08)',
         fontSize: 12,
         opacity: nodeAppearance.isDimmed ? 0.42 : 1,
       },

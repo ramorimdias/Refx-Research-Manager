@@ -8,12 +8,15 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import * as repo from '@/lib/repositories/local-db'
+import { formatReference } from '@/lib/services/work-reference-service'
 import type { Document, DocumentRelation } from '@/lib/types'
 import { getDocumentOpenHref } from '@/lib/services/document-relation-service'
 import { useT } from '@/lib/localization'
 
 type DocumentGraphPanelProps = {
   selectedDocument: Document | null
+  selectedWorkReference?: repo.DbWorkReference | null
   selectedRelation: DocumentRelation | null
   sourceDocument: Document | null
   targetDocument: Document | null
@@ -27,6 +30,7 @@ type DocumentGraphPanelProps = {
 
 export function DocumentGraphPanel({
   selectedDocument,
+  selectedWorkReference,
   selectedRelation,
   sourceDocument,
   targetDocument,
@@ -44,7 +48,7 @@ export function DocumentGraphPanel({
     setIsAbstractExpanded(false)
   }, [selectedDocument?.id])
 
-  if (!selectedDocument && !selectedRelation) {
+  if (!selectedDocument && !selectedRelation && !selectedWorkReference) {
     return (
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <div className="p-5">
@@ -53,6 +57,59 @@ export function DocumentGraphPanel({
             {t('mapsPage.relationDetailsDescription')}
           </p>
         </div>
+      </div>
+    )
+  }
+
+  if (selectedWorkReference) {
+    return (
+      <div className="flex h-full min-h-0 flex-col overflow-hidden">
+        <div className="p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <div className="rounded-full border border-dashed border-slate-300 bg-muted/70 p-2 text-slate-700">
+                <Link2 className="h-4 w-4" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold">{selectedWorkReference.reference.title}</h2>
+                <p className="text-sm text-muted-foreground">Reference-only node</p>
+              </div>
+            </div>
+            {onCloseSelection ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full"
+                onClick={onCloseSelection}
+                aria-label={t('mapsPage.closeDetails')}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        <Separator />
+        <ScrollArea className="h-0 min-h-0 flex-1">
+          <div className="space-y-5 p-5">
+            <div className="rounded-2xl border border-dashed bg-card p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Formatted reference</p>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                {formatReference(selectedWorkReference.reference, 'apa')}
+              </p>
+            </div>
+            <div className="grid gap-3">
+              <div className="rounded-2xl bg-muted/60 p-4">
+                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Match status</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {selectedWorkReference.matchedDocumentId
+                    ? `Matched via ${selectedWorkReference.matchMethod?.replaceAll('_', ' ') ?? 'reference matching'}`
+                    : 'No document match yet'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </ScrollArea>
       </div>
     )
   }

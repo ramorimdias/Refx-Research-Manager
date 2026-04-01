@@ -71,6 +71,8 @@ export default function SettingsPage() {
   const [doiReferenceStatus, setDoiReferenceStatus] = useState<string | null>(null)
   const [restoreTargetPath, setRestoreTargetPath] = useState<string | null>(null)
   const [isRestoreWarningOpen, setIsRestoreWarningOpen] = useState(false)
+  const [isClearDataDialogOpen, setIsClearDataDialogOpen] = useState(false)
+  const [backupDeleteTargetPath, setBackupDeleteTargetPath] = useState<string | null>(null)
   const hasLoadedSettingsRef = useRef(false)
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false)
 
@@ -178,12 +180,10 @@ export default function SettingsPage() {
   }, [])
 
   const handleClearLocalData = async () => {
-    const confirmed = window.confirm('Clear all local documents, notes, and imported files? This cannot be undone.')
-    if (!confirmed) return
-
     setIsClearing(true)
     try {
       await clearLocalData()
+      setIsClearDataDialogOpen(false)
       router.push('/libraries')
     } finally {
       setIsClearing(false)
@@ -272,10 +272,9 @@ export default function SettingsPage() {
 
   const handleDeleteBackup = async (path: string) => {
     if (!isDesktopApp) return
-    const confirmed = window.confirm('Delete this backup file?')
-    if (!confirmed) return
     await repo.deleteBackup(path)
     await loadBackups()
+    setBackupDeleteTargetPath(null)
   }
 
   const handleCheckForUpdates = async () => {
@@ -890,7 +889,7 @@ export default function SettingsPage() {
                                   <Button variant="outline" size="sm" onClick={() => handleOpenRestoreWarning(backup.path)} disabled={isRestoringBackup}>
                                     Restore
                                   </Button>
-                                  <Button variant="ghost" size="icon-sm" onClick={() => void handleDeleteBackup(backup.path)}>
+                                  <Button variant="ghost" size="icon-sm" onClick={() => setBackupDeleteTargetPath(backup.path)}>
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </div>
@@ -912,7 +911,7 @@ export default function SettingsPage() {
                     <CardDescription className="text-red-800">This action is irreversible.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <Button variant="destructive" className="w-full" onClick={() => void handleClearLocalData()} disabled={isClearing}>
+                    <Button variant="destructive" className="w-full" onClick={() => setIsClearDataDialogOpen(true)} disabled={isClearing}>
                       {isClearing ? 'Clearing...' : 'Clear Local Data'}
                     </Button>
                   </CardContent>
@@ -950,6 +949,57 @@ export default function SettingsPage() {
         onInstall={() => void handleInstallUpdate()}
         locale={locale}
       />
+      <AlertDialog
+        open={isClearDataDialogOpen}
+        onOpenChange={(open) => {
+          if (!isClearing) {
+            setIsClearDataDialogOpen(open)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear local data?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Clear all local documents, notes, and imported files? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isClearing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleClearLocalData()} disabled={isClearing}>
+              {isClearing ? 'Clearing...' : 'Clear Local Data'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={Boolean(backupDeleteTargetPath)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setBackupDeleteTargetPath(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete backup file?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete this backup file?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!backupDeleteTargetPath) return
+                void handleDeleteBackup(backupDeleteTargetPath)
+              }}
+            >
+              Delete Backup
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <AlertDialog
         open={isRestoreWarningOpen}
         onOpenChange={(open) => {

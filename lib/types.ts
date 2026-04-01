@@ -236,6 +236,45 @@ export interface ParsedDocumentReference {
   referenceIndex: number
 }
 
+export type ReferenceType = 'article' | 'book' | 'inproceedings' | 'thesis' | 'report' | 'misc' | 'online'
+export type CitationStyle = 'apa' | 'mla' | 'chicago'
+
+export interface Reference {
+  id: string
+  documentId?: string
+  type: ReferenceType
+  citationKey?: string
+  title: string
+  authors: string[]
+  year?: number
+  journal?: string
+  volume?: string
+  issue?: string
+  pages?: string
+  publisher?: string
+  booktitle?: string
+  doi?: string
+  url?: string
+  abstract?: string
+  keywords?: string[]
+  bibtex?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface WorkReference {
+  id: string
+  workDocumentId: string
+  referenceId: string
+  sortOrder: number
+  matchedDocumentId?: string
+  matchMethod?: CitationMatchMethod
+  matchConfidence?: number
+  createdAt: Date
+  updatedAt: Date
+  reference: Reference
+}
+
 export interface Author {
   id: string
   displayName: string
@@ -281,13 +320,13 @@ export interface Note {
   updatedAt: Date
 }
 
-export type ReferenceItemType = 'article' | 'book' | 'inproceedings' | 'thesis' | 'report' | 'misc'
+export type LegacyReferenceItemType = 'article' | 'book' | 'inproceedings' | 'thesis' | 'report' | 'misc'
 
-export interface Reference {
+export interface LegacyReferenceRecord {
   id: string
   documentId?: string
   rawBibtex?: string
-  itemType: ReferenceItemType
+  itemType: LegacyReferenceItemType
   fields: Record<string, string>
   doi?: string
   citationKey: string

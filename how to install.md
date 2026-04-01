@@ -183,7 +183,7 @@ If you are building on a Windows machine and want to validate locally before sha
 3. **Smoke-test the desktop app in dev mode:**
 
    ```powershell
-   pnpm tauri:dev
+   
    ```
 
    Check that:
@@ -278,3 +278,4 @@ pnpm tauri:build
 - Reader currently uses an iframe-based local PDF display foundation (page/zoom persisted); this is intentionally a transitional base toward deeper PDF tooling.
 - Some advanced features/pages are still mock-backed while core library/document/note desktop paths are local-first.
 - CI/network-restricted environments may fail Rust crate downloads; local development with internet access is expected.
+pnpm tauri:dev

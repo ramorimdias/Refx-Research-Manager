@@ -262,6 +262,72 @@ export type DbDocumentRelation = {
   updatedAt: string
 }
 
+export type DbReference = {
+  id: string
+  documentId?: string
+  type: string
+  citationKey?: string
+  title: string
+  authors?: string
+  year?: number
+  journal?: string
+  volume?: string
+  issue?: string
+  pages?: string
+  publisher?: string
+  booktitle?: string
+  doi?: string
+  url?: string
+  abstract?: string
+  keywords?: string
+  bibtex?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type DbCreateReferenceInput = {
+  documentId?: string
+  type: string
+  citationKey?: string
+  title: string
+  authors?: string
+  year?: number
+  journal?: string
+  volume?: string
+  issue?: string
+  pages?: string
+  publisher?: string
+  booktitle?: string
+  doi?: string
+  url?: string
+  abstract?: string
+  keywords?: string
+  bibtex?: string
+}
+
+export type DbUpdateReferenceInput = Partial<DbCreateReferenceInput>
+
+export type DbWorkReference = {
+  id: string
+  workDocumentId: string
+  referenceId: string
+  sortOrder: number
+  matchedDocumentId?: string
+  matchMethod?: string
+  matchConfidence?: number
+  createdAt: string
+  updatedAt: string
+  reference: DbReference
+}
+
+export type DbCreateWorkReferenceInput = {
+  workDocumentId: string
+  referenceId: string
+  matchedDocumentId?: string
+  matchMethod?: string
+  matchConfidence?: number
+}
+
 export type DbCreateDocumentRelationInput = {
   sourceDocumentId: string
   targetDocumentId: string
@@ -490,6 +556,38 @@ export async function deleteRelation(id: string) {
 
 export async function listRelationsForLibrary(libraryId: string) {
   return invoke<DbDocumentRelation[]>('list_document_relations_for_library', { libraryId })
+}
+
+export async function listReferences() {
+  return invoke<DbReference[]>('list_references')
+}
+
+export async function createReference(input: DbCreateReferenceInput) {
+  return invoke<DbReference>('create_reference', { input })
+}
+
+export async function updateReference(id: string, input: DbUpdateReferenceInput) {
+  return invoke<DbReference | null>('update_reference', { id, input })
+}
+
+export async function listWorkReferences(workDocumentId: string) {
+  return invoke<DbWorkReference[]>('list_work_references_for_document', { workDocumentId })
+}
+
+export async function createWorkReference(input: DbCreateWorkReferenceInput) {
+  return invoke<DbWorkReference>('create_work_reference', { input })
+}
+
+export async function deleteWorkReference(id: string) {
+  return invoke<boolean>('delete_work_reference', { id })
+}
+
+export async function reorderWorkReferences(workDocumentId: string, workReferenceIds: string[]) {
+  return invoke<DbWorkReference[]>('reorder_work_references', { workDocumentId, workReferenceIds })
+}
+
+export async function recheckWorkReferenceMatches(workDocumentId?: string) {
+  return invoke<DbWorkReference[]>('recheck_work_reference_matches', { workDocumentId })
 }
 
 export async function listDocumentDoiReferencesForDocument(documentId: string) {

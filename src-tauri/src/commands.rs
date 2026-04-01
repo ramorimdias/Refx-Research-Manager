@@ -173,6 +173,46 @@ pub struct DocumentKeyword {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Reference {
+    pub id: String,
+    pub document_id: Option<String>,
+    pub r#type: String,
+    pub citation_key: Option<String>,
+    pub title: String,
+    pub authors: Option<String>,
+    pub year: Option<i64>,
+    pub journal: Option<String>,
+    pub volume: Option<String>,
+    pub issue: Option<String>,
+    pub pages: Option<String>,
+    pub publisher: Option<String>,
+    pub booktitle: Option<String>,
+    pub doi: Option<String>,
+    pub url: Option<String>,
+    pub abstract_text: Option<String>,
+    pub keywords: Option<String>,
+    pub bibtex: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkReference {
+    pub id: String,
+    pub work_document_id: String,
+    pub reference_id: String,
+    pub sort_order: i64,
+    pub matched_document_id: Option<String>,
+    pub match_method: Option<String>,
+    pub match_confidence: Option<f64>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub reference: Reference,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UsageCounter {
     pub key: String,
     pub value: String,
@@ -327,6 +367,60 @@ pub struct UpdateDocumentInput {
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
     pub cover_image_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReferenceInput {
+    pub document_id: Option<String>,
+    pub r#type: String,
+    pub citation_key: Option<String>,
+    pub title: String,
+    pub authors: Option<String>,
+    pub year: Option<i64>,
+    pub journal: Option<String>,
+    pub volume: Option<String>,
+    pub issue: Option<String>,
+    pub pages: Option<String>,
+    pub publisher: Option<String>,
+    pub booktitle: Option<String>,
+    pub doi: Option<String>,
+    pub url: Option<String>,
+    pub abstract_text: Option<String>,
+    pub keywords: Option<String>,
+    pub bibtex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReferenceInput {
+    pub document_id: Option<String>,
+    pub r#type: Option<String>,
+    pub citation_key: Option<String>,
+    pub title: Option<String>,
+    pub authors: Option<String>,
+    pub year: Option<i64>,
+    pub journal: Option<String>,
+    pub volume: Option<String>,
+    pub issue: Option<String>,
+    pub pages: Option<String>,
+    pub publisher: Option<String>,
+    pub booktitle: Option<String>,
+    pub doi: Option<String>,
+    pub url: Option<String>,
+    pub abstract_text: Option<String>,
+    pub keywords: Option<String>,
+    pub bibtex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkReferenceInput {
+    pub work_document_id: String,
+    pub reference_id: String,
+    pub matched_document_id: Option<String>,
+    pub match_method: Option<String>,
+    pub match_confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1270,6 +1364,43 @@ CREATE TABLE IF NOT EXISTS app_usage_counters (
   counter_value TEXT NOT NULL,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS "references" (
+  id TEXT PRIMARY KEY,
+  document_id TEXT,
+  type TEXT NOT NULL,
+  citation_key TEXT,
+  title TEXT NOT NULL,
+  authors TEXT,
+  year INTEGER,
+  journal TEXT,
+  volume TEXT,
+  issue TEXT,
+  pages TEXT,
+  publisher TEXT,
+  booktitle TEXT,
+  doi TEXT,
+  url TEXT,
+  abstract TEXT,
+  keywords TEXT,
+  bibtex TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS work_references (
+  id TEXT PRIMARY KEY,
+  work_document_id TEXT NOT NULL,
+  reference_id TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  matched_document_id TEXT,
+  match_method TEXT,
+  match_confidence REAL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (work_document_id) REFERENCES documents(id) ON DELETE CASCADE,
+  FOREIGN KEY (reference_id) REFERENCES "references"(id) ON DELETE CASCADE,
+  FOREIGN KEY (matched_document_id) REFERENCES documents(id) ON DELETE SET NULL
+);
 CREATE TABLE IF NOT EXISTS graph_views (
   id TEXT PRIMARY KEY,
   library_id TEXT NOT NULL,
@@ -1319,6 +1450,11 @@ CREATE INDEX IF NOT EXISTS idx_document_doi_references_source_document_id ON doc
 CREATE INDEX IF NOT EXISTS idx_document_doi_references_matched_document_id ON document_doi_references(matched_document_id);
 CREATE INDEX IF NOT EXISTS idx_document_keywords_document_id ON document_keywords(document_id);
 CREATE INDEX IF NOT EXISTS idx_document_keywords_keyword ON document_keywords(keyword);
+CREATE INDEX IF NOT EXISTS idx_references_document_id ON "references"(document_id);
+CREATE INDEX IF NOT EXISTS idx_references_doi ON "references"(doi);
+CREATE INDEX IF NOT EXISTS idx_work_references_work_document_id ON work_references(work_document_id);
+CREATE INDEX IF NOT EXISTS idx_work_references_reference_id ON work_references(reference_id);
+CREATE INDEX IF NOT EXISTS idx_work_references_matched_document_id ON work_references(matched_document_id);
 CREATE INDEX IF NOT EXISTS idx_graph_views_library_id ON graph_views(library_id);
 CREATE INDEX IF NOT EXISTS idx_graph_view_node_layouts_graph_view_id ON graph_view_node_layouts(graph_view_id);
         "#,
@@ -2013,11 +2149,150 @@ fn map_document_keyword_row(
     })
 }
 
+fn map_reference_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Reference> {
+    Ok(Reference {
+        id: row.get(0)?,
+        document_id: row.get(1)?,
+        r#type: row.get(2)?,
+        citation_key: row.get(3)?,
+        title: row.get(4)?,
+        authors: row.get(5)?,
+        year: row.get(6)?,
+        journal: row.get(7)?,
+        volume: row.get(8)?,
+        issue: row.get(9)?,
+        pages: row.get(10)?,
+        publisher: row.get(11)?,
+        booktitle: row.get(12)?,
+        doi: row.get(13)?,
+        url: row.get(14)?,
+        abstract_text: row.get(15)?,
+        keywords: row.get(16)?,
+        bibtex: row.get(17)?,
+        created_at: row.get(18)?,
+        updated_at: row.get(19)?,
+    })
+}
+
+fn map_work_reference_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkReference> {
+    Ok(WorkReference {
+        id: row.get(0)?,
+        work_document_id: row.get(1)?,
+        reference_id: row.get(2)?,
+        sort_order: row.get(3)?,
+        matched_document_id: row.get(4)?,
+        match_method: row.get(5)?,
+        match_confidence: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+        reference: Reference {
+            id: row.get(9)?,
+            document_id: row.get(10)?,
+            r#type: row.get(11)?,
+            citation_key: row.get(12)?,
+            title: row.get(13)?,
+            authors: row.get(14)?,
+            year: row.get(15)?,
+            journal: row.get(16)?,
+            volume: row.get(17)?,
+            issue: row.get(18)?,
+            pages: row.get(19)?,
+            publisher: row.get(20)?,
+            booktitle: row.get(21)?,
+            doi: row.get(22)?,
+            url: row.get(23)?,
+            abstract_text: row.get(24)?,
+            keywords: row.get(25)?,
+            bibtex: row.get(26)?,
+            created_at: row.get(27)?,
+            updated_at: row.get(28)?,
+        },
+    })
+}
+
 fn document_exists(conn: &Connection, id: &str) -> Result<bool, AppError> {
     let exists: Option<String> = conn
         .query_row("SELECT id FROM documents WHERE id = ?1", params![id], |row| row.get(0))
         .optional()?;
     Ok(exists.is_some())
+}
+
+fn list_references_all(conn: &Connection) -> Result<Vec<Reference>, AppError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          id,
+          document_id,
+          type,
+          citation_key,
+          title,
+          authors,
+          year,
+          journal,
+          volume,
+          issue,
+          pages,
+          publisher,
+          booktitle,
+          doi,
+          url,
+          abstract,
+          keywords,
+          bibtex,
+          created_at,
+          updated_at
+        FROM "references"
+        ORDER BY updated_at DESC, created_at DESC
+        "#,
+    )?;
+    let rows = stmt.query_map([], map_reference_row)?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
+fn list_work_references_for_document_id(
+    conn: &Connection,
+    work_document_id: &str,
+) -> Result<Vec<WorkReference>, AppError> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+          wr.id,
+          wr.work_document_id,
+          wr.reference_id,
+          wr.sort_order,
+          wr.matched_document_id,
+          wr.match_method,
+          wr.match_confidence,
+          wr.created_at,
+          wr.updated_at,
+          r.id,
+          r.document_id,
+          r.type,
+          r.citation_key,
+          r.title,
+          r.authors,
+          r.year,
+          r.journal,
+          r.volume,
+          r.issue,
+          r.pages,
+          r.publisher,
+          r.booktitle,
+          r.doi,
+          r.url,
+          r.abstract,
+          r.keywords,
+          r.bibtex,
+          r.created_at,
+          r.updated_at
+        FROM work_references wr
+        INNER JOIN "references" r ON r.id = wr.reference_id
+        WHERE wr.work_document_id = ?1
+        ORDER BY wr.sort_order ASC, wr.created_at ASC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![work_document_id], map_work_reference_row)?;
+    Ok(rows.filter_map(Result::ok).collect())
 }
 
 fn list_relations_for_library(
@@ -2068,6 +2343,164 @@ fn normalize_doi_value(input: &str) -> String {
         .replace("doi:", "")
         .trim()
         .to_string()
+}
+
+fn normalize_reference_text(input: &str) -> String {
+    input
+        .to_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || character.is_whitespace() {
+                character
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn first_author_key_from_json(authors_json: Option<&str>) -> String {
+    let Some(raw) = authors_json else {
+        return String::new();
+    };
+
+    if let Ok(parsed) = serde_json::from_str::<Vec<String>>(raw) {
+        return normalize_reference_text(parsed.first().map(String::as_str).unwrap_or(""));
+    }
+
+    normalize_reference_text(raw)
+}
+
+fn title_tokens(input: &str) -> Vec<String> {
+    normalize_reference_text(input)
+        .split(' ')
+        .filter(|token| token.len() >= 3)
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn jaccard_similarity(left: &[String], right: &[String]) -> f64 {
+    if left.is_empty() || right.is_empty() {
+        return 0.0;
+    }
+
+    let left_set: BTreeSet<_> = left.iter().collect();
+    let right_set: BTreeSet<_> = right.iter().collect();
+    let intersection = left_set.intersection(&right_set).count() as f64;
+    let union = left_set.union(&right_set).count() as f64;
+    if union <= 0.0 { 0.0 } else { intersection / union }
+}
+
+fn resolve_matching_document_for_reference(
+    conn: &Connection,
+    work_document_id: &str,
+    title: &str,
+    authors_json: Option<&str>,
+    year: Option<i64>,
+    doi: Option<&str>,
+) -> Result<(Option<String>, Option<String>, Option<f64>), AppError> {
+    let normalized_doi = doi.map(normalize_doi_value).unwrap_or_default();
+    if !normalized_doi.is_empty() {
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, doi
+            FROM documents
+            WHERE id != ?1
+              AND doi IS NOT NULL
+              AND TRIM(doi) != ''
+            ORDER BY updated_at DESC, created_at DESC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![work_document_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (document_id, candidate_doi) = row?;
+            if normalize_doi_value(&candidate_doi) == normalized_doi {
+                return Ok((Some(document_id), Some("doi_exact".to_string()), Some(0.99)));
+            }
+        }
+    }
+
+    let normalized_title = normalize_reference_text(title);
+    if normalized_title.is_empty() {
+        return Ok((None, None, None));
+    }
+
+    let reference_author = first_author_key_from_json(authors_json);
+    let reference_tokens = title_tokens(title);
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT id, title, authors, year
+        FROM documents
+        WHERE id != ?1
+        ORDER BY updated_at DESC, created_at DESC
+        "#,
+    )?;
+    let rows = stmt.query_map(params![work_document_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+        ))
+    })?;
+
+    let mut best_match: Option<(String, String, f64)> = None;
+    for row in rows {
+        let (document_id, candidate_title, candidate_authors, candidate_year) = row?;
+        let candidate_normalized_title = normalize_reference_text(&candidate_title);
+        if candidate_normalized_title == normalized_title {
+            return Ok((Some(document_id), Some("title_exact".to_string()), Some(0.94)));
+        }
+
+        let similarity = jaccard_similarity(&reference_tokens, &title_tokens(&candidate_title));
+        if similarity < 0.52 {
+            continue;
+        }
+
+        let year_matches = year.is_some() && candidate_year.is_some() && year == candidate_year;
+        let author_matches =
+            !reference_author.is_empty() && reference_author == first_author_key_from_json(Some(&candidate_authors));
+
+        let (method, confidence) = if similarity >= 0.86 && year_matches && author_matches {
+            ("title_firstauthor_year".to_string(), 0.91)
+        } else if similarity >= 0.82 && year_matches {
+            ("title_year".to_string(), 0.86)
+        } else if similarity >= 0.74 && year_matches && author_matches {
+            ("title_firstauthor_year".to_string(), 0.83)
+        } else if similarity >= 0.72 && year_matches {
+            ("title_year".to_string(), 0.78)
+        } else if similarity >= 0.68 && year_matches && author_matches {
+            ("title_firstauthor_year".to_string(), 0.76)
+        } else {
+            let mut confidence = 0.48 + similarity * 0.28;
+            if year_matches {
+                confidence += 0.10;
+            }
+            if author_matches {
+                confidence += 0.08;
+            }
+            ("fuzzy_title".to_string(), confidence.min(0.96))
+        };
+
+        if confidence < 0.62 {
+            continue;
+        }
+
+        match &best_match {
+            Some((_, _, current_confidence)) if *current_confidence >= confidence => {}
+            _ => best_match = Some((document_id, method, confidence)),
+        }
+    }
+
+    Ok(match best_match {
+        Some((document_id, method, confidence)) => (Some(document_id), Some(method), Some(confidence)),
+        None => (None, None, None),
+    })
 }
 
 fn resolve_matching_document_id_for_doi(
@@ -3472,6 +3905,592 @@ pub fn list_document_relations_for_library(
 ) -> Result<Vec<DocumentRelation>, AppError> {
     let conn = open_db(&app)?;
     list_relations_for_library(&conn, &library_id)
+}
+
+#[tauri::command]
+pub fn list_references(app: AppHandle) -> Result<Vec<Reference>, AppError> {
+    let conn = open_db(&app)?;
+    list_references_all(&conn)
+}
+
+#[tauri::command]
+pub fn create_reference(
+    app: AppHandle,
+    input: CreateReferenceInput,
+) -> Result<Reference, AppError> {
+    let conn = open_db(&app)?;
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err(AppError::Validation(
+            "Reference title is required.".to_string(),
+        ));
+    }
+
+    if let Some(document_id) = input.document_id.as_deref() {
+        if !document_exists(&conn, document_id)? {
+            return Err(AppError::Validation(
+                "Linked document was not found.".to_string(),
+            ));
+        }
+    }
+
+    let id = format!("reference-{}", uuid::Uuid::new_v4());
+    let now = now_iso();
+    let normalized_doi = input
+        .doi
+        .as_deref()
+        .map(normalize_doi_value)
+        .filter(|value| !value.is_empty());
+
+    conn.execute(
+        r#"
+        INSERT INTO "references" (
+          id,
+          document_id,
+          type,
+          citation_key,
+          title,
+          authors,
+          year,
+          journal,
+          volume,
+          issue,
+          pages,
+          publisher,
+          booktitle,
+          doi,
+          url,
+          abstract,
+          keywords,
+          bibtex,
+          created_at,
+          updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?19)
+        "#,
+        params![
+            id.clone(),
+            input.document_id,
+            input.r#type.trim(),
+            input.citation_key.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            title,
+            input.authors.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.year,
+            input.journal.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.volume.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.issue.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.pages.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.publisher.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.booktitle.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            normalized_doi,
+            input.url.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.abstract_text.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.keywords.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.bibtex.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            now,
+        ],
+    )?;
+
+    conn.query_row(
+        r#"
+        SELECT
+          id,
+          document_id,
+          type,
+          citation_key,
+          title,
+          authors,
+          year,
+          journal,
+          volume,
+          issue,
+          pages,
+          publisher,
+          booktitle,
+          doi,
+          url,
+          abstract,
+          keywords,
+          bibtex,
+          created_at,
+          updated_at
+        FROM "references"
+        WHERE id = ?1
+        "#,
+        params![id],
+        map_reference_row,
+    )
+    .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub fn update_reference(
+    app: AppHandle,
+    id: String,
+    input: UpdateReferenceInput,
+) -> Result<Option<Reference>, AppError> {
+    let conn = open_db(&app)?;
+
+    if let Some(document_id) = input.document_id.as_deref() {
+        if !document_exists(&conn, document_id)? {
+            return Err(AppError::Validation(
+                "Linked document was not found.".to_string(),
+            ));
+        }
+    }
+
+    if let Some(title) = input.title.as_deref() {
+        if title.trim().is_empty() {
+            return Err(AppError::Validation(
+                "Reference title is required.".to_string(),
+            ));
+        }
+    }
+
+    conn.execute(
+        r#"
+        UPDATE "references" SET
+          document_id = COALESCE(?1, document_id),
+          type = COALESCE(?2, type),
+          citation_key = COALESCE(?3, citation_key),
+          title = COALESCE(?4, title),
+          authors = COALESCE(?5, authors),
+          year = COALESCE(?6, year),
+          journal = COALESCE(?7, journal),
+          volume = COALESCE(?8, volume),
+          issue = COALESCE(?9, issue),
+          pages = COALESCE(?10, pages),
+          publisher = COALESCE(?11, publisher),
+          booktitle = COALESCE(?12, booktitle),
+          doi = COALESCE(?13, doi),
+          url = COALESCE(?14, url),
+          abstract = COALESCE(?15, abstract),
+          keywords = COALESCE(?16, keywords),
+          bibtex = COALESCE(?17, bibtex),
+          updated_at = ?18
+        WHERE id = ?19
+        "#,
+        params![
+            input.document_id,
+            input.r#type.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.citation_key.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.title.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.authors.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.year,
+            input.journal.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.volume.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.issue.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.pages.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.publisher.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.booktitle.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input
+                .doi
+                .map(|value| normalize_doi_value(&value))
+                .filter(|value| !value.is_empty()),
+            input.url.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.abstract_text.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.keywords.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            input.bibtex.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+            now_iso(),
+            id,
+        ],
+    )?;
+
+    conn.query_row(
+        r#"
+        SELECT
+          id,
+          document_id,
+          type,
+          citation_key,
+          title,
+          authors,
+          year,
+          journal,
+          volume,
+          issue,
+          pages,
+          publisher,
+          booktitle,
+          doi,
+          url,
+          abstract,
+          keywords,
+          bibtex,
+          created_at,
+          updated_at
+        FROM "references"
+        WHERE id = ?1
+        "#,
+        params![id],
+        map_reference_row,
+    )
+    .optional()
+    .map_err(AppError::from)
+}
+
+#[tauri::command]
+pub fn list_work_references_for_document(
+    app: AppHandle,
+    work_document_id: String,
+) -> Result<Vec<WorkReference>, AppError> {
+    let conn = open_db(&app)?;
+    list_work_references_for_document_id(&conn, &work_document_id)
+}
+
+#[tauri::command]
+pub fn create_work_reference(
+    app: AppHandle,
+    input: CreateWorkReferenceInput,
+) -> Result<WorkReference, AppError> {
+    let mut conn = open_db(&app)?;
+    let tx = conn.transaction()?;
+
+    let work_document_type: Option<String> = tx
+        .query_row(
+            "SELECT document_type FROM documents WHERE id = ?1",
+            params![input.work_document_id.clone()],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    match work_document_type.as_deref() {
+        Some("my_work") => {}
+        Some(_) => {
+            return Err(AppError::Validation(
+                "References can only be attached to My work items.".to_string(),
+            ))
+        }
+        None => {
+            return Err(AppError::Validation(
+                "Work document was not found.".to_string(),
+            ))
+        }
+    }
+
+    let reference_row: Option<(String, Option<String>, Option<i64>, Option<String>)> = tx
+        .query_row(
+            r#"
+            SELECT title, authors, year, doi
+            FROM "references"
+            WHERE id = ?1
+            "#,
+            params![input.reference_id.clone()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+
+    let Some((reference_title, reference_authors, reference_year, reference_doi)) = reference_row else {
+        return Err(AppError::Validation(
+            "Reference was not found.".to_string(),
+        ));
+    };
+
+    let existing: Option<WorkReference> = tx
+        .query_row(
+            r#"
+            SELECT
+              wr.id,
+              wr.work_document_id,
+              wr.reference_id,
+              wr.sort_order,
+              wr.matched_document_id,
+              wr.match_method,
+              wr.match_confidence,
+              wr.created_at,
+              wr.updated_at,
+              r.id,
+              r.document_id,
+              r.type,
+              r.citation_key,
+              r.title,
+              r.authors,
+              r.year,
+              r.journal,
+              r.volume,
+              r.issue,
+              r.pages,
+              r.publisher,
+              r.booktitle,
+              r.doi,
+              r.url,
+              r.abstract,
+              r.keywords,
+              r.bibtex,
+              r.created_at,
+              r.updated_at
+            FROM work_references wr
+            INNER JOIN "references" r ON r.id = wr.reference_id
+            WHERE wr.work_document_id = ?1 AND wr.reference_id = ?2
+            "#,
+            params![input.work_document_id.clone(), input.reference_id.clone()],
+            map_work_reference_row,
+        )
+        .optional()?;
+
+    if let Some(existing_work_reference) = existing {
+        tx.commit()?;
+        return Ok(existing_work_reference);
+    }
+
+    let sort_order: i64 = tx.query_row(
+        "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM work_references WHERE work_document_id = ?1",
+        params![input.work_document_id.clone()],
+        |row| row.get(0),
+    )?;
+
+    let (matched_document_id, match_method, match_confidence) =
+        if input.matched_document_id.is_some()
+            || input.match_method.is_some()
+            || input.match_confidence.is_some()
+        {
+            (
+                input.matched_document_id,
+                input.match_method,
+                input.match_confidence,
+            )
+        } else {
+            resolve_matching_document_for_reference(
+                &tx,
+                &input.work_document_id,
+                &reference_title,
+                reference_authors.as_deref(),
+                reference_year,
+                reference_doi.as_deref(),
+            )?
+        };
+
+    let id = format!("work-reference-{}", uuid::Uuid::new_v4());
+    let now = now_iso();
+    tx.execute(
+        r#"
+        INSERT INTO work_references (
+          id,
+          work_document_id,
+          reference_id,
+          sort_order,
+          matched_document_id,
+          match_method,
+          match_confidence,
+          created_at,
+          updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+        "#,
+        params![
+            id.clone(),
+            input.work_document_id.clone(),
+            input.reference_id,
+            sort_order,
+            matched_document_id,
+            match_method,
+            match_confidence,
+            now,
+        ],
+    )?;
+
+    let created = tx.query_row(
+        r#"
+        SELECT
+          wr.id,
+          wr.work_document_id,
+          wr.reference_id,
+          wr.sort_order,
+          wr.matched_document_id,
+          wr.match_method,
+          wr.match_confidence,
+          wr.created_at,
+          wr.updated_at,
+          r.id,
+          r.document_id,
+          r.type,
+          r.citation_key,
+          r.title,
+          r.authors,
+          r.year,
+          r.journal,
+          r.volume,
+          r.issue,
+          r.pages,
+          r.publisher,
+          r.booktitle,
+          r.doi,
+          r.url,
+          r.abstract,
+          r.keywords,
+          r.bibtex,
+          r.created_at,
+          r.updated_at
+        FROM work_references wr
+        INNER JOIN "references" r ON r.id = wr.reference_id
+        WHERE wr.id = ?1
+        "#,
+        params![id],
+        map_work_reference_row,
+    )?;
+    tx.commit()?;
+    Ok(created)
+}
+
+#[tauri::command]
+pub fn delete_work_reference(app: AppHandle, id: String) -> Result<bool, AppError> {
+    let conn = open_db(&app)?;
+    let rows = conn.execute("DELETE FROM work_references WHERE id = ?1", params![id])?;
+    Ok(rows > 0)
+}
+
+#[tauri::command]
+pub fn reorder_work_references(
+    app: AppHandle,
+    work_document_id: String,
+    work_reference_ids: Vec<String>,
+) -> Result<Vec<WorkReference>, AppError> {
+    let mut conn = open_db(&app)?;
+    let tx = conn.transaction()?;
+
+    let existing_ids = {
+        let mut stmt = tx.prepare(
+            "SELECT id FROM work_references WHERE work_document_id = ?1 ORDER BY sort_order ASC, created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![work_document_id.clone()], |row| row.get::<_, String>(0))?;
+        rows.filter_map(Result::ok).collect::<Vec<_>>()
+    };
+
+    if existing_ids.len() != work_reference_ids.len()
+        || !existing_ids
+            .iter()
+            .all(|id| work_reference_ids.iter().any(|candidate| candidate == id))
+    {
+        return Err(AppError::Validation(
+            "The provided reference order does not match the work bibliography.".to_string(),
+        ));
+    }
+
+    for (index, work_reference_id) in work_reference_ids.iter().enumerate() {
+        tx.execute(
+            r#"
+            UPDATE work_references
+            SET sort_order = ?1,
+                updated_at = ?2
+            WHERE id = ?3 AND work_document_id = ?4
+            "#,
+            params![index as i64, now_iso(), work_reference_id, work_document_id.clone()],
+        )?;
+    }
+
+    let ordered = list_work_references_for_document_id(&tx, &work_document_id)?;
+    tx.commit()?;
+    Ok(ordered)
+}
+
+#[tauri::command]
+pub fn recheck_work_reference_matches(
+    app: AppHandle,
+    work_document_id: Option<String>,
+) -> Result<Vec<WorkReference>, AppError> {
+    let mut conn = open_db(&app)?;
+    let tx = conn.transaction()?;
+
+    let rows = {
+        let mut stmt = tx.prepare(
+            r#"
+            SELECT
+              wr.id,
+              wr.work_document_id,
+              r.title,
+              r.authors,
+              r.year,
+              r.doi
+            FROM work_references wr
+            INNER JOIN "references" r ON r.id = wr.reference_id
+            WHERE (?1 IS NULL OR wr.work_document_id = ?1)
+            ORDER BY wr.work_document_id ASC, wr.sort_order ASC, wr.created_at ASC
+            "#,
+        )?;
+        let mapped = stmt.query_map(params![work_document_id.clone()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })?;
+        mapped.filter_map(Result::ok).collect::<Vec<_>>()
+    };
+
+    let now = now_iso();
+    for (id, current_work_document_id, title, authors, year, doi) in rows {
+        let (matched_document_id, match_method, match_confidence) =
+            resolve_matching_document_for_reference(
+                &tx,
+                &current_work_document_id,
+                &title,
+                authors.as_deref(),
+                year,
+                doi.as_deref(),
+            )?;
+
+        tx.execute(
+            r#"
+            UPDATE work_references
+            SET matched_document_id = ?1,
+                match_method = ?2,
+                match_confidence = ?3,
+                updated_at = ?4
+            WHERE id = ?5
+            "#,
+            params![matched_document_id, match_method, match_confidence, now, id],
+        )?;
+    }
+
+    let refreshed = if let Some(work_document_id) = work_document_id {
+        list_work_references_for_document_id(&tx, &work_document_id)?
+    } else {
+        let mut stmt = tx.prepare(
+            r#"
+            SELECT
+              wr.id,
+              wr.work_document_id,
+              wr.reference_id,
+              wr.sort_order,
+              wr.matched_document_id,
+              wr.match_method,
+              wr.match_confidence,
+              wr.created_at,
+              wr.updated_at,
+              r.id,
+              r.document_id,
+              r.type,
+              r.citation_key,
+              r.title,
+              r.authors,
+              r.year,
+              r.journal,
+              r.volume,
+              r.issue,
+              r.pages,
+              r.publisher,
+              r.booktitle,
+              r.doi,
+              r.url,
+              r.abstract,
+              r.keywords,
+              r.bibtex,
+              r.created_at,
+              r.updated_at
+            FROM work_references wr
+            INNER JOIN "references" r ON r.id = wr.reference_id
+            ORDER BY wr.work_document_id ASC, wr.sort_order ASC, wr.created_at ASC
+            "#,
+        )?;
+        let rows = stmt.query_map([], map_work_reference_row)?;
+        rows.filter_map(Result::ok).collect::<Vec<_>>()
+    };
+
+    tx.commit()?;
+    Ok(refreshed)
 }
 
 #[tauri::command]

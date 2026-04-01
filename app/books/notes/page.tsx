@@ -4,6 +4,16 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, BookMarked, Plus, Save, Trash2 } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -36,6 +46,7 @@ export default function PhysicalBookNotesPage() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [draft, setDraft] = useState<BookNoteDraft>(DEFAULT_DRAFT)
   const [isSaving, setIsSaving] = useState(false)
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
 
   const bookNotes = useMemo(
     () =>
@@ -115,13 +126,12 @@ export default function PhysicalBookNotesPage() {
 
   const handleDelete = async () => {
     if (!draft.id || !isDesktopApp) return
-    const confirmed = window.confirm('Delete this book note?')
-    if (!confirmed) return
 
     await repo.deleteNote(draft.id)
     await loadNotes()
     setSelectedNoteId(null)
     setDraft(DEFAULT_DRAFT)
+    setIsDeleteDialogOpen(false)
   }
 
   return (
@@ -228,12 +238,12 @@ export default function PhysicalBookNotesPage() {
                   {selectedNote ? `Last updated ${new Date(selectedNote.updatedAt).toLocaleString()}` : 'Not saved yet'}
                 </div>
                 <div className="flex items-center gap-2">
-                  {draft.id ? (
-                    <Button variant="destructive" onClick={() => void handleDelete()}>
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Delete
-                    </Button>
-                  ) : null}
+                {draft.id ? (
+                  <Button variant="destructive" onClick={() => setIsDeleteDialogOpen(true)}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </Button>
+                ) : null}
                   <Button onClick={() => void handleSave()} disabled={isSaving || !draft.content.trim()}>
                     <Save className="mr-2 h-4 w-4" />
                     {isSaving ? 'Saving...' : 'Save Note'}
@@ -244,6 +254,22 @@ export default function PhysicalBookNotesPage() {
           </Card>
         </div>
       </div>
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this book note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the selected note.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleDelete()}>
+              Delete Note
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
