@@ -185,5 +185,11 @@ jobs:
           body: ${{ needs.prepare-release.outputs.release_notes }}
           generate_release_notes: true
           files: |
-            release-assets/windows/**/*
-            release-assets/macos/**/*
+            release-assets/windows/**/*.msi
+            release-assets/windows/**/*.exe
+            release-assets/windows/**/*.sig
+            release-assets/windows/**/latest.json
+            release-assets/macos/**/*.app
+            release-assets/macos/**/*.dmg
+            release-assets/macos/**/*.tar.gz
+            release-assets/macos/**/*.sig
