@@ -108,6 +108,7 @@ export default function HomePage() {
   const [userName, setUserName] = useState('')
   const [greetingIndex, setGreetingIndex] = useState(0)
   const [expandedActivityIds, setExpandedActivityIds] = useState<string[]>([])
+  const [typedGreetingTitle, setTypedGreetingTitle] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -227,19 +228,19 @@ export default function HomePage() {
       ? [
           {
             title: t('home.welcomeBackNamed', { name: userName }),
-            subtitle: t('home.ideasTodayNamed', { name: userName }),
+            subtitle: t('home.ideasToday'),
           },
           {
             title: t('home.goodToSeeNamed', { name: userName }),
-            subtitle: t('home.exploringTodayNamed', { name: userName }),
+            subtitle: t('home.exploringToday'),
           },
           {
             title: t('home.backAtItNamed', { name: userName }),
-            subtitle: t('home.attentionTodayNamed', { name: userName }),
+            subtitle: t('home.attentionToday'),
           },
           {
             title: t('home.welcomeBackNamed', { name: userName }),
-            subtitle: t('home.moveForwardNamed', { name: userName }),
+            subtitle: t('home.moveForwardToday'),
           },
         ]
       : [
@@ -264,6 +265,24 @@ export default function HomePage() {
     return greetings[greetingIndex % greetings.length]
   }, [greetingIndex, t, userName])
 
+  useEffect(() => {
+    setTypedGreetingTitle('')
+
+    if (!greeting.title) return
+
+    let index = 0
+    const intervalId = window.setInterval(() => {
+      index += 1
+      setTypedGreetingTitle(greeting.title.slice(0, index))
+
+      if (index >= greeting.title.length) {
+        window.clearInterval(intervalId)
+      }
+    }, 42)
+
+    return () => window.clearInterval(intervalId)
+  }, [greeting.title])
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex items-center gap-3">
@@ -271,7 +290,10 @@ export default function HomePage() {
           <Home className="h-6 w-6" />
         </div>
         <div>
-          <h1 className="text-2xl font-semibold">{greeting.title}</h1>
+          <h1 className="text-2xl font-semibold">
+            <span>{typedGreetingTitle}</span>
+            <span className="refx-type-cursor" aria-hidden="true" />
+          </h1>
           <p className="text-muted-foreground">{greeting.subtitle}</p>
         </div>
       </div>

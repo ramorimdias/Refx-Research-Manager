@@ -815,18 +815,39 @@ export default function SettingsPage() {
                     </div>
 
                     <div>
-                      <Label className="text-sm font-medium">Semantic Scholar API Key</Label>
+                      <Label className="text-sm font-medium">Semantic Scholar API</Label>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Leave blank to use the bundled default key. Add your own if you want a less busy quota for this device.
+                        Choose whether to use the bundled API access or your own key for this device.
                       </p>
-                      <Input
-                        type="password"
-                        value={settings.semanticScholarApiKey}
-                        onChange={(event) => updateSettings('semanticScholarApiKey', event.target.value)}
-                        className="mt-2"
-                        placeholder="Leave blank to use the bundled default key"
-                      />
+                      <Select
+                        value={settings.semanticScholarApiMode}
+                        onValueChange={(value) => updateSettings('semanticScholarApiMode', value as StoredAppSettings['semanticScholarApiMode'])}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="builtin">Use built-in API</SelectItem>
+                          <SelectItem value="custom">Use your own API key</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
+
+                    {settings.semanticScholarApiMode === 'custom' ? (
+                      <div>
+                        <Label className="text-sm font-medium">Semantic Scholar API Key</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Add your own Semantic Scholar key for this device.
+                        </p>
+                        <Input
+                          type="password"
+                          value={settings.semanticScholarApiKey}
+                          onChange={(event) => updateSettings('semanticScholarApiKey', event.target.value)}
+                          className="mt-2"
+                          placeholder="Enter your own Semantic Scholar API key"
+                        />
+                      </div>
+                    ) : null}
 
                     <div>
                       <Label className="text-sm font-medium">Keyword Engine</Label>
@@ -872,6 +893,18 @@ export default function SettingsPage() {
                     <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_heuristic' ? 'bg-muted/20' : 'bg-background')}>
                       <Label className="text-sm font-medium">Gemini API Key</Label>
                       <p className="mt-1 text-xs text-muted-foreground">Optional. Add your own Gemini key for AI keyword extraction.</p>
+                      <p className="text-xs text-muted-foreground">
+                        Request one in{' '}
+                        <a
+                          href="https://aistudio.google.com/app/apikey"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-primary underline underline-offset-4"
+                        >
+                          Gemini Studio
+                        </a>
+                        {' '}and paste the generated API key here.
+                      </p>
                       <Input
                         type="password"
                         value={settings.geminiApiKey}

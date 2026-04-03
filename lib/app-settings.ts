@@ -45,6 +45,7 @@ export type StoredAppSettings = {
   autoOnlineMetadataEnrichment: boolean
   advancedClassificationMode: 'off' | 'local_heuristic'
   crossrefContactEmail: string
+  semanticScholarApiMode: 'builtin' | 'custom'
   semanticScholarApiKey: string
   keywordEngine: 'local_heuristic' | 'gemini'
   autoKeywordExtractionOnImport: boolean
@@ -71,7 +72,8 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   autoOnlineMetadataEnrichment: false,
   advancedClassificationMode: 'off',
   crossrefContactEmail: '',
-  semanticScholarApiKey: ENV_SEMANTIC_SCHOLAR_API_KEY,
+  semanticScholarApiMode: 'builtin',
+  semanticScholarApiKey: '',
   keywordEngine: 'local_heuristic',
   autoKeywordExtractionOnImport: true,
   autoGeminiOnImport: false,
@@ -143,9 +145,23 @@ function parseValue<T>(value: string | undefined, fallback: T): T {
   }
 }
 
-function resolveSemanticScholarApiKey(value: string | undefined): string {
-  const parsed = parseValue(value, '').trim()
-  return parsed || ENV_SEMANTIC_SCHOLAR_API_KEY
+function parseStoredSemanticScholarApiKey(value: string | undefined): string {
+  return parseValue(value, '').trim()
+}
+
+function resolveSemanticScholarApiMode(
+  modeValue: string | undefined,
+  keyValue: string | undefined,
+): StoredAppSettings['semanticScholarApiMode'] {
+  const parsedMode = parseValue<StoredAppSettings['semanticScholarApiMode'] | ''>(modeValue, '')
+  if (parsedMode === 'builtin' || parsedMode === 'custom') return parsedMode
+
+  const parsedKey = parseStoredSemanticScholarApiKey(keyValue)
+  if (parsedKey.length > 0 && (!ENV_SEMANTIC_SCHOLAR_API_KEY || parsedKey !== ENV_SEMANTIC_SCHOLAR_API_KEY)) {
+    return 'custom'
+  }
+
+  return 'builtin'
 }
 
 function resolveGeminiApiKey(value: string | undefined): string {
@@ -162,6 +178,14 @@ export function getResolvedGeminiApiKey(settings: Pick<StoredAppSettings, 'gemin
   return settings.geminiApiKey.trim() || ENV_GEMINI_API_KEY
 }
 
+export function getResolvedSemanticScholarApiKey(
+  settings: Pick<StoredAppSettings, 'semanticScholarApiMode' | 'semanticScholarApiKey'>,
+) {
+  return settings.semanticScholarApiMode === 'custom'
+    ? settings.semanticScholarApiKey.trim()
+    : ENV_SEMANTIC_SCHOLAR_API_KEY
+}
+
 export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppSettings> {
   if (!isDesktopApp) {
     if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS
@@ -172,7 +196,11 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
       locale: parsed.locale ?? DEFAULT_APP_SETTINGS.locale,
-      semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() || ENV_SEMANTIC_SCHOLAR_API_KEY,
+      semanticScholarApiMode: resolveSemanticScholarApiMode(
+        typeof parsed.semanticScholarApiMode === 'string' ? parsed.semanticScholarApiMode : undefined,
+        typeof parsed.semanticScholarApiKey === 'string' ? parsed.semanticScholarApiKey : undefined,
+      ),
+      semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() ?? DEFAULT_APP_SETTINGS.semanticScholarApiKey,
       keywordEngine: normalizeKeywordEngine(parsed.keywordEngine as StoredAppSettings['keywordEngine'] | 'local_keybert' | undefined),
       autoKeywordExtractionOnImport:
         parsed.autoKeywordExtractionOnImport ?? DEFAULT_APP_SETTINGS.autoKeywordExtractionOnImport,
@@ -208,7 +236,8 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       DEFAULT_APP_SETTINGS.advancedClassificationMode,
     ),
     crossrefContactEmail: parseValue(stored.crossrefContactEmail, DEFAULT_APP_SETTINGS.crossrefContactEmail),
-    semanticScholarApiKey: resolveSemanticScholarApiKey(stored.semanticScholarApiKey),
+    semanticScholarApiMode: resolveSemanticScholarApiMode(stored.semanticScholarApiMode, stored.semanticScholarApiKey),
+    semanticScholarApiKey: parseStoredSemanticScholarApiKey(stored.semanticScholarApiKey),
     keywordEngine: normalizeKeywordEngine(parseValue(stored.keywordEngine, DEFAULT_APP_SETTINGS.keywordEngine) as StoredAppSettings['keywordEngine'] | 'local_keybert'),
     autoKeywordExtractionOnImport: parseValue(
       stored.autoKeywordExtractionOnImport,
@@ -253,6 +282,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     autoOnlineMetadataEnrichment: JSON.stringify(settings.autoOnlineMetadataEnrichment),
     advancedClassificationMode: JSON.stringify(settings.advancedClassificationMode),
     crossrefContactEmail: JSON.stringify(settings.crossrefContactEmail),
+    semanticScholarApiMode: JSON.stringify(settings.semanticScholarApiMode),
     semanticScholarApiKey: JSON.stringify(settings.semanticScholarApiKey),
     keywordEngine: JSON.stringify(settings.keywordEngine),
     autoKeywordExtractionOnImport: JSON.stringify(settings.autoKeywordExtractionOnImport),

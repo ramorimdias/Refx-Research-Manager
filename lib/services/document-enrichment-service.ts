@@ -1,7 +1,7 @@
 'use client'
 
 import type { DbDocument } from '@/lib/repositories/local-db'
-import { loadAppSettings, type StoredAppSettings } from '@/lib/app-settings'
+import { getResolvedSemanticScholarApiKey, loadAppSettings, type StoredAppSettings } from '@/lib/app-settings'
 import {
   lookupCrossrefMetadata,
   lookupOpenAlexMetadata,
@@ -248,7 +248,7 @@ export async function loadOnlineMetadataEnrichmentSettings(isDesktopApp: boolean
   const settings = await loadAppSettings(isDesktopApp)
   return {
     crossrefContactEmail: settings.crossrefContactEmail,
-    semanticScholarApiKey: settings.semanticScholarApiKey,
+    semanticScholarApiKey: getResolvedSemanticScholarApiKey(settings),
   } satisfies OnlineMetadataEnrichmentSettings
 }
 
