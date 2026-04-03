@@ -399,3 +399,21 @@
 .stage-skimmed { --stage-color: oklch(0.70 0.15 85); }
 .stage-read { --stage-color: oklch(0.55 0.15 160); }
 .stage-archived { --stage-color: oklch(0.50 0.01 260); }
+
+/* App-wide text selection defaults */
+body,
+body * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+select,
+[contenteditable='true'],
+[contenteditable=''],
+[data-allow-select],
+.allow-select {
+  -webkit-user-select: text;
+  user-select: text;
+}
