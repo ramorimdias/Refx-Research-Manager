@@ -74,7 +74,7 @@ export default function ReportsPage() {
       </div>
 
       <div className="space-y-6 p-6">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-tour-id="reports-summary">
           <StatsCard label="Total Documents" value={stats.totalDocuments} icon={FileText} />
           <StatsCard label="Finished" value={stats.readDocuments} icon={BookOpen} />
           <StatsCard label="Currently Reading" value={stats.readingDocuments} icon={Clock} />

@@ -2,12 +2,14 @@
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
   "description": "Default capabilities for Refx desktop app",
-  "windows": ["main", "reader-*"],
+  "windows": ["main", "splash", "reader-*"],
   "permissions": [
     "core:default",
     "core:window:default",
     "core:window:allow-create",
     "core:window:allow-close",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-set-size",
@@ -32,7 +34,10 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        "$APPDATA/**"
+        "$APPDATA/**",
+        "$DOCUMENT/**",
+        "$DOWNLOAD/**",
+        "$HOME/**"
       ]
     },
     "dialog:default",

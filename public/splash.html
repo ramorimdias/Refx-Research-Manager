@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Refx</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        background:
+          radial-gradient(circle at top, #dbeafe 0%, #f8fafc 34%, #eef2ff 100%);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top, #dbeafe 0%, #f8fafc 34%, #eef2ff 100%);
+        color: #0f172a;
+      }
+
+      .shell {
+        position: relative;
+        display: grid;
+        width: 100%;
+        height: 100%;
+        place-items: center;
+        overflow: hidden;
+      }
+
+      .glow {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(52px);
+        opacity: 0.75;
+      }
+
+      .glow-a {
+        top: 24px;
+        left: 18px;
+        width: 168px;
+        height: 168px;
+        background: rgba(125, 211, 252, 0.35);
+      }
+
+      .glow-b {
+        right: -22px;
+        top: 2px;
+        width: 210px;
+        height: 210px;
+        background: rgba(253, 224, 71, 0.22);
+      }
+
+      .glow-c {
+        bottom: -28px;
+        left: 108px;
+        width: 196px;
+        height: 196px;
+        background: rgba(52, 211, 153, 0.18);
+      }
+
+      .card {
+        position: relative;
+        z-index: 1;
+        width: 286px;
+        padding: 34px 26px 28px;
+        border: 1px solid rgba(255, 255, 255, 0.72);
+        border-radius: 32px;
+        background: rgba(255, 255, 255, 0.8);
+        box-shadow: 0 28px 120px rgba(15, 23, 42, 0.18);
+        backdrop-filter: blur(18px);
+        text-align: center;
+      }
+
+      .logo-frame {
+        display: inline-grid;
+        width: 88px;
+        height: 88px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.78);
+        border-radius: 28px;
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.12);
+      }
+
+      .logo-frame img {
+        width: 56px;
+        height: 56px;
+      }
+
+      h1 {
+        margin: 20px 0 0;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+      }
+
+      p {
+        margin: 10px 0 0;
+        font-size: 13px;
+        min-height: 40px;
+        line-height: 1.55;
+        color: rgba(51, 65, 85, 0.9);
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 18px;
+        height: 18px;
+        margin-top: 18px;
+        border: 2px solid rgba(37, 99, 235, 0.18);
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: spin 0.85s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <div class="glow glow-a"></div>
+      <div class="glow glow-b"></div>
+      <div class="glow glow-c"></div>
+      <section class="card" aria-label="Application is loading">
+        <div class="logo-frame">
+          <img src="/icon.svg" alt="Refx" />
+        </div>
+        <h1>Refx Research Manager</h1>
+        <p id="phrase">Preparing your library, references, and reader workspace.</p>
+        <span class="spinner" aria-hidden="true"></span>
+      </section>
+    </main>
+    <script>
+      const loadingCopy = {
+        en: [
+          'Loading next Nobel Prize works...',
+          'Loading cure of cancer...',
+          'Loading refrigerator user manual...',
+          'Indexing groundbreaking footnotes...',
+          'Calibrating academic chaos...',
+          'Summoning very important PDFs...',
+          'Dusting off unread masterpieces...',
+          'Organizing suspiciously ambitious reading plans...',
+          'Untangling references with heroic confidence...',
+          'Preparing your future literature review...',
+          'Warming up citation engines...',
+          'Locating the paragraph you swear you read yesterday...',
+          'Loading the paper that will absolutely fix reviewer #2...',
+          'Sorting citations like socks that almost match...',
+          'Checking whether that DOI was real or just confidence...',
+          'Loading highly peer-reviewed procrastination...',
+          'Reheating your finest half-finished ideas...',
+          'Preparing world-changing research and one random PDF about chairs...',
+          'Counting how many tabs became a methodology...',
+          'Looking for the sentence you highlighted with great conviction...',
+        ],
+        'pt-BR': [
+          'Carregando os próximos trabalhos ganhadores do Nobel...',
+          'Carregando a cura do câncer...',
+          'Carregando o manual da geladeira...',
+          'Indexando notas de rodapé revolucionárias...',
+          'Calibrando o caos acadêmico...',
+          'Invocando PDFs muito importantes...',
+          'Tirando a poeira de obras-primas ainda não lidas...',
+          'Organizando planos de leitura suspeitamente ambiciosos...',
+          'Desembaraçando referências com confiança heroica...',
+          'Preparando sua futura revisão de literatura...',
+          'Aquecendo os motores de citação...',
+          'Procurando o parágrafo que você jura que leu ontem...',
+          'Carregando o artigo que definitivamente vai convencer o revisor 2...',
+          'Separando citações como meias que quase combinam...',
+          'Confirmando se esse DOI existe mesmo ou foi só coragem...',
+          'Carregando procrastinação altamente revisada por pares...',
+          'Reaquecendo suas melhores ideias pela metade...',
+          'Preparando pesquisas que vão mudar o mundo e um PDF aleatório sobre cadeiras...',
+          'Contando quantas abas viraram metodologia...',
+          'Procurando a frase que você destacou com convicção absoluta...',
+        ],
+        fr: [
+          'Chargement des prochains travaux Nobel...',
+          'Chargement du remède contre le cancer...',
+          'Chargement du manuel du réfrigérateur...',
+          'Indexation de notes de bas de page révolutionnaires...',
+          'Calibration du chaos académique...',
+          'Invocation de PDF extrêmement importants...',
+          'Dépoussiérage de chefs-d’œuvre encore jamais lus...',
+          'Organisation de plans de lecture scandaleusement ambitieux...',
+          'Démêlage héroïque des références...',
+          'Préparation de votre future revue de littérature...',
+          'Mise en chauffe des moteurs de citation...',
+          'Recherche du paragraphe que vous jurez avoir lu hier...',
+          'Chargement de l’article qui convaincra enfin le relecteur numéro 2...',
+          'Tri des citations comme des chaussettes presque assorties...',
+          'Vérification que ce DOI existe vraiment et n’était pas juste de l’assurance...',
+          'Chargement d’une procrastination relue par les pairs...',
+          'Réchauffage de vos meilleures idées à moitié terminées...',
+          'Préparation de recherches qui vont changer le monde et d’un PDF aléatoire sur les chaises...',
+          'Comptage du nombre d’onglets devenus une méthodologie...',
+          'Recherche de la phrase surlignée avec une confiance absolue...',
+        ],
+      };
+
+      const SPLASH_LOCALE_STORAGE_KEY = 'refx-splash-locale';
+
+      function detectLocale() {
+        try {
+          const storedLocale = window.localStorage.getItem(SPLASH_LOCALE_STORAGE_KEY);
+          if (storedLocale === 'en' || storedLocale === 'pt-BR' || storedLocale === 'fr') {
+            return storedLocale;
+          }
+        } catch {}
+
+        const language = navigator.language || 'en';
+        if (language.startsWith('pt')) return 'pt-BR';
+        if (language.startsWith('fr')) return 'fr';
+        return 'en';
+      }
+
+      const locale = detectLocale();
+      const phrases = loadingCopy[locale] || loadingCopy.en;
+      const phraseNode = document.getElementById('phrase');
+      let phraseIndex = Math.floor(Math.random() * phrases.length);
+
+      function paintPhrase() {
+        phraseNode.textContent = phrases[phraseIndex] || phrases[0];
+      }
+
+      paintPhrase();
+
+      window.setInterval(() => {
+        phraseIndex = (phraseIndex + 1) % phrases.length;
+        paintPhrase();
+      }, 2200);
+    </script>
+  </body>
+</html>

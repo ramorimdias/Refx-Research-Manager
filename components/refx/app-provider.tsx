@@ -1,14 +1,21 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Image from 'next/image'
+import { useEffect, useRef, useState } from 'react'
 import { useUiStore } from '@/lib/stores/ui-store'
 import { useRuntimeActions, useRuntimeState } from '@/lib/stores/runtime-store'
-import { Loader2 } from 'lucide-react'
-import { getBaseThemeMode, getThemeAccentVariant, loadAppSettings, saveAppSettings, type StoredAppSettings } from '@/lib/app-settings'
+import {
+  getBaseThemeMode,
+  getThemeAccentVariant,
+  loadAppSettings,
+  saveAppSettings,
+  SPLASH_LOCALE_STORAGE_KEY,
+  type StoredAppSettings,
+} from '@/lib/app-settings'
 import * as repo from '@/lib/repositories/local-db'
 import { useTheme } from 'next-themes'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
+import { AppTourProvider } from '@/components/refx/app-tour-provider'
+import { AppLoadingScreen } from '@/components/refx/app-loading-screen'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -28,11 +35,13 @@ import {
   downloadAndInstallAppUpdate,
   type AppUpdateSummary,
 } from '@/lib/services/app-update-service'
-import { getCurrentWindow, isTauri } from '@/lib/tauri/client'
+import { getCurrentWindow, isTauri, WebviewWindow } from '@/lib/tauri/client'
 
 interface AppProviderProps {
   children: React.ReactNode
 }
+
+const DEBUG_LOADING_SPLASH_UNTIL_KEY = 'refx.debug.loading-splash-until'
 
 export function AppProvider({ children }: AppProviderProps) {
   const [isUiPrefsReady, setIsUiPrefsReady] = useState(false)
@@ -40,12 +49,15 @@ export function AppProvider({ children }: AppProviderProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [appSettings, setAppSettings] = useState<StoredAppSettings | null>(null)
   const [isNameDialogOpen, setIsNameDialogOpen] = useState(false)
+  const [isWelcomeFlowResolved, setIsWelcomeFlowResolved] = useState(false)
   const [draftUserName, setDraftUserName] = useState('')
   const [dontAskNameAgain, setDontAskNameAgain] = useState(false)
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateSummary | null>(null)
   const [isUpdateDialogOpen, setIsUpdateDialogOpen] = useState(false)
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
   const [updateInstallStatus, setUpdateInstallStatus] = useState<string | null>(null)
+  const [debugSplashUntil, setDebugSplashUntil] = useState<number | null>(null)
+  const hasRevealedDesktopWindow = useRef(false)
   const { initialize } = useRuntimeActions()
   const { initialized, isDesktopApp } = useRuntimeState()
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed)
@@ -72,9 +84,12 @@ export function AppProvider({ children }: AppProviderProps) {
     const applySettings = async () => {
       const settings = await loadAppSettings(isDesktopApp)
       setAppSettings(settings)
+      window.localStorage.setItem(SPLASH_LOCALE_STORAGE_KEY, settings.locale)
       setDraftUserName(settings.userName)
       setDontAskNameAgain(settings.skipNamePrompt)
-      setIsNameDialogOpen(!settings.userName.trim() && !settings.skipNamePrompt)
+      const shouldAskForName = !settings.userName.trim() && !settings.skipNamePrompt
+      setIsNameDialogOpen(shouldAskForName)
+      setIsWelcomeFlowResolved(!shouldAskForName)
       setTheme(getBaseThemeMode(settings.theme))
       const accentVariant = getThemeAccentVariant(settings.theme)
       if (accentVariant) {
@@ -188,6 +203,7 @@ export function AppProvider({ children }: AppProviderProps) {
     setAppSettings(nextSettings)
     setDontAskNameAgain(false)
     await saveAppSettings(isDesktopApp, nextSettings)
+    setIsWelcomeFlowResolved(true)
     setIsNameDialogOpen(false)
   }
 
@@ -198,11 +214,19 @@ export function AppProvider({ children }: AppProviderProps) {
     setAppSettings(nextSettings)
     setDontAskNameAgain(true)
     await saveAppSettings(isDesktopApp, nextSettings)
+    setIsWelcomeFlowResolved(true)
     setIsNameDialogOpen(false)
   }
 
   const handleWelcomeLocaleChange = (nextLocale: AppLocale) => {
     setAppSettings((current) => (current ? { ...current, locale: nextLocale } : current))
+  }
+
+  const handleMarkTourCompleted = async () => {
+    if (!appSettings || appSettings.hasCompletedAppTour) return
+    const nextSettings = { ...appSettings, hasCompletedAppTour: true }
+    setAppSettings(nextSettings)
+    await saveAppSettings(isDesktopApp, nextSettings)
   }
 
   useEffect(() => {
@@ -220,34 +244,72 @@ export function AppProvider({ children }: AppProviderProps) {
     window.localStorage.setItem('refx.ui.sidebar-collapsed', String(sidebarCollapsed))
   }, [initialized, isUiPrefsReady, sidebarCollapsed])
 
-  if (isLoading || !initialized || !isUiPrefsReady || !isSettingsReady) {
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.sessionStorage.getItem(DEBUG_LOADING_SPLASH_UNTIL_KEY)
+    if (!raw) return
+    const parsed = Number.parseInt(raw, 10)
+    if (!Number.isFinite(parsed) || parsed <= Date.now()) {
+      window.sessionStorage.removeItem(DEBUG_LOADING_SPLASH_UNTIL_KEY)
+      return
+    }
+
+    setDebugSplashUntil(parsed)
+
+    const timeoutId = window.setTimeout(() => {
+      window.sessionStorage.removeItem(DEBUG_LOADING_SPLASH_UNTIL_KEY)
+      setDebugSplashUntil(null)
+    }, Math.max(0, parsed - Date.now()))
+
+    return () => window.clearTimeout(timeoutId)
+  }, [])
+
+  const isDebugSplashActive = debugSplashUntil !== null && debugSplashUntil > Date.now()
+  const shouldShowLoadingScreen = isLoading || !initialized || !isUiPrefsReady || !isSettingsReady || isDebugSplashActive
+
+  useEffect(() => {
+    if (!isDesktopApp || !isTauri() || shouldShowLoadingScreen || hasRevealedDesktopWindow.current) return
+
+    hasRevealedDesktopWindow.current = true
+
+    void (async () => {
+      try {
+        const currentWindow = getCurrentWindow()
+        await currentWindow.show()
+        await currentWindow.setFocus().catch(() => undefined)
+
+        const splashWindow = await WebviewWindow.getByLabel('splash')
+        if (splashWindow) {
+          await splashWindow.close().catch(() => undefined)
+        }
+      } catch (error) {
+        hasRevealedDesktopWindow.current = false
+        console.warn('Failed to reveal main window after startup:', error)
+      }
+    })()
+  }, [isDesktopApp, shouldShowLoadingScreen])
+
+  if (shouldShowLoadingScreen) {
     const locale = appSettings?.locale ?? 'en'
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <div className="flex items-center gap-3">
-            <Image
-              src="/icon.svg"
-              alt="Refx"
-              width={40}
-              height={40}
-              className="h-10 w-10 rounded-xl"
-            />
-            <span className="text-2xl font-semibold">Refx</span>
-          </div>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span className="text-sm">{translate(locale, 'appProvider.loadingWorkspace')}</span>
-          </div>
-        </div>
-      </div>
+      <AppLoadingScreen
+        compact
+        locale={locale}
+        className="min-h-screen bg-[radial-gradient(circle_at_top,#dbeafe_0%,#f8fafc_34%,#eef2ff_100%)] dark:bg-[radial-gradient(circle_at_top,#1d2841_0%,#0f172a_36%,#09090b_100%)]"
+      />
     )
   }
 
   const locale = appSettings?.locale ?? 'en'
   return (
     <LocaleProvider initialLocale={locale}>
-      {!isNameDialogOpen ? children : null}
+      <AppTourProvider
+        enabled={!isNameDialogOpen}
+        shouldAutostart={Boolean(isWelcomeFlowResolved && !isNameDialogOpen && appSettings && !appSettings.hasCompletedAppTour)}
+        onTourCompleted={handleMarkTourCompleted}
+      >
+        {!isNameDialogOpen ? children : null}
+      </AppTourProvider>
       <AppUpdateDialog
         open={isUpdateDialogOpen}
         onOpenChange={handleUpdateDialogOpenChange}

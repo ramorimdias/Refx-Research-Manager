@@ -45,7 +45,75 @@ function htmlToPlainText(value: string) {
     .trim()
 }
 
-export default function CommentsPage() {
+function CommentsTourDemo() {
+  return (
+    <div className="p-6">
+      <div className="mx-auto flex max-w-7xl flex-col gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/libraries">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back to Library
+              </Link>
+            </Button>
+            <div>
+              <h1 className="flex items-center gap-2 text-2xl font-semibold">
+                <FileText className="h-6 w-6" />
+                REFX Tour Sample PDF
+              </h1>
+              <p className="text-sm text-muted-foreground">Write a document-level comment and pull supporting notes into the draft.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+          <Card className="min-h-0" data-tour-id="comments-notes">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <span>Document Notes</span>
+                <Badge variant="secondary">2</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {[
+                { title: 'Note 1 (p. 2)', text: 'Capture the key argument from the introduction.' },
+                { title: 'Note 2 (p. 4)', text: 'Highlight where methods and evidence are introduced.' },
+              ].map((note) => (
+                <div key={note.title} className="rounded-lg border p-3">
+                  <div className="text-sm font-medium">{note.title}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{note.text}</div>
+                  <div className="mt-3 flex justify-end">
+                    <Button variant="outline" size="sm">Insert</Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          <Card className="min-h-0" data-tour-id="comments-draft">
+            <CardHeader>
+              <CardTitle>Comment Draft</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                Build a high-level commentary here, using the notes on the left as evidence while you synthesize the document.
+              </div>
+              <div className="min-h-[28rem] rounded-md border border-input bg-transparent px-3 py-2 text-base shadow-xs">
+                <p className="mb-3 font-medium">Sample commentary</p>
+                <p className="text-muted-foreground">
+                  This demo draft shows where to write an overall comment for a document after reviewing the notes you created in the reader.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RealCommentsPage() {
   const params = useSearchParams()
   const id = params.get('id') ?? ''
   const documents = useDocumentStore((state) => state.documents)
@@ -234,7 +302,7 @@ export default function CommentsPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
-          <Card className="min-h-0">
+          <Card className="min-h-0" data-tour-id="comments-notes">
             <CardHeader>
               <div className="flex items-center justify-between gap-3">
                 <CardTitle className="flex items-center gap-2">
@@ -294,7 +362,7 @@ export default function CommentsPage() {
             </CardContent>
           </Card>
 
-          <Card className="min-h-0">
+          <Card className="min-h-0" data-tour-id="comments-draft">
             <CardHeader>
               <CardTitle>Comment Draft</CardTitle>
             </CardHeader>
@@ -348,4 +416,15 @@ export default function CommentsPage() {
       </div>
     </div>
   )
+}
+
+export default function CommentsPage() {
+  const params = useSearchParams()
+  const isTourDemo = params.get('tourDemo') === '1'
+
+  if (isTourDemo) {
+    return <CommentsTourDemo />
+  }
+
+  return <RealCommentsPage />
 }

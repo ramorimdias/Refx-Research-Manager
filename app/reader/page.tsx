@@ -72,7 +72,7 @@ export default function ReaderIndexPage() {
       </div>
 
       {continueReading.length > 0 && (
-        <div className="mb-8">
+        <div className="mb-8" data-tour-id="reader-continue">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
             <Clock className="h-5 w-5 text-primary" />
             {t('readerIndex.continueReading')}

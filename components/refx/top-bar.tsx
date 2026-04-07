@@ -24,7 +24,7 @@ export function TopBar() {
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b border-border/80 bg-background/92 px-5 backdrop-blur">
-      <div className="relative w-full max-w-xl">
+      <div className="relative w-full max-w-xl" data-tour-id="shell-search">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           ref={inputRef}
@@ -42,13 +42,26 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" className="gap-2 rounded-full" onClick={() => toggleCommandPalette(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2 rounded-full"
+          onClick={() => toggleCommandPalette(true)}
+          data-tour-id="shell-command"
+        >
           <Command className="h-4 w-4" />
           <span className="hidden lg:inline">{t('topBar.command')}</span>
           <span className="hidden text-[11px] text-muted-foreground md:inline">Ctrl K</span>
         </Button>
 
-        <Button variant="outline" size="icon" className="rounded-full" onClick={() => router.push('/settings')} aria-label={t('topBar.openSettings')}>
+        <Button
+          variant="outline"
+          size="icon"
+          className="rounded-full"
+          onClick={() => router.push('/settings')}
+          aria-label={t('topBar.openSettings')}
+          data-tour-id="shell-settings"
+        >
           <Settings className="h-4 w-4" />
         </Button>
       </div>

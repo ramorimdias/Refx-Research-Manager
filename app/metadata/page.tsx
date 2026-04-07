@@ -267,7 +267,7 @@ export default function MetadataWorkspacePage() {
           </Button>
         </div>
 
-        <Card>
+        <Card data-tour-id="metadata-queue">
           <CardContent className="flex flex-wrap items-center gap-3 p-4">
             <div className="min-w-[240px] flex-1">
               <Label className="text-sm">{t('metadataPage.library')}</Label>
@@ -337,7 +337,7 @@ export default function MetadataWorkspacePage() {
           />
         ) : (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.95fr)]">
-            <Card>
+            <Card data-tour-id="metadata-providers">
               <CardHeader className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>

@@ -79,7 +79,7 @@ import { cn } from '@/lib/utils'
 import * as repo from '@/lib/repositories/local-db'
 import type { ImportProgressUpdate } from '@/lib/services/desktop-service'
 import { convertFileSrc, open as openFileDialog, stat } from '@/lib/tauri/client'
-import { useT } from '@/lib/localization'
+import { useLocale, useT } from '@/lib/localization'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
 import { useFilteredDocuments } from '@/lib/stores/document-selectors'
 import { useLibraryActions, useLibraryStore } from '@/lib/stores/library-store'
@@ -297,6 +297,7 @@ function choosePrimaryDuplicateDocument(documents: Document[]) {
 
 export default function LibrariesPage() {
   const t = useT()
+  const { locale } = useLocale()
   const activeLibraryId = useLibraryStore((state) => state.activeLibraryId)
   const libraries = useLibraryStore((state) => state.libraries)
   const storedDocuments = useDocumentStore((state) => state.documents)
@@ -333,6 +334,50 @@ export default function LibrariesPage() {
   const [duplicateScanError, setDuplicateScanError] = useState<string>('')
   const [mergingDuplicateGroupId, setMergingDuplicateGroupId] = useState<string | null>(null)
   const bookCoverQrSectionRef = useRef<HTMLDivElement | null>(null)
+
+  const libraryUiCopy = useMemo(() => {
+    switch (locale) {
+      case 'pt-BR':
+        return {
+          editButton: 'Editar',
+          cancel: 'Cancelar',
+          creating: 'Criando...',
+          saving: 'Salvando...',
+          saveChanges: 'Salvar alterações',
+          deleting: 'Excluindo...',
+          deleteLibraryQuestion: 'Excluir biblioteca?',
+          deleteLibraryDescription: 'Isso removerá "{name}" e seus documentos locais do app. Esta ação não pode ser desfeita.',
+          deleteLibraryFallback: 'Esta ação não pode ser desfeita.',
+          libraryName: 'Nome da biblioteca',
+        }
+      case 'fr':
+        return {
+          editButton: 'Modifier',
+          cancel: 'Annuler',
+          creating: 'Création...',
+          saving: 'Enregistrement...',
+          saveChanges: 'Enregistrer les modifications',
+          deleting: 'Suppression...',
+          deleteLibraryQuestion: 'Supprimer la bibliothèque ?',
+          deleteLibraryDescription: 'Cela supprimera "{name}" et ses documents locaux de l’application. Cette action est irréversible.',
+          deleteLibraryFallback: 'Cette action est irréversible.',
+          libraryName: 'Nom de la bibliothèque',
+        }
+      default:
+        return {
+          editButton: 'Edit',
+          cancel: 'Cancel',
+          creating: 'Creating...',
+          saving: 'Saving...',
+          saveChanges: 'Save changes',
+          deleting: 'Deleting...',
+          deleteLibraryQuestion: 'Delete library?',
+          deleteLibraryDescription: 'This will remove "{name}" and its local documents from the app. This action cannot be undone.',
+          deleteLibraryFallback: 'This action cannot be undone.',
+          libraryName: 'Library name',
+        }
+    }
+  }, [locale])
 
   const activeLibrary = libraries.find((lib) => lib.id === activeLibraryId)
   const visibleLibraryDocuments = useMemo(
@@ -764,7 +809,10 @@ export default function LibrariesPage() {
         {!filtersCollapsed && <FilterPanel />}
 
         <div className="flex-1 flex min-w-0 flex-col bg-transparent">
-          <div className="flex items-center justify-between gap-4 border-b border-transparent bg-muted/65 px-5 py-4 backdrop-blur">
+          <div
+            className="flex items-center justify-between gap-4 border-b border-transparent bg-muted/65 px-5 py-4 backdrop-blur"
+            data-tour-id="libraries-toolbar"
+          >
             <div className="flex items-center gap-4 flex-1">
               <Button variant="outline" size="sm" className="rounded-full" onClick={() => setFiltersCollapsed((current) => !current)}>
                 {filtersCollapsed ? <PanelLeftOpen className="mr-2 h-4 w-4" /> : <PanelLeftClose className="mr-2 h-4 w-4" />}
@@ -814,16 +862,29 @@ export default function LibrariesPage() {
                 <Plus className="mr-2 h-4 w-4" />
                 {t('libraries.library')}
               </Button>
-              <Button variant="outline" size="sm" className="rounded-full" onClick={() => void handleImport()} disabled={!isDesktopApp || isImporting}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                onClick={() => void handleImport()}
+                disabled={!isDesktopApp || isImporting}
+                data-tour-id="libraries-import"
+              >
                 <Upload className="mr-2 h-4 w-4" />
                 {isImporting ? t('libraries.importing') : t('libraries.import')}
               </Button>
-              <Button variant="outline" size="sm" className="rounded-full" onClick={openPhysicalBookDialog}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-full"
+                onClick={openPhysicalBookDialog}
+                data-tour-id="libraries-physical-book"
+              >
                 <BookMarked className="mr-2 h-4 w-4" />
                 {t('libraries.book')}
               </Button>
 
-              <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
+              <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} data-tour-id="libraries-view-mode">
                 <TabsList>
                   <TabsTrigger value="table">
                     <Table2 className="h-4 w-4" />
@@ -899,7 +960,7 @@ export default function LibrariesPage() {
                 </Button>
                 <Button variant="outline" size="sm" className="rounded-full" onClick={openRenameDialog}>
                   <Pencil className="mr-2 h-4 w-4" />
-                  Edit
+                  {libraryUiCopy.editButton}
                 </Button>
               </div>
             </div>
@@ -911,6 +972,7 @@ export default function LibrariesPage() {
               isImporting && 'bg-muted/20',
             )}
             style={{ scrollbarGutter: 'stable' }}
+            data-tour-id="libraries-list"
           >
             {isImporting && (
               <div className="absolute inset-x-5 top-5 z-10 flex items-start justify-center">
@@ -1314,32 +1376,32 @@ export default function LibrariesPage() {
           if (!open) resetLibraryForm()
         }}
       >
-        <DialogContent>
+          <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create Library</DialogTitle>
-            <DialogDescription>Add a new local library for organizing your documents.</DialogDescription>
+            <DialogTitle>{t('libraries.createLibraryTitle')}</DialogTitle>
+            <DialogDescription>{t('libraries.createLibraryDescription')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="library-name">Name</Label>
+              <Label htmlFor="library-name">{t('libraries.libraryNameLabel')}</Label>
               <Input
                 id="library-name"
                 value={libraryForm.name}
                 onChange={(event) => setLibraryForm((state) => ({ ...state, name: event.target.value }))}
-                placeholder="My Papers"
+                placeholder={t('libraries.libraryNamePlaceholder')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="library-description">Description</Label>
+              <Label htmlFor="library-description">{t('libraries.libraryDescriptionLabel')}</Label>
               <Input
                 id="library-description"
                 value={libraryForm.description}
                 onChange={(event) => setLibraryForm((state) => ({ ...state, description: event.target.value }))}
-                placeholder="Optional description"
+                placeholder={t('libraries.libraryDescriptionPlaceholder')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="library-color">Color</Label>
+              <Label htmlFor="library-color">{t('libraries.libraryColorLabel')}</Label>
               <div id="library-color" className="flex flex-wrap gap-2">
                 {LIBRARY_COLOR_OPTIONS.map((color) => {
                   const selected = libraryForm.color === color
@@ -1360,10 +1422,10 @@ export default function LibrariesPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-              Cancel
+              {libraryUiCopy.cancel}
             </Button>
             <Button onClick={() => void handleCreateLibrary()} disabled={!libraryForm.name.trim() || isSavingLibrary}>
-              {isSavingLibrary ? 'Creating...' : 'Create Library'}
+              {isSavingLibrary ? libraryUiCopy.creating : t('libraries.createLibraryAction')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1381,12 +1443,12 @@ export default function LibrariesPage() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Library</DialogTitle>
-            <DialogDescription>Update the local library name, description, or color.</DialogDescription>
+            <DialogTitle>{t('libraries.editLibrary')}</DialogTitle>
+            <DialogDescription>{t('libraries.editLibraryDescription')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="rename-library-name">Name</Label>
+              <Label htmlFor="rename-library-name">{t('libraries.libraryNameLabel')}</Label>
               <Input
                 id="rename-library-name"
                 value={libraryForm.name}
@@ -1394,7 +1456,7 @@ export default function LibrariesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="rename-library-description">Description</Label>
+              <Label htmlFor="rename-library-description">{t('libraries.libraryDescriptionLabel')}</Label>
               <Input
                 id="rename-library-description"
                 value={libraryForm.description}
@@ -1402,7 +1464,7 @@ export default function LibrariesPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="rename-library-color">Color</Label>
+              <Label htmlFor="rename-library-color">{t('libraries.libraryColorLabel')}</Label>
               <div id="rename-library-color" className="flex flex-wrap gap-2">
                 {LIBRARY_COLOR_OPTIONS.map((color) => {
                   const selected = libraryForm.color === color
@@ -1424,19 +1486,19 @@ export default function LibrariesPage() {
             {activeLibrary && (
               <div className="space-y-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-destructive">Delete Library</p>
+                  <p className="text-sm font-medium text-destructive">{t('libraries.deleteLibraryTitle')}</p>
                   {libraries.length > 1 ? (
                     <p className="text-sm text-muted-foreground">
-                      Type <span className="font-medium text-foreground">{activeLibrary.name}</span> to enable deletion.
+                      {t('libraries.deleteLibraryConfirmationHelp', { name: activeLibrary.name })}
                     </p>
                   ) : (
                     <p className="text-sm text-muted-foreground">
-                      At least one library must remain, so this library cannot be deleted right now.
+                      {t('libraries.deleteLibraryUnavailable')}
                     </p>
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="delete-library-confirmation">Library name</Label>
+                  <Label htmlFor="delete-library-confirmation">{libraryUiCopy.libraryName}</Label>
                   <Input
                     id="delete-library-confirmation"
                     value={deleteLibraryConfirmation}
@@ -1458,14 +1520,14 @@ export default function LibrariesPage() {
                 disabled={libraries.length <= 1 || deleteLibraryConfirmation.trim() !== activeLibrary.name}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Delete Library
+                {t('libraries.deleteLibraryTitle')}
               </Button>
             )}
             <Button variant="outline" onClick={() => setIsRenameDialogOpen(false)}>
-              Cancel
+              {libraryUiCopy.cancel}
             </Button>
             <Button onClick={() => void handleRenameLibrary()} disabled={!libraryForm.name.trim() || isSavingLibrary}>
-              {isSavingLibrary ? 'Saving...' : 'Save Changes'}
+              {isSavingLibrary ? libraryUiCopy.saving : t('libraries.updateLibraryAction')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1474,17 +1536,17 @@ export default function LibrariesPage() {
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete library?</AlertDialogTitle>
+            <AlertDialogTitle>{libraryUiCopy.deleteLibraryQuestion}</AlertDialogTitle>
             <AlertDialogDescription>
               {activeLibrary
-                ? `This will remove "${activeLibrary.name}" and its local documents from the app. This action cannot be undone.`
-                : 'This action cannot be undone.'}
+                ? libraryUiCopy.deleteLibraryDescription.replace('{name}', activeLibrary.name)
+                : libraryUiCopy.deleteLibraryFallback}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isSavingLibrary}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isSavingLibrary}>{libraryUiCopy.cancel}</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleDeleteLibrary()} disabled={isSavingLibrary}>
-              {isSavingLibrary ? 'Deleting...' : 'Delete Library'}
+              {isSavingLibrary ? libraryUiCopy.deleting : t('libraries.deleteLibraryTitle')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

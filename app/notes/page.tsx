@@ -190,7 +190,7 @@ export default function NotesPage() {
 
   return (
     <div className="flex h-full">
-      <div className="flex w-96 flex-col border-r">
+      <div className="flex w-96 flex-col border-r" data-tour-id="notes-list">
         <div className="space-y-3 border-b p-4">
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -298,7 +298,7 @@ export default function NotesPage() {
         </div>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col p-4">
+      <div className="flex min-w-0 flex-1 flex-col p-4" data-tour-id="notes-editor">
         {selectedNote ? (
           <div className="flex h-full flex-col space-y-4">
             <div className="flex items-start justify-between gap-4">

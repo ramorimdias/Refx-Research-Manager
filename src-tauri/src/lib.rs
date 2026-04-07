@@ -3,7 +3,7 @@ mod backup;
 
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PersistedWindowState {
@@ -58,6 +58,35 @@ fn restore_window_state<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     if state.fullscreen {
         let _ = window.set_fullscreen(true);
     }
+}
+
+fn build_startup_splash<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<()> {
+    if app.get_webview_window("splash").is_some() {
+        return Ok(());
+    }
+
+    let splash = WebviewWindowBuilder::new(app, "splash", WebviewUrl::App("splash.html".into()))
+        .title("Refx")
+        .inner_size(420.0, 420.0)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .closable(false)
+        .decorations(false)
+        .shadow(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(true)
+        .center()
+        .build()?;
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        if let Err(error) = splash.set_icon(icon) {
+            eprintln!("Failed to apply splash icon: {}", error);
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -143,12 +172,20 @@ pub fn run() {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
 
-            if let (Some(window), Some(icon)) = (
-                app.get_webview_window("main"),
-                app.default_window_icon().cloned(),
-            ) {
-                if let Err(error) = window.set_icon(icon) {
-                    eprintln!("Failed to apply window icon: {}", error);
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    if let Err(error) = window.set_icon(icon) {
+                        eprintln!("Failed to apply window icon: {}", error);
+                    }
+                }
+
+                if let Err(error) = build_startup_splash(&app.handle()) {
+                    eprintln!("Failed to create splash window: {}", error);
+                    let _ = window.show();
+                }
+
+                if let Err(error) = window.hide() {
+                    eprintln!("Failed to hide main window during startup: {}", error);
                 }
 
                 restore_window_state(&window);

@@ -23,6 +23,7 @@ export const GEMINI_MODEL_OPTIONS = [
 export type StoredAppSettings = {
   userName: string
   skipNamePrompt: boolean
+  hasCompletedAppTour: boolean
   locale: AppLocale
   theme:
     | 'light'
@@ -59,6 +60,7 @@ export type StoredAppSettings = {
 export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   userName: '',
   skipNamePrompt: false,
+  hasCompletedAppTour: false,
   locale: 'en',
   theme: 'system',
   fontSize: '16',
@@ -135,6 +137,7 @@ export function toggleStoredThemeVariant(
 }
 
 const SETTINGS_STORAGE_KEY = 'refx-settings'
+export const SPLASH_LOCALE_STORAGE_KEY = 'refx-splash-locale'
 
 function parseValue<T>(value: string | undefined, fallback: T): T {
   if (!value) return fallback
@@ -196,6 +199,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
       locale: parsed.locale ?? DEFAULT_APP_SETTINGS.locale,
+      hasCompletedAppTour: parsed.hasCompletedAppTour ?? DEFAULT_APP_SETTINGS.hasCompletedAppTour,
       semanticScholarApiMode: resolveSemanticScholarApiMode(
         typeof parsed.semanticScholarApiMode === 'string' ? parsed.semanticScholarApiMode : undefined,
         typeof parsed.semanticScholarApiKey === 'string' ? parsed.semanticScholarApiKey : undefined,
@@ -217,6 +221,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
   return {
     userName: parseValue(stored.userName, DEFAULT_APP_SETTINGS.userName),
     skipNamePrompt: parseValue(stored.skipNamePrompt, DEFAULT_APP_SETTINGS.skipNamePrompt),
+    hasCompletedAppTour: parseValue(stored.hasCompletedAppTour, DEFAULT_APP_SETTINGS.hasCompletedAppTour),
     locale: parseValue(stored.locale, DEFAULT_APP_SETTINGS.locale),
     theme: parseValue(stored.theme, DEFAULT_APP_SETTINGS.theme),
     fontSize: parseValue(stored.fontSize, DEFAULT_APP_SETTINGS.fontSize),
@@ -261,6 +266,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
   if (!isDesktopApp) {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))
+      window.localStorage.setItem(SPLASH_LOCALE_STORAGE_KEY, settings.locale)
       window.dispatchEvent(new CustomEvent('refx-settings-changed', { detail: settings }))
     }
     return
@@ -269,6 +275,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
   await repo.setSettings({
     userName: JSON.stringify(settings.userName),
     skipNamePrompt: JSON.stringify(settings.skipNamePrompt),
+    hasCompletedAppTour: JSON.stringify(settings.hasCompletedAppTour),
     locale: JSON.stringify(settings.locale),
     theme: JSON.stringify(settings.theme),
     fontSize: JSON.stringify(settings.fontSize),
@@ -294,6 +301,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
   })
 
   if (typeof window !== 'undefined') {
+    window.localStorage.setItem(SPLASH_LOCALE_STORAGE_KEY, settings.locale)
     window.dispatchEvent(new CustomEvent('refx-settings-changed', { detail: settings }))
   }
 }

@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Refx - Research Library",
         "width": 1400,
         "height": 900,
@@ -19,11 +20,12 @@
         "minHeight": 768,
         "resizable": true,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "visible": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: asset: https:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: asset: https:; object-src 'self' asset: data: blob:; worker-src 'self' blob:;"
     }
   },
   "bundle": {

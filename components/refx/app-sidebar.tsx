@@ -107,6 +107,7 @@ export function AppSidebar() {
           <Link
             href="/"
             className="flex w-full items-center gap-3 overflow-hidden"
+            data-tour-id="shell-brand"
           >
             <BrandMark className="h-8 w-8 shrink-0 text-neutral-950 dark:text-neutral-50" />
             <div
@@ -150,7 +151,7 @@ export function AppSidebar() {
                 </Button>
               )}
             </div>
-            <nav className="space-y-1.5">
+            <nav className="space-y-1.5" data-tour-id="shell-nav">
               {mainNavItems.map((item) => {
                 const isActive = pathname === item.href || 
                   (item.href !== '/' && pathname.startsWith(item.href))

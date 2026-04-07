@@ -2336,7 +2336,10 @@ function MapsPageContent() {
 
           {!isTopBarCollapsed ? (
           <div className="grid gap-2 xl:grid-cols-[minmax(0,0.72fr)_minmax(360px,520px)_minmax(0,0.95fr)]">
-            <Card className="border-border/70 bg-card/92 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
+            <Card
+              className="border-border/70 bg-card/92 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.05)]"
+              data-tour-id="maps-workspace"
+            >
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -2386,7 +2389,10 @@ function MapsPageContent() {
               </div>
             </Card>
 
-            <Card className="border-border/70 bg-card/92 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.05)]">
+            <Card
+              className="border-border/70 bg-card/92 p-3 shadow-[0_10px_28px_rgba(15,23,42,0.05)]"
+              data-tour-id="maps-add-controls"
+            >
               <div className="space-y-2">
                 <div className="flex items-center gap-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -2562,6 +2568,7 @@ function MapsPageContent() {
             </div>
           ) : null}
 
+          <div data-tour-id="maps-canvas">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -2696,6 +2703,7 @@ function MapsPageContent() {
               color={isDarkMode ? '#334155' : '#cbd5e1'}
             />
           </ReactFlow>
+          </div>
           {contextMenu ? (
             <div
               className="fixed z-[1000] min-w-[180px] rounded-md border bg-white p-1 shadow-lg"

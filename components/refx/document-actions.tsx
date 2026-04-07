@@ -31,6 +31,7 @@ import {
 import * as repo from '@/lib/repositories/local-db'
 import type { Document } from '@/lib/types'
 import { useDocumentActions } from '@/lib/stores/document-store'
+import { useT } from '@/lib/localization'
 
 interface DocumentActionsProps {
   document: Document
@@ -139,6 +140,7 @@ function DocumentActionMenuItems({
   onOpenFileLocation: () => void
   onRemove: () => void
 }) {
+  const t = useT()
   const Item = variant === 'dropdown' ? DropdownMenuItem : ContextMenuItem
   const Separator = variant === 'dropdown' ? DropdownMenuSeparator : ContextMenuSeparator
   const openHref = document.documentType === 'my_work'
@@ -168,7 +170,7 @@ function DocumentActionMenuItems({
       <Item asChild>
         <Link href={`/documents?id=${document.id}&edit=1`}>
           <Edit className="mr-2 h-4 w-4" />
-          Edit Details
+          {t('searchPage.openDetails')}
         </Link>
       </Item>
       <Item asChild>

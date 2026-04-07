@@ -285,7 +285,7 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3" data-tour-id="home-greeting">
         <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
           <Home className="h-6 w-6" />
         </div>
@@ -298,7 +298,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div>
+      <div data-tour-id="home-libraries">
         <Card>
           <CardHeader>
             <CardTitle>{t('home.quickActions')}</CardTitle>
@@ -332,7 +332,7 @@ export default function HomePage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card className="gap-0 pb-0">
+        <Card className="gap-0 pb-0" data-tour-id="home-activity">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Clock className="h-4 w-4" />

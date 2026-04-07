@@ -47,7 +47,7 @@ import {
   normalizeWhitespace,
   seedReferenceFromDocument,
 } from '@/lib/services/work-reference-service'
-import { useT } from '@/lib/localization'
+import { useLocale, useT } from '@/lib/localization'
 import { cn } from '@/lib/utils'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
 import { useLibraryStore } from '@/lib/stores/library-store'
@@ -101,6 +101,7 @@ function buildDocumentResumeHref(document: Document) {
 export default function ReferencesPage() {
   const router = useRouter()
   const t = useT()
+  const { locale } = useLocale()
   const libraries = useLibraryStore((state) => state.libraries)
   const activeLibraryId = useLibraryStore((state) => state.activeLibraryId)
   const documents = useDocumentStore((state) => state.documents)
@@ -129,9 +130,30 @@ export default function ReferencesPage() {
   const [isRecheckingMatches, setIsRecheckingMatches] = useState(false)
   const [draggingWorkReferenceId, setDraggingWorkReferenceId] = useState<string | null>(null)
   const [copiedWorkReferenceId, setCopiedWorkReferenceId] = useState<string | null>(null)
+  const [copiedAllReferences, setCopiedAllReferences] = useState(false)
   const [pendingDeleteWorkReferenceId, setPendingDeleteWorkReferenceId] = useState<string | null>(null)
   const [isDeleteWorkDialogOpen, setIsDeleteWorkDialogOpen] = useState(false)
   const [isDeletingWork, setIsDeletingWork] = useState(false)
+
+  const referenceUiCopy = useMemo(() => {
+    switch (locale) {
+      case 'pt-BR':
+        return {
+          copyAllReferences: 'Copiar todas as referências',
+          copiedAllReferences: 'Tudo copiado',
+        }
+      case 'fr':
+        return {
+          copyAllReferences: 'Copier toutes les références',
+          copiedAllReferences: 'Tout copié',
+        }
+      default:
+        return {
+          copyAllReferences: 'Copy all references',
+          copiedAllReferences: 'Copied all',
+        }
+    }
+  }, [locale])
 
   useEffect(() => {
     if (!selectedWorkId && myWorks[0]?.id) {
@@ -396,6 +418,25 @@ export default function ReferencesPage() {
     }
   }
 
+  const handleCopyAllReferences = async () => {
+    try {
+      const serialized = workReferences
+        .map((entry) => formatReference(entry.reference, selectedStyle))
+        .filter((value) => value.trim().length > 0)
+        .join('\n')
+
+      if (!serialized) return
+
+      await navigator.clipboard.writeText(serialized)
+      setCopiedAllReferences(true)
+      window.setTimeout(() => {
+        setCopiedAllReferences(false)
+      }, 1600)
+    } catch {
+      setStatusMessage(t('referencesPage.couldNotCopyAllReferences'))
+    }
+  }
+
   const handleDeleteWorkReference = async (id: string) => {
     try {
       await repo.deleteWorkReference(id)
@@ -510,7 +551,7 @@ export default function ReferencesPage() {
       </div>
 
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <Card className="min-h-0">
+        <Card className="min-h-0" data-tour-id="references-work">
           <CardHeader>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -578,6 +619,16 @@ export default function ReferencesPage() {
               </Tooltip>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleCopyAllReferences()}
+                disabled={!selectedWork || workReferences.length === 0}
+                className={cn(copiedAllReferences && 'border-emerald-300 text-emerald-600')}
+              >
+                {copiedAllReferences ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {copiedAllReferences ? referenceUiCopy.copiedAllReferences : referenceUiCopy.copyAllReferences}
+              </Button>
               <Button
                 type="button"
                 variant="outline"

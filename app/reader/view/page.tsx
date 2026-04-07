@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Printer, Search, SquareArrowOutUpRight, StickyNote, Trash2, Type, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Printer, Search, SquareArrowOutUpRight, StickyNote, Trash2, Type, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -80,10 +80,14 @@ function ReaderColorPalette({
   selectedColorId,
   onSelect,
   type,
+  isDeleteMode = false,
+  onToggleDeleteMode,
 }: {
   selectedColorId: ReaderColorId
   onSelect: (colorId: ReaderColorId) => void
   type: 'highlight' | 'note'
+  isDeleteMode?: boolean
+  onToggleDeleteMode?: () => void
 }) {
   return (
     <div className="flex items-center gap-1 rounded-full border border-border/80 bg-background/95 px-2 py-1 shadow-sm">
@@ -104,6 +108,21 @@ function ReaderColorPalette({
           />
         )
       })}
+      {onToggleDeleteMode ? (
+        <button
+          type="button"
+          aria-label={`delete ${type}s`}
+          onClick={onToggleDeleteMode}
+          className={cn(
+            'ml-1 flex h-5 w-5 items-center justify-center rounded-full border transition-transform hover:scale-105',
+            isDeleteMode
+              ? 'border-red-500 bg-red-500 text-white ring-2 ring-red-500/20'
+              : 'border-border/70 bg-background text-red-600',
+          )}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      ) : null}
     </div>
   )
 }
@@ -241,7 +260,77 @@ function ReaderToolbarIconButton({
   )
 }
 
-export default function ReaderViewPage() {
+function ReaderViewTourDemo() {
+  return (
+    <div className="flex h-full flex-col bg-background">
+      <div className="border-b border-border bg-background/95 px-6 py-4">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Button asChild variant="outline" size="sm">
+              <a href="/reader">
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                Back
+              </a>
+            </Button>
+            <div>
+              <h1 className="text-xl font-semibold">REFX Tour Sample PDF</h1>
+              <p className="text-sm text-muted-foreground">A safe bundled PDF used only for the guided tour.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" data-tour-id="reader-search" aria-label="Reader search">
+              <Search className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" data-tour-id="reader-highlight" aria-label="Reader highlights">
+              <Highlighter className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" data-tour-id="reader-notes" aria-label="Reader notes">
+              <StickyNote className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 p-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input className="max-w-sm" value="tour sample" readOnly />
+          <Badge variant="secondary">Reader demo</Badge>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-muted/15 p-4">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" aria-label="Previous page">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Badge variant="outline">Page 1 / 2</Badge>
+              <Button variant="outline" size="icon" aria-label="Next page">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" aria-label="Zoom out">
+                <ZoomOut className="h-4 w-4" />
+              </Button>
+              <Badge variant="outline">100%</Badge>
+              <Button variant="outline" size="icon" aria-label="Zoom in">
+                <ZoomIn className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-border bg-white shadow-sm">
+            <iframe
+              src="/tour-sample.pdf#toolbar=0&navpanes=0&scrollbar=0"
+              className="pointer-events-none h-[70vh] w-full border-0"
+              title="Tour sample PDF"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RealReaderViewPage() {
   const t = useT()
   const router = useRouter()
   const params = useSearchParams()
@@ -275,9 +364,11 @@ export default function ReaderViewPage() {
   const [isPageRendering, setIsPageRendering] = useState(false)
   const [isRunningOcr, setIsRunningOcr] = useState(false)
   const [isHighlightMode, setIsHighlightMode] = useState(false)
+  const [isHighlightDeleteMode, setIsHighlightDeleteMode] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
   const [selectedHighlightColorId, setSelectedHighlightColorId] = useState<ReaderColorId>('yellow')
   const [selectedNoteColorId, setSelectedNoteColorId] = useState<ReaderColorId>('yellow')
+  const [isNoteDeleteMode, setIsNoteDeleteMode] = useState(false)
   const [notePlacementCursor, setNotePlacementCursor] = useState<{ x: number; y: number } | null>(null)
   const [highlightPlacementCursor, setHighlightPlacementCursor] = useState<{ x: number; y: number } | null>(null)
   const [pdfDocument, setPdfDocument] = useState<{ numPages: number; getPage: (pageNumber: number) => Promise<unknown>; destroy?: () => Promise<void> } | null>(null)
@@ -519,7 +610,7 @@ export default function ReaderViewPage() {
         !document?.filePath
         || !isTauri()
         || viewerMode !== 'pdfjs'
-        || (!isTextSelectionMode && !isTextSelectionGestureActive)
+        || !isTextSelectionMode
       ) {
         setPageWords([])
         return
@@ -542,7 +633,7 @@ export default function ReaderViewPage() {
     return () => {
       cancelled = true
     }
-  }, [document?.filePath, page, viewerMode, isTextSelectionGestureActive, isTextSelectionMode])
+  }, [document?.filePath, page, viewerMode, isTextSelectionMode])
 
   const activeOccurrence = searchOccurrences[activeOccurrenceIndex] ?? null
   const selectedHighlightColor = getReaderColorOption(selectedHighlightColorId)
@@ -634,10 +725,12 @@ export default function ReaderViewPage() {
   useEffect(() => {
     setIsSelectingCommentPosition(false)
     setIsNoteEditorOpen(false)
+    setIsNoteDeleteMode(false)
     setCommentDraftAreaRect(null)
     notePlacementStartRef.current = null
     setNotePlacementCursor(null)
     setIsHighlightMode(false)
+    setIsHighlightDeleteMode(false)
     setIsTextSelectionGestureActive(false)
     setDraftHighlightRect(null)
     setHighlightPlacementCursor(null)
@@ -674,7 +767,7 @@ export default function ReaderViewPage() {
     return () => window.cancelAnimationFrame(rafId)
   }, [isNoteEditorOpen])
 
-  const isTextSelectionLayerVisible = isTextSelectionMode || isTextSelectionGestureActive
+  const isTextSelectionLayerVisible = isTextSelectionMode
   const hasNativeTextLayer = document?.hasExtractedText && document.textExtractionStatus === 'complete'
 
   const deactivateTextSelectionMode = () => {
@@ -685,17 +778,15 @@ export default function ReaderViewPage() {
   }
 
   const handleTextSelectionGestureStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isTextSelectionMode) return
     if (!canUsePreciseViewer || isHighlightMode || isSelectingCommentPosition) return
     if (event.button !== 0) return
     setIsTextSelectionGestureActive(true)
   }
 
   const handleTextSelectionGestureEnd = () => {
-    if (isTextSelectionMode) return
-    window.requestAnimationFrame(() => {
-      skipNextTransientTextDismissRef.current = true
-      setIsTextSelectionGestureActive(true)
-    })
+    if (!isTextSelectionMode) return
+    setIsTextSelectionGestureActive(false)
   }
 
   const handleTransientTextSelectionDismiss = () => {
@@ -1296,7 +1387,7 @@ export default function ReaderViewPage() {
   }
 
   const handlePlacementCursorMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if ((!isSelectingCommentPosition && !isHighlightMode) || renderedPageSize.width <= 0 || renderedPageSize.height <= 0) {
+    if ((!isSelectingCommentPosition && !(isHighlightMode && !isHighlightDeleteMode)) || renderedPageSize.width <= 0 || renderedPageSize.height <= 0) {
       return
     }
 
@@ -1312,7 +1403,7 @@ export default function ReaderViewPage() {
       setNotePlacementCursor(nextCursor)
     }
 
-    if (isHighlightMode) {
+    if (isHighlightMode && !isHighlightDeleteMode) {
       setHighlightPlacementCursor(nextCursor)
     }
   }
@@ -1322,7 +1413,7 @@ export default function ReaderViewPage() {
       setNotePlacementCursor(null)
     }
 
-    if (isHighlightMode && !highlightDragStartRef.current) {
+    if (isHighlightMode && !isHighlightDeleteMode && !highlightDragStartRef.current) {
       setHighlightPlacementCursor(null)
     }
   }
@@ -1437,7 +1528,7 @@ export default function ReaderViewPage() {
   }
 
   const handleHighlightPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!isHighlightMode || !canUsePreciseViewer) return
+    if (!isHighlightMode || isHighlightDeleteMode || !canUsePreciseViewer) return
     if (event.button !== 0) return
 
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -1505,7 +1596,7 @@ export default function ReaderViewPage() {
       }),
     })
     await refreshData()
-    setIsHighlightMode(false)
+    setIsHighlightDeleteMode(false)
     setHighlightPlacementCursor(null)
   }
 
@@ -1518,8 +1609,10 @@ export default function ReaderViewPage() {
   const handleStartNewComment = () => {
     deactivateTextSelectionMode()
     setIsHighlightMode(false)
+    setIsHighlightDeleteMode(false)
     setDraftHighlightRect(null)
     highlightDragStartRef.current = null
+    setIsNoteDeleteMode(false)
     setSelectedCommentId(null)
     setCommentDraftContent('')
     setCommentDraftPosition(null)
@@ -1529,7 +1622,28 @@ export default function ReaderViewPage() {
     setNotePlacementCursor({ x: 0.5, y: 0.12 })
   }
 
+  const exitHighlightMode = () => {
+    setIsHighlightMode(false)
+    setIsHighlightDeleteMode(false)
+    setDraftHighlightRect(null)
+    setHighlightPlacementCursor(null)
+    highlightDragStartRef.current = null
+  }
+
+  const exitNoteMode = () => {
+    setIsSelectingCommentPosition(false)
+    setIsNoteDeleteMode(false)
+    setIsNoteEditorOpen(false)
+    setNotePlacementCursor(null)
+    notePlacementStartRef.current = null
+    setCommentDraftAreaRect(null)
+  }
+
   const handleSelectComment = (commentId: string, options?: { scrollIntoView?: boolean }) => {
+    if (isNoteDeleteMode) {
+      void handleDeleteCommentById(commentId)
+      return
+    }
     if (options?.scrollIntoView) {
       shouldAutoScrollCommentRef.current = true
     }
@@ -1714,9 +1828,14 @@ export default function ReaderViewPage() {
             label={isHighlightMode ? 'Exit highlight mode' : 'Highlight mode'}
             onClick={() => {
               deactivateTextSelectionMode()
-              setIsSelectingCommentPosition(false)
-              setIsNoteEditorOpen(false)
-              setIsHighlightMode((current) => !current)
+              exitNoteMode()
+              setIsHighlightMode((current) => {
+                const next = !current
+                if (!next) {
+                  setIsHighlightDeleteMode(false)
+                }
+                return next
+              })
               setDraftHighlightRect(null)
               setHighlightPlacementCursor(null)
               highlightDragStartRef.current = null
@@ -1724,46 +1843,68 @@ export default function ReaderViewPage() {
             disabled={!canUsePreciseViewer}
             aria-pressed={isHighlightMode}
             className={cn(isHighlightMode && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
+            data-tour-id="reader-highlight"
           >
             <Highlighter className="h-4 w-4" />
           </ReaderToolbarIconButton>
           {isHighlightMode ? (
             <ReaderColorPalette
               selectedColorId={selectedHighlightColorId}
-              onSelect={setSelectedHighlightColorId}
+              onSelect={(colorId) => {
+                setSelectedHighlightColorId(colorId)
+                setIsHighlightDeleteMode(false)
+              }}
               type="highlight"
+              isDeleteMode={isHighlightDeleteMode}
+              onToggleDeleteMode={() => {
+                deactivateTextSelectionMode()
+                exitNoteMode()
+                setIsHighlightDeleteMode(true)
+              }}
             />
           ) : null}
           <ReaderToolbarIconButton
-            label={isSelectingCommentPosition ? 'Cancel note placement' : 'New note'}
+            label={isSelectingCommentPosition || isNoteDeleteMode ? 'Cancel note mode' : 'New note'}
             onClick={() => {
-              if (isSelectingCommentPosition) {
+              if (isSelectingCommentPosition || isNoteDeleteMode) {
                 handleCancelCommentEditor()
+                setIsNoteDeleteMode(false)
               } else {
                 handleStartNewComment()
               }
             }}
             disabled={!canUsePreciseViewer}
-            aria-pressed={isSelectingCommentPosition}
-            className={cn(isSelectingCommentPosition && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
+            aria-pressed={isSelectingCommentPosition || isNoteDeleteMode}
+            className={cn((isSelectingCommentPosition || isNoteDeleteMode) && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
+            data-tour-id="reader-notes"
           >
             <StickyNote className="h-4 w-4" />
           </ReaderToolbarIconButton>
-          {isSelectingCommentPosition ? (
+          {(isSelectingCommentPosition || isNoteDeleteMode) ? (
             <ReaderColorPalette
               selectedColorId={selectedNoteColorId}
-              onSelect={setSelectedNoteColorId}
+              onSelect={(colorId) => {
+                setSelectedNoteColorId(colorId)
+                setIsNoteDeleteMode(false)
+                setIsSelectingCommentPosition(true)
+              }}
               type="note"
+              isDeleteMode={isNoteDeleteMode}
+              onToggleDeleteMode={() => {
+                deactivateTextSelectionMode()
+                exitHighlightMode()
+                exitNoteMode()
+                setSelectedCommentId(null)
+                setCommentDraftPosition(null)
+                setIsNoteDeleteMode(true)
+              }}
             />
           ) : null}
           <ReaderToolbarIconButton
             label={isTextSelectionLayerVisible ? 'Exit text selection' : 'Select text'}
             onClick={() => {
-              setIsHighlightMode(false)
-              setDraftHighlightRect(null)
-              setHighlightPlacementCursor(null)
-              highlightDragStartRef.current = null
-              setIsSelectingCommentPosition(false)
+              exitHighlightMode()
+              exitNoteMode()
               if (isTextSelectionLayerVisible) {
                 deactivateTextSelectionMode()
               } else {
@@ -1802,7 +1943,7 @@ export default function ReaderViewPage() {
               onClick={() => router.push(`/documents?id=${document.id}`)}
             >
               <FilePenLine className="mr-2 h-4 w-4" />
-              Edit Details
+              {t('searchPage.openDetails')}
             </Button>
           </div>
           {document.filePath && !hasNativeTextLayer && (
@@ -1837,12 +1978,21 @@ export default function ReaderViewPage() {
               )}
             {canUsePreciseViewer ? (
               <div className="flex min-h-full items-start justify-center">
-              <div
-                className={cn(
+                <div
+                  className={cn(
                   'relative overflow-hidden rounded border bg-white shadow-sm',
-                  (isSelectingCommentPosition || isHighlightMode) && 'cursor-crosshair ring-2 ring-primary/25',
+                  (isSelectingCommentPosition || isNoteDeleteMode || isHighlightMode) && 'ring-2 ring-primary/25',
+                  (isSelectingCommentPosition || (isHighlightMode && !isHighlightDeleteMode)) && 'cursor-crosshair',
+                  (isHighlightDeleteMode || isNoteDeleteMode) && 'cursor-not-allowed',
                 )}
                 onClick={isSelectingCommentPosition ? handlePageCommentSelection : undefined}
+                onContextMenu={(event) => {
+                  if (!isHighlightMode && !isHighlightDeleteMode && !isSelectingCommentPosition && !isNoteDeleteMode) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  exitHighlightMode()
+                  exitNoteMode()
+                }}
                 onClickCapture={() => {
                   if (!isHighlightMode && !isSelectingCommentPosition) {
                     handleTransientTextSelectionDismiss()
@@ -1905,10 +2055,10 @@ export default function ReaderViewPage() {
                               handleSelectComment(comment.id, { scrollIntoView: true })
                             }}
                             onContextMenu={(event) => {
-                              if (!isHighlightMode) return
+                              if (!isNoteDeleteMode) return
                               event.preventDefault()
                               event.stopPropagation()
-                              void handleDeleteCommentById(comment.id)
+                              setIsNoteDeleteMode(false)
                             }}
                             className={cn(
                               'pointer-events-auto absolute flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border border-white text-xs font-semibold text-white shadow-lg transition hover:scale-105',
@@ -1921,8 +2071,8 @@ export default function ReaderViewPage() {
                             }}
                             aria-label={`Select ${buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)}`}
                             title={
-                              isHighlightMode
-                                ? 'Right-click to delete'
+                              isNoteDeleteMode
+                                ? 'Click to delete'
                                 : buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)
                             }
                           >
@@ -1951,10 +2101,10 @@ export default function ReaderViewPage() {
                               handleSelectComment(comment.id, { scrollIntoView: true })
                             }}
                             onContextMenu={(event) => {
-                              if (!isHighlightMode) return
+                              if (!isNoteDeleteMode) return
                               event.preventDefault()
                               event.stopPropagation()
-                              void handleDeleteCommentById(comment.id)
+                              setIsNoteDeleteMode(false)
                             }}
                             className={cn(
                               'pointer-events-auto absolute rounded-sm transition',
@@ -1969,8 +2119,8 @@ export default function ReaderViewPage() {
                             }}
                             aria-label={`Select ${buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)}`}
                             title={
-                              isHighlightMode
-                                ? 'Right-click to delete'
+                              isNoteDeleteMode
+                                ? 'Click to delete'
                                 : buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)
                             }
                           >
@@ -2134,12 +2284,23 @@ export default function ReaderViewPage() {
                             height: `${highlight.rect.height * renderedPageSize.height}px`,
                             backgroundColor: hexToRgba(highlight.color, 0.32),
                           }}
-                          onContextMenu={(event) => {
+                          onClick={(event) => {
+                            if (!isHighlightDeleteMode) return
                             event.preventDefault()
                             event.stopPropagation()
                             void handleDeleteAreaHighlight(highlight.id)
                           }}
-                          title="Right-click to remove highlight"
+                          onContextMenu={(event) => {
+                            if (!isHighlightDeleteMode) return
+                            event.preventDefault()
+                            event.stopPropagation()
+                            setIsHighlightDeleteMode(false)
+                          }}
+                          title={
+                            isHighlightDeleteMode
+                              ? 'Click to delete'
+                              : 'Highlight'
+                          }
                         />
                       ))}
                       {draftHighlightRect ? (
@@ -2225,7 +2386,7 @@ export default function ReaderViewPage() {
       <ResizablePanel defaultSize={26} minSize={18} maxSize={45}>
         <div className="flex h-full flex-col border-l">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-          <div className="space-y-2 rounded-lg border p-3">
+          <div className="space-y-2 rounded-lg border p-3" data-tour-id="reader-search">
             <div className="flex items-center gap-2 text-sm font-medium">
               <Search className="h-4 w-4" />
              {t('readerView.search')}
@@ -2463,4 +2624,15 @@ export default function ReaderViewPage() {
       </AlertDialog>
     </>
   )
+}
+
+export default function ReaderViewPage() {
+  const params = useSearchParams()
+  const isTourDemo = params.get('tourDemo') === '1'
+
+  if (isTourDemo) {
+    return <ReaderViewTourDemo />
+  }
+
+  return <RealReaderViewPage />
 }

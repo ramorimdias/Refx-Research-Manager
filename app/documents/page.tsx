@@ -356,11 +356,193 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
   )
 }
 
-export default function DocumentDetailPage() {
+function DocumentDetailTourDemo() {
+  return (
+    <div className="p-6">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/libraries">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back
+            </Link>
+          </Button>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline">
+              <BookOpen className="mr-2 h-4 w-4" />
+              Open Reader
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[520px_minmax(0,1fr)]">
+          <div className="xl:sticky xl:top-6 xl:self-start">
+            <Card className="overflow-hidden">
+              <CardHeader className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle>Document Preview</CardTitle>
+                  <span className="text-xs text-muted-foreground">1 / 2</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled>
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Previous
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" disabled>
+                    Next
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button type="button" variant="outline" size="icon" disabled>
+                      <Minus className="h-4 w-4" />
+                    </Button>
+                    <span className="w-14 text-center text-sm text-muted-foreground">100%</span>
+                    <Button type="button" variant="outline" size="icon" disabled>
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="max-h-[72vh] min-h-[420px] overflow-hidden rounded-lg border bg-muted/20 p-4">
+                  <div className="overflow-hidden rounded-xl border border-border bg-white shadow-sm">
+                    <iframe
+                      src="/tour-sample.pdf#toolbar=0&navpanes=0&scrollbar=0"
+                      className="pointer-events-none h-[62vh] min-h-[420px] w-full border-0"
+                      title="Tour sample PDF preview"
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-6">
+          <Card data-tour-id="documents-information">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>Document Information</CardTitle>
+                <MetadataStatusBadge status="partial" />
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" data-tour-id="documents-fetch-metadata">
+                  <Globe className="mr-2 h-4 w-4" />
+                  Find Metadata Online
+                </Button>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <Label>Title</Label>
+                  <Input className="mt-1.5" value="REFX Tour Sample PDF" readOnly />
+                </div>
+                <div className="md:col-span-2">
+                  <Label>Authors</Label>
+                  <Input className="mt-1.5" value="Refx Team, Demo Author" readOnly />
+                </div>
+                <div>
+                  <Label>Year</Label>
+                  <Input className="mt-1.5" value="2026" readOnly />
+                </div>
+                <div>
+                  <Label>Reading Stage</Label>
+                  <Input className="mt-1.5" value="Reading" readOnly />
+                </div>
+                <div>
+                  <Label>DOI</Label>
+                  <Input className="mt-1.5" value="10.0000/refx-tour-demo" readOnly />
+                </div>
+                <div>
+                  <Label>Publisher</Label>
+                  <Input className="mt-1.5" value="Refx Demo Press" readOnly />
+                </div>
+                <div className="md:col-span-2">
+                  <Label>Abstract</Label>
+                  <Textarea
+                    className="mt-1.5 min-h-28"
+                    value="This sample document is bundled only for the guided tour. It shows where to edit metadata, manage tags, inspect references, and open the reader without using a real library document."
+                    readOnly
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card data-tour-id="documents-tags">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <Tag className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>Tags and Classification</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <TagChip name="tour" />
+                <TagChip name="workflow" />
+                <TagChip name="sample pdf" />
+              </div>
+              <div className="space-y-2 rounded-lg border border-border p-4">
+                <Label className="text-sm font-medium">Suggested Tags</Label>
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-300/70 bg-emerald-500/[0.06] p-2">
+                    <Check className="h-4 w-4 text-emerald-600" />
+                    <X className="h-4 w-4 text-red-600" />
+                    <TagChip name="metadata review" />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border border-border p-2">
+                    <Check className="h-4 w-4 text-emerald-600" />
+                    <X className="h-4 w-4 text-red-600" />
+                    <TagChip name="notes" />
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card data-tour-id="documents-references">
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <Link2 className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>References & Citations</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-4 lg:grid-cols-2">
+              <section className="rounded-lg border border-border p-4">
+                <Label className="text-sm font-medium">Makes reference to</Label>
+                <div className="mt-3 rounded-md border border-border bg-muted/20 p-3">
+                  <div className="font-medium">Literature Review Sample</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Demo Author • 2024 • Manual relation</div>
+                </div>
+              </section>
+              <section className="rounded-lg border border-border p-4">
+                <Label className="text-sm font-medium">Is referenced by</Label>
+                <div className="mt-3 rounded-md border border-border bg-muted/20 p-3">
+                  <div className="font-medium">Project Outline Example</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Refx Team • 2025 • DOI match</div>
+                </div>
+              </section>
+            </CardContent>
+          </Card>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RealDocumentDetailPage({
+  id,
+  metadataMode,
+  autoSearchMetadata,
+}: {
+  id: string
+  metadataMode: string | null
+  autoSearchMetadata: boolean
+}) {
   const params = useSearchParams()
-  const id = params.get('id')
-  const metadataMode = params.get('metadata')
-  const autoSearchMetadata = params.get('autoSearchMetadata') === '1'
   const router = useRouter()
   const t = useT()
   const documents = useDocumentStore((state) => state.documents)
@@ -772,10 +954,6 @@ export default function DocumentDetailPage() {
         return 'outline'
     }
   }, [document]) as ComponentProps<typeof Badge>['variant']
-
-  if (!id) {
-    return <div className="p-6">Missing document id.</div>
-  }
 
   if (!document) {
     if (!initialized) return <div className="p-6">Loading document...</div>
@@ -2276,5 +2454,29 @@ export default function DocumentDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function DocumentDetailPage() {
+  const params = useSearchParams()
+  const id = params.get('id')
+  const metadataMode = params.get('metadata')
+  const autoSearchMetadata = params.get('autoSearchMetadata') === '1'
+  const isTourDemo = params.get('tourDemo') === '1'
+
+  if (isTourDemo) {
+    return <DocumentDetailTourDemo />
+  }
+
+  if (!id) {
+    return <div className="p-6">Missing document id.</div>
+  }
+
+  return (
+    <RealDocumentDetailPage
+      id={id}
+      metadataMode={metadataMode}
+      autoSearchMetadata={autoSearchMetadata}
+    />
   )
 }

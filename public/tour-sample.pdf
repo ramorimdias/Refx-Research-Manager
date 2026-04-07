@@ -1,0 +1,69 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 2 /Kids [3 0 R 4 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+6 0 obj
+<< /Length 229 >>
+stream
+BT
+/F1 26 Tf
+72 720 Td
+(REFX Tour Sample PDF) Tj
+0 -42 Td
+/F1 14 Tf
+(This bundled file is used only for the in-app guided tour.) Tj
+0 -24 Td
+(It gives the reader, comments, and document detail tour steps a safe example.) Tj
+0 -24 Td
+(No real library document is opened while the tour is running.) Tj
+0 -48 Td
+/F1 16 Tf
+(Page 1) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Length 192 >>
+stream
+BT
+/F1 24 Tf
+72 720 Td
+(Tour Actions Demo) Tj
+0 -42 Td
+/F1 14 Tf
+(Use this sample to point out highlights, notes, search, metadata, and comments.) Tj
+0 -24 Td
+(You can safely reference this PDF in the tour without touching user content.) Tj
+0 -48 Td
+/F1 16 Tf
+(Page 2) Tj
+ET
+endstream
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000117 00000 n 
+0000000243 00000 n 
+0000000369 00000 n 
+0000000439 00000 n 
+0000000718 00000 n 
+trailer
+<< /Root 1 0 R /Size 8 >>
+startxref
+959
+%%EOF

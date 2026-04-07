@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Database, Download, HardDrive, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Database, Download, HardDrive, Lightbulb, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -41,6 +41,7 @@ import * as repo from '@/lib/repositories/local-db'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
+import { useAppTour } from '@/components/refx/app-tour-provider'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
 import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
 import { APP_VERSION } from '@/lib/app-version'
@@ -54,6 +55,7 @@ export default function SettingsPage() {
   const { locale } = useLocale()
   const router = useRouter()
   const { setTheme } = useTheme()
+  const { startAppTour } = useAppTour()
   const documents = useDocumentStore((state) => state.documents)
   const { scanDocumentsOcr, classifyDocuments } = useDocumentActions()
   const { clearLocalData, refreshData } = useRuntimeActions()
@@ -84,6 +86,7 @@ export default function SettingsPage() {
   const [backupDeleteTargetPath, setBackupDeleteTargetPath] = useState<string | null>(null)
   const hasLoadedSettingsRef = useRef(false)
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false)
+  const isDevSplashPreviewAvailable = process.env.NODE_ENV === 'development'
 
   const processingCopy = useMemo(() => {
     switch (locale) {
@@ -191,6 +194,197 @@ export default function SettingsPage() {
         }
     }
   }, [locale])
+
+  const settingsUiCopy = useMemo(() => {
+    switch (locale) {
+      case 'pt-BR':
+        return {
+          automaticProcessingTitle: 'Processamento automático',
+          automaticProcessingDescription: 'Padrões de processamento.',
+          autoOcr: 'OCR automático',
+          autoOcrDescription: 'Executar OCR após a importação.',
+          autoMetadataExtraction: 'Extração automática de metadados',
+          autoMetadataExtractionDescription: 'Extrair título, autores, ano e DOI durante a importação.',
+          autoOnlineMetadataEnrichment: 'Enriquecimento online automático de metadados',
+          autoOnlineMetadataEnrichmentDescription: 'Usar Crossref primeiro e Semantic Scholar depois quando os metadados estiverem incompletos.',
+          metadataApiConfiguration: 'Configuração das APIs de metadados',
+          metadataApiConfigurationDescription: 'A configuração dos provedores fica salva localmente neste dispositivo.',
+          crossrefContactEmail: 'Email de contato do Crossref',
+          crossrefContactEmailDescription: 'Dica de contato opcional para as requisições ao Crossref.',
+          semanticScholarApi: 'API do Semantic Scholar',
+          semanticScholarApiDescription: 'Escolha entre usar o acesso embutido ou a sua própria chave neste dispositivo.',
+          useBuiltinApi: 'Usar API embutida',
+          useOwnApiKey: 'Usar sua própria chave de API',
+          semanticScholarApiKey: 'Chave da API do Semantic Scholar',
+          semanticScholarApiKeyDescription: 'Adicione sua própria chave do Semantic Scholar para este dispositivo.',
+          semanticScholarApiKeyPlaceholder: 'Digite sua própria chave da API do Semantic Scholar',
+          keywordEngine: 'Motor de palavras-chave',
+          keywordEngineDescription: 'A heurística local é a opção padrão e ilimitada. Gemini é um aprimoramento opcional. A busca manual por IA na página de detalhes continua disponível.',
+          autoExtractKeywordsOnImport: 'Extrair palavras-chave automaticamente na importação',
+          autoExtractKeywordsOnImportDescription: 'Usar palavras-chave dos autores primeiro, depois heurística local ou extração Gemini conforme suas configurações.',
+          autoRequestGeminiOnImport: 'Solicitar Gemini automaticamente na importação',
+          autoRequestGeminiOnImportDescription: 'Usar Gemini apenas quando o motor de palavras-chave for Gemini e o limite diário permitir.',
+          doiLinks: 'Links DOI',
+          rechecking: 'Verificando novamente...',
+          recheckDoiLinks: 'Verificar links DOI novamente',
+          backups: 'Backups',
+          backupsDescription: 'Backups locais em arquivo único para documentos, notas, mapas e configurações.',
+          automaticBackups: 'Backups automáticos',
+          automaticBackupsDescription: 'Backups gerenciados pelo app criados ao iniciar quando necessário.',
+          backupScope: 'Escopo do backup',
+          everything: 'Tudo',
+          documentsOnly: 'Somente documentos',
+          settingsOnly: 'Somente configurações',
+          frequencyInDays: 'Frequência em dias',
+          keepBackups: 'Manter backups',
+          manualBackupExport: 'Exportação manual de backup',
+          restoreFile: 'Restaurar arquivo',
+          refresh: 'Atualizar',
+          noAutomaticBackupsYet: 'Ainda não há backups automáticos.',
+          restore: 'Restaurar',
+          dangerZone: 'Zona de perigo',
+          irreversible: 'Esta ação é irreversível.',
+          clearLocalDataQuestion: 'Limpar dados locais?',
+          clearLocalDataDialogDescription: 'Limpar todos os documentos locais, notas e arquivos importados? Isso não pode ser desfeito.',
+          deleteBackupAction: 'Excluir backup',
+          deleteBackupDialogDescription: 'Excluir este arquivo de backup?',
+          restoreBackupSafetyDescription: 'Isto é destrutivo. O REFX apagará os dados locais atuais dentro do escopo selecionado antes de aplicar o backup.',
+          restoreBackupSafetyDescription2: 'Para sua segurança, o REFX criará antes um backup completo. Se a restauração falhar ou o resultado não for o esperado, você poderá restaurar esse backup de segurança.',
+          restoreBackupSafetyDescription3: 'Continue apenas se quiser substituir o estado local atual pelo backup selecionado.',
+          restoreSource: 'Origem: {path}',
+          createSafetyBackupAndRestore: 'Criar backup de segurança e restaurar',
+          restoring: 'Restaurando...',
+          splashPreview: 'Pré-visualizar tela de carregamento',
+          splashPreviewDescription: 'Recarrega o app e força a tela de carregamento por alguns segundos para depuração.',
+        }
+      case 'fr':
+        return {
+          automaticProcessingTitle: 'Traitement automatique',
+          automaticProcessingDescription: 'Paramètres de traitement par défaut.',
+          autoOcr: 'OCR automatique',
+          autoOcrDescription: 'Lancer l’OCR après l’import.',
+          autoMetadataExtraction: 'Extraction automatique des métadonnées',
+          autoMetadataExtractionDescription: 'Extraire le titre, les auteurs, l’année et le DOI pendant l’import.',
+          autoOnlineMetadataEnrichment: 'Enrichissement en ligne automatique des métadonnées',
+          autoOnlineMetadataEnrichmentDescription: 'Utiliser Crossref puis Semantic Scholar quand les métadonnées sont incomplètes.',
+          metadataApiConfiguration: 'Configuration des API de métadonnées',
+          metadataApiConfigurationDescription: 'La configuration des fournisseurs est enregistrée localement sur cet appareil.',
+          crossrefContactEmail: 'Email de contact Crossref',
+          crossrefContactEmailDescription: 'Indice de contact facultatif pour les requêtes Crossref.',
+          semanticScholarApi: 'API Semantic Scholar',
+          semanticScholarApiDescription: 'Choisissez d’utiliser l’accès intégré ou votre propre clé sur cet appareil.',
+          useBuiltinApi: 'Utiliser l’API intégrée',
+          useOwnApiKey: 'Utiliser votre propre clé API',
+          semanticScholarApiKey: 'Clé API Semantic Scholar',
+          semanticScholarApiKeyDescription: 'Ajoutez votre propre clé Semantic Scholar pour cet appareil.',
+          semanticScholarApiKeyPlaceholder: 'Saisissez votre propre clé API Semantic Scholar',
+          keywordEngine: 'Moteur de mots-clés',
+          keywordEngineDescription: 'L’heuristique locale est l’option par défaut et illimitée. Gemini est une amélioration facultative. La récupération manuelle via IA depuis la page de détails reste disponible.',
+          autoExtractKeywordsOnImport: 'Extraire automatiquement les mots-clés à l’import',
+          autoExtractKeywordsOnImportDescription: 'Utiliser d’abord les mots-clés auteurs, puis l’heuristique locale ou Gemini selon vos réglages.',
+          autoRequestGeminiOnImport: 'Demander Gemini automatiquement à l’import',
+          autoRequestGeminiOnImportDescription: 'Utiliser Gemini seulement si le moteur de mots-clés est Gemini et que la limite quotidienne le permet.',
+          doiLinks: 'Liens DOI',
+          rechecking: 'Nouvelle vérification...',
+          recheckDoiLinks: 'Revérifier les liens DOI',
+          backups: 'Sauvegardes',
+          backupsDescription: 'Sauvegardes locales en fichier unique pour les documents, notes, cartes et réglages.',
+          automaticBackups: 'Sauvegardes automatiques',
+          automaticBackupsDescription: 'Sauvegardes gérées par l’application créées au démarrage lorsque nécessaire.',
+          backupScope: 'Portée de la sauvegarde',
+          everything: 'Tout',
+          documentsOnly: 'Documents seulement',
+          settingsOnly: 'Réglages seulement',
+          frequencyInDays: 'Fréquence en jours',
+          keepBackups: 'Conserver les sauvegardes',
+          manualBackupExport: 'Export manuel de sauvegarde',
+          restoreFile: 'Restaurer un fichier',
+          refresh: 'Actualiser',
+          noAutomaticBackupsYet: 'Aucune sauvegarde automatique pour le moment.',
+          restore: 'Restaurer',
+          dangerZone: 'Zone de danger',
+          irreversible: 'Cette action est irréversible.',
+          clearLocalDataQuestion: 'Effacer les données locales ?',
+          clearLocalDataDialogDescription: 'Effacer tous les documents locaux, les notes et les fichiers importés ? Cette action est irréversible.',
+          deleteBackupAction: 'Supprimer la sauvegarde',
+          deleteBackupDialogDescription: 'Supprimer ce fichier de sauvegarde ?',
+          restoreBackupSafetyDescription: 'Cette opération est destructive. REFX effacera les données locales actuelles dans le périmètre choisi avant d’appliquer la sauvegarde.',
+          restoreBackupSafetyDescription2: 'Pour vous protéger, REFX créera d’abord une sauvegarde complète. Si la restauration échoue ou si le résultat ne correspond pas à vos attentes, vous pourrez restaurer cette sauvegarde de sécurité.',
+          restoreBackupSafetyDescription3: 'Continuez seulement si vous voulez remplacer l’état local actuel par la sauvegarde sélectionnée.',
+          restoreSource: 'Source : {path}',
+          createSafetyBackupAndRestore: 'Créer une sauvegarde de sécurité et restaurer',
+          restoring: 'Restauration...',
+          splashPreview: 'Prévisualiser l’écran de chargement',
+          splashPreviewDescription: 'Recharge l’application et force l’écran de chargement pendant quelques secondes pour le débogage.',
+        }
+      default:
+        return {
+          automaticProcessingTitle: 'Automatic Processing',
+          automaticProcessingDescription: 'Processing defaults.',
+          autoOcr: 'Auto OCR',
+          autoOcrDescription: 'Run OCR after import.',
+          autoMetadataExtraction: 'Auto Metadata Extraction',
+          autoMetadataExtractionDescription: 'Extract title, authors, year, and DOI during import.',
+          autoOnlineMetadataEnrichment: 'Auto Online Metadata Enrichment',
+          autoOnlineMetadataEnrichmentDescription: 'Use Crossref first and Semantic Scholar second when metadata is incomplete.',
+          metadataApiConfiguration: 'Metadata API Configuration',
+          metadataApiConfigurationDescription: 'Provider configuration is stored locally on this device.',
+          crossrefContactEmail: 'Crossref Contact Email',
+          crossrefContactEmailDescription: 'Optional contact hint for Crossref requests.',
+          semanticScholarApi: 'Semantic Scholar API',
+          semanticScholarApiDescription: 'Choose whether to use the bundled API access or your own key for this device.',
+          useBuiltinApi: 'Use built-in API',
+          useOwnApiKey: 'Use your own API key',
+          semanticScholarApiKey: 'Semantic Scholar API Key',
+          semanticScholarApiKeyDescription: 'Add your own Semantic Scholar key for this device.',
+          semanticScholarApiKeyPlaceholder: 'Enter your own Semantic Scholar API key',
+          keywordEngine: 'Keyword Engine',
+          keywordEngineDescription: 'The local heuristic extractor is the default unlimited option. Gemini is an optional enhancement. Manual AI fetch from the details page is still available.',
+          autoExtractKeywordsOnImport: 'Auto extract keywords on import',
+          autoExtractKeywordsOnImportDescription: 'Use author keywords first, then local heuristic or Gemini extraction based on your settings.',
+          autoRequestGeminiOnImport: 'Auto request Gemini on import',
+          autoRequestGeminiOnImportDescription: 'Use Gemini only when the keyword engine is Gemini and the daily cap allows it.',
+          doiLinks: 'DOI Links',
+          rechecking: 'Rechecking...',
+          recheckDoiLinks: 'Recheck DOI Links',
+          backups: 'Backups',
+          backupsDescription: 'Single-file local backups for documents, notes, maps, and settings.',
+          automaticBackups: 'Automatic Backups',
+          automaticBackupsDescription: 'App-managed backups created on startup when due.',
+          backupScope: 'Backup Scope',
+          everything: 'Everything',
+          documentsOnly: 'Documents Only',
+          settingsOnly: 'Settings Only',
+          frequencyInDays: 'Frequency in days',
+          keepBackups: 'Keep backups',
+          manualBackupExport: 'Manual Backup Export',
+          restoreFile: 'Restore File',
+          refresh: 'Refresh',
+          noAutomaticBackupsYet: 'No automatic backups yet.',
+          restore: 'Restore',
+          dangerZone: 'Danger Zone',
+          irreversible: 'This action is irreversible.',
+          clearLocalDataQuestion: 'Clear local data?',
+          clearLocalDataDialogDescription: 'Clear all local documents, notes, and imported files? This cannot be undone.',
+          deleteBackupAction: 'Delete Backup',
+          deleteBackupDialogDescription: 'Delete this backup file?',
+          restoreBackupSafetyDescription: 'This is destructive. REFX will wipe the current local data inside the selected restore scope before applying the backup.',
+          restoreBackupSafetyDescription2: 'To protect you, REFX will create a full safety backup first. If the restore fails or the result is not what you expected, you can restore from that safety backup.',
+          restoreBackupSafetyDescription3: 'Continue only if you want to replace your current local state with the selected backup.',
+          restoreSource: 'Source: {path}',
+          createSafetyBackupAndRestore: 'Create safety backup and restore',
+          restoring: 'Restoring...',
+          splashPreview: 'Preview loading screen',
+          splashPreviewDescription: 'Reload the app and force the loading screen for a few seconds so you can debug it.',
+        }
+    }
+  }, [locale])
+
+  const handlePreviewLoadingSplash = () => {
+    if (typeof window === 'undefined') return
+    window.sessionStorage.setItem('refx.debug.loading-splash-until', String(Date.now() + 5000))
+    window.location.reload()
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -609,7 +803,7 @@ export default function SettingsPage() {
 
       <div className="flex flex-1 overflow-hidden">
         <div className="hidden w-56 shrink-0 overflow-auto border-r border-border/80 bg-muted/20 md:block">
-          <nav className="space-y-1 p-4">
+          <nav className="space-y-1 p-4" data-tour-id="settings-nav">
             {sections.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
@@ -667,6 +861,18 @@ export default function SettingsPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="rounded-xl border border-border/70 bg-muted/20 p-4" data-tour-id="settings-tour-button">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{t('settings.seeAppTour')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{t('tour.settingsRelaunchHelp')}</p>
+                        </div>
+                        <Button type="button" variant="outline" onClick={startAppTour}>
+                          <Lightbulb className="mr-2 h-4 w-4" />
+                          {t('settings.seeAppTour')}
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -737,14 +943,14 @@ export default function SettingsPage() {
               <>
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Automatic Processing</CardTitle>
-                    <CardDescription>Processing defaults.</CardDescription>
+                    <CardTitle className="text-base">{settingsUiCopy.automaticProcessingTitle}</CardTitle>
+                    <CardDescription>{settingsUiCopy.automaticProcessingDescription}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <Label className="text-sm font-medium">Auto OCR</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">Run OCR after import.</p>
+                        <Label className="text-sm font-medium">{settingsUiCopy.autoOcr}</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoOcrDescription}</p>
                       </div>
                       <Checkbox checked={settings.autoOcr} onCheckedChange={(checked) => updateSettings('autoOcr', !!checked)} />
                     </div>
@@ -753,8 +959,8 @@ export default function SettingsPage() {
 
                     <div className="flex items-center justify-between">
                       <div>
-                        <Label className="text-sm font-medium">Auto Metadata Extraction</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">Extract title, authors, year, and DOI during import.</p>
+                        <Label className="text-sm font-medium">{settingsUiCopy.autoMetadataExtraction}</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoMetadataExtractionDescription}</p>
                       </div>
                       <Checkbox
                         checked={settings.autoMetadata}
@@ -766,8 +972,8 @@ export default function SettingsPage() {
 
                     <div className="flex items-center justify-between">
                       <div>
-                        <Label className="text-sm font-medium">Auto Online Metadata Enrichment</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">Use Crossref first and Semantic Scholar second when metadata is incomplete.</p>
+                        <Label className="text-sm font-medium">{settingsUiCopy.autoOnlineMetadataEnrichment}</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoOnlineMetadataEnrichmentDescription}</p>
                       </div>
                       <Checkbox
                         checked={settings.autoOnlineMetadataEnrichment}
@@ -798,13 +1004,13 @@ export default function SettingsPage() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Metadata API Configuration</CardTitle>
-                  <CardDescription>Provider configuration is stored locally on this device.</CardDescription>
+                    <CardTitle className="text-base">{settingsUiCopy.metadataApiConfiguration}</CardTitle>
+                  <CardDescription>{settingsUiCopy.metadataApiConfigurationDescription}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
-                      <Label className="text-sm font-medium">Crossref Contact Email</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">Optional contact hint for Crossref requests.</p>
+                      <Label className="text-sm font-medium">{settingsUiCopy.crossrefContactEmail}</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.crossrefContactEmailDescription}</p>
                       <Input
                         type="email"
                         value={settings.crossrefContactEmail}
@@ -815,10 +1021,8 @@ export default function SettingsPage() {
                     </div>
 
                     <div>
-                      <Label className="text-sm font-medium">Semantic Scholar API</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Choose whether to use the bundled API access or your own key for this device.
-                      </p>
+                      <Label className="text-sm font-medium">{settingsUiCopy.semanticScholarApi}</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.semanticScholarApiDescription}</p>
                       <Select
                         value={settings.semanticScholarApiMode}
                         onValueChange={(value) => updateSettings('semanticScholarApiMode', value as StoredAppSettings['semanticScholarApiMode'])}
@@ -827,33 +1031,29 @@ export default function SettingsPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="builtin">Use built-in API</SelectItem>
-                          <SelectItem value="custom">Use your own API key</SelectItem>
+                          <SelectItem value="builtin">{settingsUiCopy.useBuiltinApi}</SelectItem>
+                          <SelectItem value="custom">{settingsUiCopy.useOwnApiKey}</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
 
                     {settings.semanticScholarApiMode === 'custom' ? (
                       <div>
-                        <Label className="text-sm font-medium">Semantic Scholar API Key</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Add your own Semantic Scholar key for this device.
-                        </p>
+                        <Label className="text-sm font-medium">{settingsUiCopy.semanticScholarApiKey}</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.semanticScholarApiKeyDescription}</p>
                         <Input
                           type="password"
                           value={settings.semanticScholarApiKey}
                           onChange={(event) => updateSettings('semanticScholarApiKey', event.target.value)}
                           className="mt-2"
-                          placeholder="Enter your own Semantic Scholar API key"
+                          placeholder={settingsUiCopy.semanticScholarApiKeyPlaceholder}
                         />
                       </div>
                     ) : null}
 
                     <div>
-                      <Label className="text-sm font-medium">Keyword Engine</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        The local heuristic extractor is the default unlimited option. Gemini is an optional enhancement. Manual AI fetch from the details page is still available.
-                      </p>
+                      <Label className="text-sm font-medium">{settingsUiCopy.keywordEngine}</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.keywordEngineDescription}</p>
                       <Select
                         value={settings.keywordEngine}
                         onValueChange={(value) => updateSettings('keywordEngine', value as StoredAppSettings['keywordEngine'])}
@@ -870,8 +1070,8 @@ export default function SettingsPage() {
 
                     <div className="flex items-center justify-between">
                       <div>
-                        <Label className="text-sm font-medium">Auto extract keywords on import</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">Use author keywords first, then local heuristic or Gemini extraction based on your settings.</p>
+                        <Label className="text-sm font-medium">{settingsUiCopy.autoExtractKeywordsOnImport}</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoExtractKeywordsOnImportDescription}</p>
                       </div>
                       <Checkbox
                         checked={settings.autoKeywordExtractionOnImport}
@@ -881,8 +1081,8 @@ export default function SettingsPage() {
 
                     <div className="flex items-center justify-between">
                       <div>
-                        <Label className="text-sm font-medium">Auto request Gemini on import</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">Use Gemini only when the keyword engine is Gemini and the daily cap allows it.</p>
+                        <Label className="text-sm font-medium">{settingsUiCopy.autoRequestGeminiOnImport}</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoRequestGeminiOnImportDescription}</p>
                       </div>
                       <Checkbox
                         checked={settings.autoGeminiOnImport}
@@ -1061,13 +1261,13 @@ export default function SettingsPage() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">DOI Links</CardTitle>
-                    <CardDescription>Recheck stored DOI references against all documents after new imports.</CardDescription>
+                    <CardTitle className="text-base">{settingsUiCopy.doiLinks}</CardTitle>
+                    <CardDescription>{t('settings.recheckDoiDescription')}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <Button variant="outline" onClick={() => void handleRecheckDoiReferences()} disabled={isRecheckingDoiReferences}>
                       {isRecheckingDoiReferences ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      {isRecheckingDoiReferences ? 'Rechecking...' : 'Recheck DOI Links'}
+                      {isRecheckingDoiReferences ? settingsUiCopy.rechecking : settingsUiCopy.recheckDoiLinks}
                     </Button>
                     {doiReferenceStatus ? (
                       <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
@@ -1083,15 +1283,15 @@ export default function SettingsPage() {
               <>
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">Backups</CardTitle>
-                    <CardDescription>Single-file local backups for documents, notes, maps, and settings.</CardDescription>
+                    <CardTitle className="text-base">{settingsUiCopy.backups}</CardTitle>
+                    <CardDescription>{settingsUiCopy.backupsDescription}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-5">
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <Label className="text-sm font-medium">Automatic Backups</Label>
-                          <p className="mt-1 text-xs text-muted-foreground">App-managed backups created on startup when due.</p>
+                          <Label className="text-sm font-medium">{settingsUiCopy.automaticBackups}</Label>
+                          <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.automaticBackupsDescription}</p>
                         </div>
                         <Checkbox
                           checked={settings.autoBackupEnabled}
@@ -1101,7 +1301,7 @@ export default function SettingsPage() {
 
                       <div className="grid gap-4 md:grid-cols-3">
                         <div>
-                          <Label className="text-sm">Backup Scope</Label>
+                          <Label className="text-sm">{settingsUiCopy.backupScope}</Label>
                           <Select
                             value={settings.autoBackupScope}
                             onValueChange={(value) => updateSettings('autoBackupScope', value as StoredAppSettings['autoBackupScope'])}
@@ -1110,15 +1310,15 @@ export default function SettingsPage() {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="full">Everything</SelectItem>
-                              <SelectItem value="documents">Documents Only</SelectItem>
-                              <SelectItem value="settings">Settings Only</SelectItem>
+                              <SelectItem value="full">{settingsUiCopy.everything}</SelectItem>
+                              <SelectItem value="documents">{settingsUiCopy.documentsOnly}</SelectItem>
+                              <SelectItem value="settings">{settingsUiCopy.settingsOnly}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
 
                         <div>
-                          <Label className="text-sm">Frequency in days</Label>
+                          <Label className="text-sm">{settingsUiCopy.frequencyInDays}</Label>
                           <Input
                             className="mt-1.5"
                             type="number"
@@ -1135,7 +1335,7 @@ export default function SettingsPage() {
                         </div>
 
                         <div>
-                          <Label className="text-sm">Keep backups</Label>
+                          <Label className="text-sm">{settingsUiCopy.keepBackups}</Label>
                           <Input
                             className="mt-1.5"
                             type="number"
@@ -1159,23 +1359,23 @@ export default function SettingsPage() {
                     <Separator />
 
                     <div className="space-y-3">
-                      <Label className="text-sm font-medium">Manual Backup Export</Label>
+                      <Label className="text-sm font-medium">{settingsUiCopy.manualBackupExport}</Label>
                       <div className="flex flex-wrap gap-2">
                         <Button variant="outline" onClick={() => void handleCreateBackup('full')} disabled={isCreatingBackup}>
                           <Download className="mr-2 h-4 w-4" />
-                          Everything
+                          {settingsUiCopy.everything}
                         </Button>
                         <Button variant="outline" onClick={() => void handleCreateBackup('documents')} disabled={isCreatingBackup}>
                           <Download className="mr-2 h-4 w-4" />
-                          Documents
+                          {settingsUiCopy.documentsOnly}
                         </Button>
                         <Button variant="outline" onClick={() => void handleCreateBackup('settings')} disabled={isCreatingBackup}>
                           <Download className="mr-2 h-4 w-4" />
-                          Settings
+                          {settingsUiCopy.settingsOnly}
                         </Button>
                         <Button variant="outline" onClick={() => void handleRestoreFromFile()} disabled={isRestoringBackup}>
                           <Upload className="mr-2 h-4 w-4" />
-                          Restore File
+                          {settingsUiCopy.restoreFile}
                         </Button>
                       </div>
                       {backupStatus ? <p className="text-xs text-muted-foreground">{backupStatus}</p> : null}
@@ -1185,16 +1385,16 @@ export default function SettingsPage() {
 
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <Label className="text-sm font-medium">Automatic Backups</Label>
+                        <Label className="text-sm font-medium">{settingsUiCopy.automaticBackups}</Label>
                         <Button variant="ghost" size="sm" onClick={() => void loadBackups()}>
                           <RotateCcw className="mr-2 h-4 w-4" />
-                          Refresh
+                          {settingsUiCopy.refresh}
                         </Button>
                       </div>
 
                       {backups.length === 0 ? (
                         <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-                          No automatic backups yet.
+                          {settingsUiCopy.noAutomaticBackupsYet}
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -1210,7 +1410,7 @@ export default function SettingsPage() {
                                 </div>
                                 <div className="flex gap-2">
                                   <Button variant="outline" size="sm" onClick={() => handleOpenRestoreWarning(backup.path)} disabled={isRestoringBackup}>
-                                    Restore
+                                    {settingsUiCopy.restore}
                                   </Button>
                                   <Button variant="ghost" size="icon-sm" onClick={() => setBackupDeleteTargetPath(backup.path)}>
                                     <Trash2 className="h-4 w-4" />
@@ -1229,13 +1429,13 @@ export default function SettingsPage() {
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base text-red-900">
                       <ShieldAlert className="h-4 w-4" />
-                      Danger Zone
+                      {settingsUiCopy.dangerZone}
                     </CardTitle>
-                    <CardDescription className="text-red-800">This action is irreversible.</CardDescription>
+                    <CardDescription className="text-red-800">{settingsUiCopy.irreversible}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <Button variant="destructive" className="w-full" onClick={() => setIsClearDataDialogOpen(true)} disabled={isClearing}>
-                      {isClearing ? 'Clearing...' : 'Clear Local Data'}
+                      {isClearing ? t('settings.clearing') : t('settings.clearLocalData')}
                     </Button>
                   </CardContent>
                 </Card>
@@ -1258,6 +1458,19 @@ export default function SettingsPage() {
                       <span className="text-sm">Version</span>
                       <Badge variant="secondary">v{APP_VERSION}</Badge>
                     </div>
+                    {isDevSplashPreviewAvailable ? (
+                      <>
+                        <Separator />
+                        <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+                          <p className="text-sm font-medium">{settingsUiCopy.splashPreview}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.splashPreviewDescription}</p>
+                          <Button variant="outline" className="mt-3" onClick={handlePreviewLoadingSplash}>
+                            <Sparkles className="mr-2 h-4 w-4" />
+                            {settingsUiCopy.splashPreview}
+                          </Button>
+                        </div>
+                      </>
+                    ) : null}
                   </CardContent>
                 </Card>
 
@@ -1322,15 +1535,13 @@ export default function SettingsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear local data?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Clear all local documents, notes, and imported files? This cannot be undone.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{settingsUiCopy.clearLocalDataQuestion}</AlertDialogTitle>
+            <AlertDialogDescription>{settingsUiCopy.clearLocalDataDialogDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isClearing}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleClearLocalData()} disabled={isClearing}>
-              {isClearing ? 'Clearing...' : 'Clear Local Data'}
+              {isClearing ? t('settings.clearing') : t('settings.clearLocalData')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1345,10 +1556,8 @@ export default function SettingsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete backup file?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Delete this backup file?
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t('settings.deleteBackupTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{settingsUiCopy.deleteBackupDialogDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
@@ -1358,7 +1567,7 @@ export default function SettingsPage() {
                 void handleDeleteBackup(backupDeleteTargetPath)
               }}
             >
-              Delete Backup
+              {settingsUiCopy.deleteBackupAction}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1376,20 +1585,14 @@ export default function SettingsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Restore backup and replace current local data?</AlertDialogTitle>
+            <AlertDialogTitle>{t('settings.restoreBackupTitle')}</AlertDialogTitle>
             <AlertDialogDescription className="space-y-3">
-              <span className="block">
-                This is destructive. REFX will wipe the current local data inside the selected restore scope before applying the backup.
-              </span>
-              <span className="block">
-                To protect you, REFX will create a full safety backup first. If the restore fails or the result is not what you expected, you can restore from that safety backup.
-              </span>
-              <span className="block font-medium text-foreground">
-                Continue only if you want to replace your current local state with the selected backup.
-              </span>
+              <span className="block">{settingsUiCopy.restoreBackupSafetyDescription}</span>
+              <span className="block">{settingsUiCopy.restoreBackupSafetyDescription2}</span>
+              <span className="block font-medium text-foreground">{settingsUiCopy.restoreBackupSafetyDescription3}</span>
               {restoreTargetPath ? (
                 <span className="block rounded-md border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground/80">
-                  Source: {restoreTargetPath}
+                  {settingsUiCopy.restoreSource.replace('{path}', restoreTargetPath)}
                 </span>
               ) : null}
             </AlertDialogDescription>
@@ -1397,7 +1600,7 @@ export default function SettingsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isRestoringBackup}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleRestoreBackup()} disabled={isRestoringBackup}>
-              {isRestoringBackup ? 'Restoring...' : 'Create safety backup and restore'}
+              {isRestoringBackup ? settingsUiCopy.restoring : settingsUiCopy.createSafetyBackupAndRestore}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

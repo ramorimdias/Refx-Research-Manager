@@ -704,7 +704,7 @@ export default function SearchPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="h-fit">
+          <Card className="h-fit" data-tour-id="search-query">
             <CardContent className="space-y-5 pt-6">
               <form
                 className="space-y-4"
@@ -919,7 +919,7 @@ export default function SearchPage() {
             </CardContent>
           </Card>
 
-          <div className="space-y-4">
+          <div className="space-y-4" data-tour-id="search-results">
             {executedGroups.length > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
                 <div>
