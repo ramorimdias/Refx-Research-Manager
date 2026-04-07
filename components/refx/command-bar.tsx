@@ -25,6 +25,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'
 import { useTheme } from 'next-themes'
+import { useAppTour } from '@/components/refx/app-tour-provider'
 import { getBaseThemeMode, loadAppSettings, saveAppSettings, toggleStoredThemeVariant } from '@/lib/app-settings'
 import { useT } from '@/lib/localization'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
@@ -35,6 +36,7 @@ import { useUiStore } from '@/lib/stores/ui-store'
 export function CommandBar() {
   const t = useT()
   const router = useRouter()
+  const { closeAppTour } = useAppTour()
   const commandPaletteOpen = useUiStore((state) => state.commandPaletteOpen)
   const toggleCommandPalette = useUiStore((state) => state.toggleCommandPalette)
   const libraries = useLibraryStore((state) => state.libraries)
@@ -107,7 +109,10 @@ export function CommandBar() {
             <StickyNote className="mr-2 h-4 w-4" />
             <span>{t('nav.notes')}</span>
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => router.push('/settings'))}>
+          <CommandItem onSelect={() => runCommand(() => {
+            closeAppTour()
+            router.push('/settings')
+          })}>
             <Settings className="mr-2 h-4 w-4" />
             <span>{t('settings.title')}</span>
           </CommandItem>
@@ -122,7 +127,10 @@ export function CommandBar() {
               <span>{t('commandBar.toggleTheme')}</span>
             </CommandItem>
           )}
-          <CommandItem onSelect={() => runCommand(() => router.push('/settings'))}>
+          <CommandItem onSelect={() => runCommand(() => {
+            closeAppTour()
+            router.push('/settings')
+          })}>
             <Keyboard className="mr-2 h-4 w-4" />
             <span>{t('commandBar.openSettings')}</span>
           </CommandItem>

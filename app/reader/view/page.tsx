@@ -278,7 +278,7 @@ function ReaderViewTourDemo() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" data-tour-id="reader-search" aria-label="Reader search">
+            <Button variant="ghost" size="icon" aria-label="Reader search">
               <Search className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="icon" data-tour-id="reader-highlight" aria-label="Reader highlights">
@@ -292,7 +292,7 @@ function ReaderViewTourDemo() {
       </div>
 
       <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 p-6">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-background/80 p-3" data-tour-id="reader-search">
           <Input className="max-w-sm" value="tour sample" readOnly />
           <Badge variant="secondary">Reader demo</Badge>
         </div>

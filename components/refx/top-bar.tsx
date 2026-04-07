@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import { Command, Search, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useAppTour } from '@/components/refx/app-tour-provider'
 import { useUiStore } from '@/lib/stores/ui-store'
 import { useT } from '@/lib/localization'
 
 export function TopBar() {
   const t = useT()
   const router = useRouter()
+  const { closeAppTour } = useAppTour()
   const inputRef = useRef<HTMLInputElement>(null)
   const globalSearchQuery = useUiStore((state) => state.globalSearchQuery)
   const setGlobalSearchQuery = useUiStore((state) => state.setGlobalSearchQuery)
@@ -58,7 +60,10 @@ export function TopBar() {
           variant="outline"
           size="icon"
           className="rounded-full"
-          onClick={() => router.push('/settings')}
+          onClick={() => {
+            closeAppTour()
+            router.push('/settings')
+          }}
           aria-label={t('topBar.openSettings')}
           data-tour-id="shell-settings"
         >
