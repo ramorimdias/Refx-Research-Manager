@@ -11,34 +11,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: 20
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: pnpm
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
-      - name: Build macOS app
+      - name: Build universal macOS app
         env:
           NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm exec tauri build
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: pnpm tauri:build -- --target universal-apple-darwin
 
       - name: Upload macOS build
         uses: actions/upload-artifact@v4
         with:
-          name: macos-build
+          name: macos-build-universal
           path: |
-            src-tauri/target/release/bundle/**/*.app
-            src-tauri/target/release/bundle/**/*.dmg
-            src-tauri/target/release/bundle/**/*.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.app
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.dmg
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.app.tar.gz
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*.sig
