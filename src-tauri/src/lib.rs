@@ -181,16 +181,22 @@ pub fn run() {
                     }
                 }
 
-                if let Err(error) = build_startup_splash(&app.handle()) {
-                    eprintln!("Failed to create splash window: {}", error);
-                    let _ = window.show();
-                }
-
-                if let Err(error) = window.hide() {
-                    eprintln!("Failed to hide main window during startup: {}", error);
-                }
-
                 restore_window_state(&window);
+
+                if cfg!(target_os = "macos") {
+                    if let Err(error) = window.show() {
+                        eprintln!("Failed to show main window during macOS startup: {}", error);
+                    }
+                } else {
+                    if let Err(error) = build_startup_splash(&app.handle()) {
+                        eprintln!("Failed to create splash window: {}", error);
+                        let _ = window.show();
+                    }
+
+                    if let Err(error) = window.hide() {
+                        eprintln!("Failed to hide main window during startup: {}", error);
+                    }
+                }
             }
 
             let app_handle = app.handle().clone();
