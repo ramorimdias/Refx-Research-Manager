@@ -76,6 +76,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
   })
 }
 
+function pushPrimitiveBootMessage(message: string) {
+  if (typeof window === 'undefined') return
+  const bootstrapWindow = window as Window & {
+    __REFX_BOOTSTRAP__?: {
+      push?: (message: string) => void
+    }
+  }
+  bootstrapWindow.__REFX_BOOTSTRAP__?.push?.(message)
+}
+
 export function AppProvider({ children }: AppProviderProps) {
   const [isUiPrefsReady, setIsUiPrefsReady] = useState(false)
   const [isSettingsReady, setIsSettingsReady] = useState(false)
@@ -102,7 +112,20 @@ export function AppProvider({ children }: AppProviderProps) {
 
   const pushStartupDiagnostic = (message: string) => {
     setStartupDiagnostics((current) => [...current.slice(-5), message])
+    pushPrimitiveBootMessage(message)
   }
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const bootstrapWindow = window as Window & {
+      __REFX_APP_PROVIDER_MOUNTED__?: boolean
+    }
+
+    bootstrapWindow.__REFX_APP_PROVIDER_MOUNTED__ = true
+    window.dispatchEvent(new Event('refx:app-provider-mounted'))
+    pushPrimitiveBootMessage('react app provider mounted')
+  }, [])
 
   useEffect(() => {
     const init = async () => {
