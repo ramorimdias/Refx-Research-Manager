@@ -147,7 +147,7 @@ export function AppLoadingScreen({
           <div className="flex flex-col items-center text-center">
             <div className="flex h-20 w-20 items-center justify-center rounded-[1.6rem] border border-white/70 bg-white/90 shadow-lg dark:border-white/10 dark:bg-slate-900/80">
               <Image
-                src="/icon.svg"
+                src="/iconHD.png"
                 alt="Refx"
                 width={52}
                 height={52}
