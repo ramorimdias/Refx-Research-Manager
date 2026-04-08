@@ -16,6 +16,13 @@ UNIVERSAL_APP="${UNIVERSAL_MACOS_DIR}/${APP_NAME}.app"
 UPDATER_TARBALL="${UNIVERSAL_MACOS_DIR}/${APP_NAME}.app.tar.gz"
 APP_ZIP="${UNIVERSAL_ROOT}/${APP_NAME}.app.zip"
 DMG_PATH="${UNIVERSAL_DMG_DIR}/${APP_NAME}.dmg"
+DMG_STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/refx-dmg-stage.XXXXXX")"
+
+cleanup() {
+  rm -rf "${DMG_STAGE_DIR}"
+}
+
+trap cleanup EXIT
 
 mkdir -p "${UNIVERSAL_MACOS_DIR}" "${UNIVERSAL_DMG_DIR}"
 rm -rf "${UNIVERSAL_APP}"
@@ -41,7 +48,19 @@ if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" || -n "${TAURI_SIGNING_PRIVATE_KEY_PAT
 fi
 
 ditto -c -k --sequesterRsrc --keepParent "${UNIVERSAL_APP}" "${APP_ZIP}"
-hdiutil create -volname "${APP_NAME}" -srcfolder "${UNIVERSAL_APP}" -ov -format UDZO "${DMG_PATH}"
+ditto "${UNIVERSAL_APP}" "${DMG_STAGE_DIR}/${APP_NAME}.app"
+
+for attempt in 1 2 3; do
+  if hdiutil create -volname "${APP_NAME}" -srcfolder "${DMG_STAGE_DIR}" -ov -format UDZO "${DMG_PATH}"; then
+    break
+  fi
+
+  if [[ "${attempt}" -eq 3 ]]; then
+    exit 1
+  fi
+
+  sleep 2
+done
 
 EXECUTABLE_NAME="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${UNIVERSAL_APP}/Contents/Info.plist")"
 file "${UNIVERSAL_APP}/Contents/MacOS/${EXECUTABLE_NAME}"
