@@ -44,6 +44,26 @@ interface AppProviderProps {
 }
 
 const DEBUG_LOADING_SPLASH_UNTIL_KEY = 'refx.debug.loading-splash-until'
+const SETTINGS_LOAD_TIMEOUT_MS = 8000
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId)
+        resolve(value)
+      },
+      (error) => {
+        window.clearTimeout(timeoutId)
+        reject(error)
+      },
+    )
+  })
+}
 
 export function AppProvider({ children }: AppProviderProps) {
   const [isUiPrefsReady, setIsUiPrefsReady] = useState(false)
@@ -87,7 +107,7 @@ export function AppProvider({ children }: AppProviderProps) {
       let settings = DEFAULT_APP_SETTINGS
 
       try {
-        settings = await loadAppSettings(isDesktopApp)
+        settings = await withTimeout(loadAppSettings(isDesktopApp), SETTINGS_LOAD_TIMEOUT_MS, 'Loading app settings')
       } catch (error) {
         console.error('Failed to load app settings; using defaults.', error)
       } finally {

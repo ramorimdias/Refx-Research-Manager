@@ -57,6 +57,8 @@ import type {
   ViewMode,
 } from './types'
 
+const DESKTOP_BOOTSTRAP_TIMEOUT_MS = 12000
+
 interface RuntimeStoreState {
   initialized: boolean
   isDesktopApp: boolean
@@ -269,6 +271,25 @@ const appActions = {} as Pick<AppState,
   | 'clearLocalData'
 >
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeoutId)
+        resolve(value)
+      },
+      (error) => {
+        window.clearTimeout(timeoutId)
+        reject(error)
+      },
+    )
+  })
+}
+
 appActions.initialize = async () => {
   if (!isTauri()) {
     resetPreviewData(false)
@@ -276,7 +297,7 @@ appActions.initialize = async () => {
   }
 
   try {
-    syncDesktopData(await fetchDesktopData())
+    syncDesktopData(await withTimeout(fetchDesktopData(), DESKTOP_BOOTSTRAP_TIMEOUT_MS, 'Desktop bootstrap'))
   } catch (error) {
     console.error('Desktop bootstrap failed; starting with a safe empty workspace.', error)
     resetPreviewData(true)
