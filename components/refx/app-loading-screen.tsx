@@ -91,6 +91,8 @@ type AppLoadingScreenProps = {
   className?: string
   compact?: boolean
   locale?: AppLocale
+  statusLine?: string
+  diagnostics?: string[]
 }
 
 function detectLocale(): AppLocale {
@@ -101,7 +103,13 @@ function detectLocale(): AppLocale {
   return 'en'
 }
 
-export function AppLoadingScreen({ className, compact = false, locale }: AppLoadingScreenProps) {
+export function AppLoadingScreen({
+  className,
+  compact = false,
+  locale,
+  statusLine,
+  diagnostics,
+}: AppLoadingScreenProps) {
   const [resolvedLocale, setResolvedLocale] = useState<AppLocale>(locale ?? 'en')
   const [phraseIndex, setPhraseIndex] = useState<number | null>(null)
 
@@ -156,6 +164,27 @@ export function AppLoadingScreen({ className, compact = false, locale }: AppLoad
             <p className="mt-5 max-w-sm text-sm leading-6 text-muted-foreground">
               {phrase}
             </p>
+
+            {statusLine ? (
+              <p className="mt-4 text-xs font-medium uppercase tracking-[0.18em] text-primary/75">
+                {statusLine}
+              </p>
+            ) : null}
+
+            {diagnostics && diagnostics.length > 0 ? (
+              <div className="mt-4 w-full rounded-2xl border border-white/60 bg-white/70 p-4 text-left dark:border-white/10 dark:bg-slate-900/65">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Startup diagnostics
+                </p>
+                <div className="mt-3 space-y-2">
+                  {diagnostics.map((entry) => (
+                    <p key={entry} className="font-mono text-xs text-muted-foreground">
+                      {entry}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

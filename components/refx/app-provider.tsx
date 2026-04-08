@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/select'
 import { APP_LOCALES, LocaleProvider, translate, type AppLocale } from '@/lib/localization'
 import { APP_TOUR_ENABLED } from '@/lib/app-tour'
+import { forceSafeDesktopFallback } from '@/lib/store'
 import {
   checkForAppUpdate,
   dismissPendingAppUpdate,
@@ -45,6 +46,16 @@ interface AppProviderProps {
 
 const DEBUG_LOADING_SPLASH_UNTIL_KEY = 'refx.debug.loading-splash-until'
 const SETTINGS_LOAD_TIMEOUT_MS = 8000
+const STARTUP_WATCHDOG_TIMEOUT_MS = 15000
+
+function isLikelyMacDesktop() {
+  if (typeof window === 'undefined') return false
+  const navigatorWithUAData = window.navigator as Navigator & {
+    userAgentData?: { platform?: string }
+  }
+  const platform = navigatorWithUAData.userAgentData?.platform ?? window.navigator.platform ?? window.navigator.userAgent
+  return /mac/i.test(platform)
+}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -79,19 +90,32 @@ export function AppProvider({ children }: AppProviderProps) {
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
   const [updateInstallStatus, setUpdateInstallStatus] = useState<string | null>(null)
   const [debugSplashUntil, setDebugSplashUntil] = useState<number | null>(null)
+  const [startupStatusLine, setStartupStatusLine] = useState('Preparing startup')
+  const [startupDiagnostics, setStartupDiagnostics] = useState<string[]>([])
   const hasRevealedDesktopWindow = useRef(false)
   const { initialize } = useRuntimeActions()
   const { initialized, isDesktopApp } = useRuntimeState()
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed)
   const setSidebarCollapsed = useUiStore((state) => state.setSidebarCollapsed)
   const { setTheme } = useTheme()
+  const isMacDesktop = isDesktopApp && isLikelyMacDesktop()
+
+  const pushStartupDiagnostic = (message: string) => {
+    setStartupDiagnostics((current) => [...current.slice(-5), message])
+  }
 
   useEffect(() => {
     const init = async () => {
+      setStartupStatusLine('Initializing runtime')
+      pushStartupDiagnostic(`[runtime] initialize:start`)
       try {
         await initialize()
+        setStartupStatusLine('Runtime initialized')
+        pushStartupDiagnostic(`[runtime] initialize:done`)
       } catch (error) {
         console.error('Failed to initialize app:', error)
+        setStartupStatusLine('Runtime fallback')
+        pushStartupDiagnostic(`[runtime] initialize:error ${error instanceof Error ? error.message : String(error)}`)
       } finally {
         setIsLoading(false)
       }
@@ -105,11 +129,15 @@ export function AppProvider({ children }: AppProviderProps) {
 
     const applySettings = async () => {
       let settings = DEFAULT_APP_SETTINGS
+      setStartupStatusLine('Loading settings')
+      pushStartupDiagnostic(`[settings] load:start desktop=${String(isDesktopApp)}`)
 
       try {
         settings = await withTimeout(loadAppSettings(isDesktopApp), SETTINGS_LOAD_TIMEOUT_MS, 'Loading app settings')
+        pushStartupDiagnostic(`[settings] load:done locale=${settings.locale}`)
       } catch (error) {
         console.error('Failed to load app settings; using defaults.', error)
+        pushStartupDiagnostic(`[settings] load:error ${error instanceof Error ? error.message : String(error)}`)
       } finally {
         setAppSettings(settings)
         window.localStorage.setItem(SPLASH_LOCALE_STORAGE_KEY, settings.locale)
@@ -138,6 +166,8 @@ export function AppProvider({ children }: AppProviderProps) {
         }
 
         setIsSettingsReady(true)
+        setStartupStatusLine('Settings ready')
+        pushStartupDiagnostic(`[settings] ready`)
       }
     }
 
@@ -261,11 +291,15 @@ export function AppProvider({ children }: AppProviderProps) {
   useEffect(() => {
     if (!initialized || typeof window === 'undefined') return
 
+    setStartupStatusLine('Loading UI preferences')
+    pushStartupDiagnostic(`[ui] prefs:start`)
     const stored = window.localStorage.getItem('refx.ui.sidebar-collapsed')
     if (stored !== null) {
       setSidebarCollapsed(stored === 'true')
     }
     setIsUiPrefsReady(true)
+    setStartupStatusLine('UI preferences ready')
+    pushStartupDiagnostic(`[ui] prefs:done`)
   }, [initialized, setSidebarCollapsed])
 
   useEffect(() => {
@@ -297,9 +331,38 @@ export function AppProvider({ children }: AppProviderProps) {
   const shouldShowLoadingScreen = isLoading || !initialized || !isUiPrefsReady || !isSettingsReady || isDebugSplashActive
 
   useEffect(() => {
+    if (!isMacDesktop || !isTauri() || !shouldShowLoadingScreen) return
+
+    const timeoutId = window.setTimeout(() => {
+      console.error('Startup watchdog triggered; forcing safe desktop fallback.')
+      setStartupStatusLine('Startup fallback')
+      pushStartupDiagnostic(`[watchdog] fallback:start`)
+
+      forceSafeDesktopFallback()
+      setIsLoading(false)
+      setIsUiPrefsReady(true)
+      setIsSettingsReady(true)
+      setIsWelcomeFlowResolved(true)
+      setIsNameDialogOpen(false)
+      setAppSettings(DEFAULT_APP_SETTINGS)
+      setDraftUserName(DEFAULT_APP_SETTINGS.userName)
+      setDontAskNameAgain(DEFAULT_APP_SETTINGS.skipNamePrompt)
+      window.localStorage.setItem(SPLASH_LOCALE_STORAGE_KEY, DEFAULT_APP_SETTINGS.locale)
+      setTheme(getBaseThemeMode(DEFAULT_APP_SETTINGS.theme))
+      delete document.documentElement.dataset.refxAccent
+      document.documentElement.style.fontSize = `${DEFAULT_APP_SETTINGS.fontSize}px`
+      pushStartupDiagnostic(`[watchdog] fallback:done`)
+    }, STARTUP_WATCHDOG_TIMEOUT_MS)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [isMacDesktop, setTheme, shouldShowLoadingScreen])
+
+  useEffect(() => {
     if (!isDesktopApp || !isTauri() || shouldShowLoadingScreen || hasRevealedDesktopWindow.current) return
 
     hasRevealedDesktopWindow.current = true
+    setStartupStatusLine('Revealing main window')
+    pushStartupDiagnostic(`[window] reveal:start`)
 
     void (async () => {
       try {
@@ -311,9 +374,12 @@ export function AppProvider({ children }: AppProviderProps) {
         if (splashWindow) {
           await splashWindow.close().catch(() => undefined)
         }
+        setStartupStatusLine('Startup complete')
+        pushStartupDiagnostic(`[window] reveal:done`)
       } catch (error) {
         hasRevealedDesktopWindow.current = false
         console.warn('Failed to reveal main window after startup:', error)
+        pushStartupDiagnostic(`[window] reveal:error ${error instanceof Error ? error.message : String(error)}`)
       }
     })()
   }, [isDesktopApp, shouldShowLoadingScreen])
@@ -324,6 +390,8 @@ export function AppProvider({ children }: AppProviderProps) {
       <AppLoadingScreen
         compact
         locale={locale}
+        statusLine={isMacDesktop ? startupStatusLine : undefined}
+        diagnostics={isMacDesktop ? startupDiagnostics : undefined}
         className="min-h-screen bg-[radial-gradient(circle_at_top,#dbeafe_0%,#f8fafc_34%,#eef2ff_100%)] dark:bg-[radial-gradient(circle_at_top,#1d2841_0%,#0f172a_36%,#09090b_100%)]"
       />
     )

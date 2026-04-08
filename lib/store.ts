@@ -200,6 +200,10 @@ function resetPreviewData(isDesktopApp = false) {
   useRuntimeStore.getState().resetRuntime(isDesktopApp)
 }
 
+export function forceSafeDesktopFallback() {
+  resetPreviewData(true)
+}
+
 function syncDesktopData(data: Awaited<ReturnType<typeof fetchDesktopData>>) {
   const currentActiveLibraryId = useLibraryStore.getState().activeLibraryId
   const nextActiveLibraryId = data.libraries.some((library) => library.id === currentActiveLibraryId)
