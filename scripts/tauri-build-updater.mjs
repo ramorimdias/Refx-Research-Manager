@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 
 const repoRoot = process.cwd()
 const updaterKeyPath = resolve(repoRoot, '.tauri', 'refx-updater.key')
+const forwardedBuildArgs = process.argv.slice(2)
 
 const env = { ...process.env }
 
@@ -29,7 +30,7 @@ if ((buildIcons.status ?? 1) !== 0) {
   process.exit(buildIcons.status ?? 1)
 }
 
-const tauriBuild = spawnSync(pnpmCommand, ['exec', 'tauri', 'build'], {
+const tauriBuild = spawnSync(pnpmCommand, ['exec', 'tauri', 'build', ...forwardedBuildArgs], {
   cwd: repoRoot,
   env,
   stdio: 'inherit',

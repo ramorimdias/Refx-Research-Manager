@@ -13,6 +13,7 @@
     "tauri": "pnpm exec tauri",
     "tauri:dev": "pnpm tauri:icons && pnpm exec tauri dev",
     "tauri:build": "node scripts/tauri-build-updater.mjs",
+    "tauri:build:mac:universal": "node scripts/tauri-build-updater.mjs --target universal-apple-darwin",
     "tauri:build:update": "node scripts/tauri-build-updater.mjs",
     "tauri:icons": "node scripts/ensure-tauri-icons.mjs"
   },
