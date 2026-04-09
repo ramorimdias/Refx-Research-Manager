@@ -160,6 +160,11 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
 
+function normalizeTourPathname(pathname: string | null) {
+  if (!pathname || pathname === '/') return '/'
+  return pathname.replace(/\/+$/, '') || '/'
+}
+
 function queryTourTarget(targetTourId: string) {
   return document.querySelector<HTMLElement>(`${TARGET_SELECTOR_PREFIX}${targetTourId}"]`)
 }
@@ -375,15 +380,20 @@ export function AppTourProvider({
 }: AppTourProviderProps) {
   const { locale } = useLocale()
   const pathname = usePathname()
+  const normalizedPathname = normalizeTourPathname(pathname)
   const [isOpen, setIsOpen] = useState(false)
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [rect, setRect] = useState<SpotlightRect | null>(null)
   const [resolvedPlacement, setResolvedPlacement] = useState<AppTourPlacement>('bottom')
-  const [currentPageTargetsReady, setCurrentPageTargetsReady] = useState(false)
+  const [currentPageAvailableTargetIds, setCurrentPageAvailableTargetIds] = useState<string[]>([])
   const previousPathnameRef = useRef<string | null>(null)
   const currentPageTourSteps = useMemo(
-    () => APP_PAGE_TOURS[pathname] ?? [],
-    [pathname],
+    () => APP_PAGE_TOURS[normalizedPathname] ?? [],
+    [normalizedPathname],
+  )
+  const runnableCurrentPageTourSteps = useMemo(
+    () => currentPageTourSteps.filter((step) => currentPageAvailableTargetIds.includes(step.targetTourId)),
+    [currentPageAvailableTargetIds, currentPageTourSteps],
   )
   const hasCurrentPageTour = currentPageTourSteps.length > 0
 
@@ -392,7 +402,7 @@ export function AppTourProvider({
     setRect(null)
   }, [])
 
-  const canStartCurrentPageTour = enabled && hasCurrentPageTour && currentPageTargetsReady
+  const canStartCurrentPageTour = enabled && runnableCurrentPageTourSteps.length > 0
   const currentPageTourUnavailableReason = canStartCurrentPageTour
     ? null
     : translate(locale, 'topBar.pageGuideUnavailable')
@@ -411,13 +421,13 @@ export function AppTourProvider({
   const nextTourStep = useCallback(() => {
     setRect(null)
     setCurrentStepIndex((current) => {
-      if (current >= currentPageTourSteps.length - 1) {
+      if (current >= runnableCurrentPageTourSteps.length - 1) {
         closeCurrentPageTour()
         return current
       }
       return current + 1
     })
-  }, [closeCurrentPageTour, currentPageTourSteps.length])
+  }, [closeCurrentPageTour, runnableCurrentPageTourSteps.length])
 
   const previousTourStep = useCallback(() => {
     setRect(null)
@@ -426,14 +436,16 @@ export function AppTourProvider({
 
   useEffect(() => {
     if (typeof document === 'undefined' || !enabled || !hasCurrentPageTour) {
-      setCurrentPageTargetsReady(false)
+      setCurrentPageAvailableTargetIds([])
       return
     }
 
     let frameId = 0
     const evaluateTargets = () => {
-      setCurrentPageTargetsReady(
-        currentPageTourSteps.every((step) => Boolean(measureTourTarget(step.targetTourId))),
+      setCurrentPageAvailableTargetIds(
+        currentPageTourSteps
+          .filter((step) => Boolean(measureTourTarget(step.targetTourId)))
+          .map((step) => step.targetTourId),
       )
     }
     const scheduleEvaluation = () => {
@@ -465,7 +477,7 @@ export function AppTourProvider({
         window.cancelAnimationFrame(frameId)
       }
     }
-  }, [currentPageTourSteps, enabled, hasCurrentPageTour, pathname])
+  }, [currentPageTourSteps, enabled, hasCurrentPageTour])
 
   useEffect(() => {
     if (!enabled && isOpen) {
@@ -479,14 +491,23 @@ export function AppTourProvider({
       return
     }
 
-    if (previousPathnameRef.current !== pathname && isOpen) {
+    if (previousPathnameRef.current !== normalizedPathname && isOpen) {
       closeCurrentPageTour()
     }
 
-    previousPathnameRef.current = pathname
-  }, [closeCurrentPageTour, isOpen, pathname])
+    previousPathnameRef.current = normalizedPathname
+  }, [closeCurrentPageTour, isOpen, normalizedPathname])
 
-  const currentStep = currentPageTourSteps[currentStepIndex] ?? null
+  const currentStep = runnableCurrentPageTourSteps[currentStepIndex] ?? null
+
+  useEffect(() => {
+    if (!isOpen) return
+    if (runnableCurrentPageTourSteps.length === 0) {
+      closeCurrentPageTour()
+      return
+    }
+    setCurrentStepIndex((current) => Math.min(current, runnableCurrentPageTourSteps.length - 1))
+  }, [closeCurrentPageTour, isOpen, runnableCurrentPageTourSteps.length])
 
   useEffect(() => {
     if (!isOpen) return
@@ -592,7 +613,7 @@ export function AppTourProvider({
   )
 
   const progressPercent = currentStep
-    ? ((currentStepIndex + 1) / Math.max(currentPageTourSteps.length, 1)) * 100
+    ? ((currentStepIndex + 1) / Math.max(runnableCurrentPageTourSteps.length, 1)) * 100
     : 0
   const hasVisibleSpotlight = Boolean(isOpen && currentStep && rect)
   const spotlightRect = rect
@@ -611,7 +632,7 @@ export function AppTourProvider({
           onNext={nextTourStep}
           onClose={skipCurrentPageTour}
           isFirstStep={currentStepIndex === 0}
-          isLastStep={currentStepIndex === currentPageTourSteps.length - 1}
+          isLastStep={currentStepIndex === runnableCurrentPageTourSteps.length - 1}
           progressPercent={progressPercent}
         />
       ) : null}
