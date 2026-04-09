@@ -47,10 +47,15 @@ export type SearchOccurrence = {
 }
 
 const pdfWordCache = new Map<string, Promise<PdfPageWords[]>>()
-let pdfJsPromise: Promise<{
+
+type PdfJsModule = {
   getDocument: (source: Record<string, unknown>) => { promise: Promise<unknown>; destroy?: () => void }
   GlobalWorkerOptions: { workerSrc: string }
-}> | null = null
+}
+
+let pdfJsPromise: Promise<PdfJsModule> | null = null
+const BROWSER_PDFJS_MODULE_PATH = '/pdfjs/pdf.js' as string
+const BROWSER_PDFJS_WORKER_PATH = '/pdfjs/pdf.worker.js'
 
 function normalizeText(input: string) {
   return input.replace(/\s+/g, ' ').trim()
@@ -328,16 +333,50 @@ function findMatchesInWordList(words: PdfWord[], query: string, maxResults = 100
 
 export async function loadPdfJsModule() {
   if (!pdfJsPromise) {
-    pdfJsPromise = import('pdfjs-dist/build/pdf.mjs').then((module) => {
-      const pdfjs = module as {
-        getDocument: (source: Record<string, unknown>) => { promise: Promise<unknown>; destroy?: () => void }
-        GlobalWorkerOptions: { workerSrc: string }
+    pdfJsPromise = (async () => {
+      const importedModule = typeof window !== 'undefined'
+        ? await import(/* webpackIgnore: true */ BROWSER_PDFJS_MODULE_PATH)
+        : await import('pdfjs-dist/build/pdf.mjs')
+
+      const candidate = (
+        importedModule
+        && typeof importedModule === 'object'
+        && 'getDocument' in importedModule
+        && 'GlobalWorkerOptions' in importedModule
+      )
+        ? importedModule
+        : (
+          importedModule
+          && typeof importedModule === 'object'
+          && 'default' in importedModule
+          && importedModule.default
+          && typeof importedModule.default === 'object'
+          && 'getDocument' in importedModule.default
+          && 'GlobalWorkerOptions' in importedModule.default
+        )
+          ? importedModule.default
+          : null
+
+      if (!candidate || typeof candidate !== 'object') {
+        throw new Error('PDF.js module could not be initialized.')
       }
 
-      if (typeof window !== 'undefined' && !module.GlobalWorkerOptions.workerSrc) {
-        pdfjs.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.js'
+      const pdfjs = candidate as PdfJsModule
+      if (
+        !pdfjs.GlobalWorkerOptions
+        || (typeof pdfjs.GlobalWorkerOptions !== 'object' && typeof pdfjs.GlobalWorkerOptions !== 'function')
+      ) {
+        throw new Error('PDF.js worker options are unavailable in this build.')
       }
+
+      if (typeof window !== 'undefined' && !pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = BROWSER_PDFJS_WORKER_PATH
+      }
+
       return pdfjs
+    })().catch((error) => {
+      pdfJsPromise = null
+      throw error
     })
   }
 

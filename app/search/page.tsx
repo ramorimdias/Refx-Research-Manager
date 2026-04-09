@@ -827,6 +827,7 @@ function RealSearchPage() {
                       type="button"
                       variant={queryMode === 'simple' ? 'default' : 'outline'}
                       onClick={() => switchMode('simple')}
+                      data-tour-id="search-simple-button"
                     >
                       {t('searchPage.simple')}
                     </Button>
@@ -834,6 +835,7 @@ function RealSearchPage() {
                       type="button"
                       variant={queryMode === 'complex' ? 'default' : 'outline'}
                       onClick={() => switchMode('complex')}
+                      data-tour-id="search-complex-button"
                     >
                       {t('searchPage.complex')}
                     </Button>
@@ -958,7 +960,7 @@ function RealSearchPage() {
                 )}
               </form>
 
-              <div className="space-y-2">
+              <div className="space-y-2" data-tour-id="search-filters">
                 <SearchHelpTooltip content={t('searchPage.flexibilityHelp')}>
                   <label className="text-sm font-medium">{t('searchPage.flexibility')}</label>
                 </SearchHelpTooltip>
@@ -1156,11 +1158,5 @@ function RealSearchPage() {
 }
 
 export default function SearchPage() {
-  const params = useSearchParams()
-
-  if (params.get('tourDemo') === '1') {
-    return <SearchTourDemo />
-  }
-
   return <RealSearchPage />
 }

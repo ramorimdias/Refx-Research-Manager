@@ -30,7 +30,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { APP_LOCALES, LocaleProvider, translate, type AppLocale } from '@/lib/localization'
-import { APP_TOUR_ENABLED } from '@/lib/app-tour'
 import { forceSafeDesktopFallback } from '@/lib/store'
 import {
   checkForAppUpdate,
@@ -92,7 +91,6 @@ export function AppProvider({ children }: AppProviderProps) {
   const [isLoading, setIsLoading] = useState(true)
   const [appSettings, setAppSettings] = useState<StoredAppSettings | null>(null)
   const [isNameDialogOpen, setIsNameDialogOpen] = useState(false)
-  const [isWelcomeFlowResolved, setIsWelcomeFlowResolved] = useState(false)
   const [draftUserName, setDraftUserName] = useState('')
   const [dontAskNameAgain, setDontAskNameAgain] = useState(false)
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateSummary | null>(null)
@@ -168,7 +166,6 @@ export function AppProvider({ children }: AppProviderProps) {
         setDontAskNameAgain(settings.skipNamePrompt)
         const shouldAskForName = !settings.userName.trim() && !settings.skipNamePrompt
         setIsNameDialogOpen(shouldAskForName)
-        setIsWelcomeFlowResolved(!shouldAskForName)
         setTheme(getBaseThemeMode(settings.theme))
         const accentVariant = getThemeAccentVariant(settings.theme)
         if (accentVariant) {
@@ -285,7 +282,6 @@ export function AppProvider({ children }: AppProviderProps) {
     setAppSettings(nextSettings)
     setDontAskNameAgain(false)
     await saveAppSettings(isDesktopApp, nextSettings)
-    setIsWelcomeFlowResolved(true)
     setIsNameDialogOpen(false)
   }
 
@@ -296,19 +292,11 @@ export function AppProvider({ children }: AppProviderProps) {
     setAppSettings(nextSettings)
     setDontAskNameAgain(true)
     await saveAppSettings(isDesktopApp, nextSettings)
-    setIsWelcomeFlowResolved(true)
     setIsNameDialogOpen(false)
   }
 
   const handleWelcomeLocaleChange = (nextLocale: AppLocale) => {
     setAppSettings((current) => (current ? { ...current, locale: nextLocale } : current))
-  }
-
-  const handleMarkTourCompleted = async () => {
-    if (!appSettings || appSettings.hasCompletedAppTour) return
-    const nextSettings = { ...appSettings, hasCompletedAppTour: true }
-    setAppSettings(nextSettings)
-    await saveAppSettings(isDesktopApp, nextSettings)
   }
 
   useEffect(() => {
@@ -365,7 +353,6 @@ export function AppProvider({ children }: AppProviderProps) {
       setIsLoading(false)
       setIsUiPrefsReady(true)
       setIsSettingsReady(true)
-      setIsWelcomeFlowResolved(true)
       setIsNameDialogOpen(false)
       setAppSettings(DEFAULT_APP_SETTINGS)
       setDraftUserName(DEFAULT_APP_SETTINGS.userName)
@@ -424,9 +411,7 @@ export function AppProvider({ children }: AppProviderProps) {
   return (
     <LocaleProvider initialLocale={locale}>
       <AppTourProvider
-        enabled={Boolean(APP_TOUR_ENABLED && !isNameDialogOpen)}
-        shouldAutostart={Boolean(APP_TOUR_ENABLED && isWelcomeFlowResolved && !isNameDialogOpen && appSettings && !appSettings.hasCompletedAppTour)}
-        onTourCompleted={handleMarkTourCompleted}
+        enabled={!isNameDialogOpen}
       >
         {!isNameDialogOpen ? children : null}
       </AppTourProvider>

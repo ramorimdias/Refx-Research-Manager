@@ -2679,12 +2679,5 @@ function RealReaderViewPage() {
 }
 
 export default function ReaderViewPage() {
-  const params = useSearchParams()
-  const isTourDemo = params.get('tourDemo') === '1'
-
-  if (isTourDemo) {
-    return <ReaderViewTourDemo />
-  }
-
   return <RealReaderViewPage />
 }

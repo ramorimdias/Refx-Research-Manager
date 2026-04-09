@@ -107,7 +107,7 @@ export default function ReaderIndexPage() {
       )}
 
       {recentDocs.length > 0 && (
-        <div>
+        <div data-tour-id="reader-recent-opened">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
             <BookOpen className="h-5 w-5 text-primary" />
             {t('readerIndex.recentlyOpened')}

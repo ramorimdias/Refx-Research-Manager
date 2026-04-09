@@ -296,6 +296,7 @@ export default function MetadataWorkspacePage() {
                   setMode('fetch_possible')
                   setCurrentIndex(0)
                 }}
+                data-tour-id="metadata-fetch-possible"
               >
                 {t('metadataPage.fetchPossible')}
                 <Badge variant="secondary" className="ml-2">
@@ -309,6 +310,7 @@ export default function MetadataWorkspacePage() {
                   setMode('missing')
                   setCurrentIndex(0)
                 }}
+                data-tour-id="metadata-missing"
               >
                 {t('metadataPage.missing')}
                 <Badge variant="secondary" className="ml-2">
@@ -319,7 +321,8 @@ export default function MetadataWorkspacePage() {
           </CardContent>
         </Card>
 
-        {!currentLibrary ? (
+        <div data-tour-id="metadata-editor">
+          {!currentLibrary ? (
           <EmptyState
             icon={Database}
             title={t('metadataPage.noLibrary')}
@@ -337,7 +340,7 @@ export default function MetadataWorkspacePage() {
           />
         ) : (
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.95fr)]">
-            <Card data-tour-id="metadata-providers">
+            <Card>
               <CardHeader className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -537,6 +540,7 @@ export default function MetadataWorkspacePage() {
             </Card>
           </div>
         )}
+        </div>
       </div>
     </div>
   )

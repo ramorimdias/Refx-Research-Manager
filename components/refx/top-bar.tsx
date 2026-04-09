@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Command, Search, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppTour } from '@/components/refx/app-tour-provider'
 import { useUiStore } from '@/lib/stores/ui-store'
 import { useT } from '@/lib/localization'
@@ -12,7 +13,12 @@ import { useT } from '@/lib/localization'
 export function TopBar() {
   const t = useT()
   const router = useRouter()
-  const { closeAppTour } = useAppTour()
+  const {
+    canStartCurrentPageTour,
+    closeCurrentPageTour,
+    currentPageTourUnavailableReason,
+    startCurrentPageTour,
+  } = useAppTour()
   const inputRef = useRef<HTMLInputElement>(null)
   const globalSearchQuery = useUiStore((state) => state.globalSearchQuery)
   const setGlobalSearchQuery = useUiStore((state) => state.setGlobalSearchQuery)
@@ -56,12 +62,34 @@ export function TopBar() {
           <span className="hidden text-[11px] text-muted-foreground md:inline">Ctrl K</span>
         </Button>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button
+                variant="outline"
+                size="icon"
+                className="rounded-full text-sm font-semibold"
+                onClick={() => startCurrentPageTour()}
+                aria-label={t('topBar.openPageGuide')}
+                disabled={!canStartCurrentPageTour}
+              >
+                ?
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {canStartCurrentPageTour
+              ? t('topBar.openPageGuide')
+              : (currentPageTourUnavailableReason ?? t('topBar.pageGuideUnavailable'))}
+          </TooltipContent>
+        </Tooltip>
+
         <Button
           variant="outline"
           size="icon"
           className="rounded-full"
           onClick={() => {
-            closeAppTour()
+            closeCurrentPageTour()
             router.push('/settings')
           }}
           aria-label={t('topBar.openSettings')}

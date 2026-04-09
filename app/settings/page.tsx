@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Database, Download, HardDrive, Lightbulb, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Database, Download, HardDrive, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -41,7 +41,6 @@ import * as repo from '@/lib/repositories/local-db'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
-import { APP_TOUR_ENABLED } from '@/lib/app-tour'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
 import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
 import { APP_VERSION, getAppVersion } from '@/lib/app-version'
@@ -877,19 +876,11 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="rounded-xl border border-border/70 bg-muted/20 p-4" data-tour-id="settings-tour-button">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-medium">{t('settings.seeAppTour')}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {APP_TOUR_ENABLED ? t('tour.settingsRelaunchHelp') : t('settings.appTourTemporarilyUnavailable')}
-                          </p>
-                        </div>
-                        <Button type="button" variant="outline" disabled={!APP_TOUR_ENABLED}>
-                          <Lightbulb className="mr-2 h-4 w-4" />
-                          {APP_TOUR_ENABLED ? t('settings.seeAppTour') : t('settings.appTourDisabledCta')}
-                        </Button>
-                      </div>
+                    <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+                      <p className="text-sm font-medium">{t('settings.pageGuides')}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t('settings.pageGuidesDescription')}
+                      </p>
                     </div>
                   </CardContent>
                 </Card>

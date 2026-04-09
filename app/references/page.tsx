@@ -532,7 +532,7 @@ export default function ReferencesPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={selectedStyle} onValueChange={(value) => setSelectedStyle(value as CitationStyle)}>
-            <SelectTrigger className="w-[150px]">
+            <SelectTrigger className="w-[150px]" data-tour-id="references-style">
               <SelectValue placeholder={t('referencesPage.citationStyle')} />
             </SelectTrigger>
             <SelectContent>
@@ -543,7 +543,7 @@ export default function ReferencesPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button type="button" variant="outline" onClick={() => setIsAddingWork(true)}>
+          <Button type="button" variant="outline" onClick={() => setIsAddingWork(true)} data-tour-id="references-add-work">
             <Plus className="h-4 w-4" />
             {t('referencesPage.addWork')}
           </Button>
@@ -625,6 +625,7 @@ export default function ReferencesPage() {
                 onClick={() => void handleCopyAllReferences()}
                 disabled={!selectedWork || workReferences.length === 0}
                 className={cn(copiedAllReferences && 'border-emerald-300 text-emerald-600')}
+                data-tour-id="references-copy-all"
               >
                 {copiedAllReferences ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 {copiedAllReferences ? referenceUiCopy.copiedAllReferences : referenceUiCopy.copyAllReferences}
@@ -634,6 +635,7 @@ export default function ReferencesPage() {
                 variant="outline"
                 onClick={() => setIsAddingReference(true)}
                 disabled={!selectedWork}
+                data-tour-id="references-add-reference"
               >
                 <Plus className="h-4 w-4" />
                 {t('referencesPage.addReference')}
@@ -643,6 +645,7 @@ export default function ReferencesPage() {
                 variant="outline"
                 onClick={() => void handleRecheckMatches()}
                 disabled={!selectedWork || isRecheckingMatches}
+                data-tour-id="references-recheck"
               >
                 {isRecheckingMatches ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 {t('referencesPage.recheckMatches')}

@@ -452,7 +452,7 @@ export default function HomePage() {
           </CardContent>
         </Card>
 
-        <Card className="gap-0 pb-0">
+        <Card className="gap-0 pb-0" data-tour-id="home-recent-opened">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <ArrowRight className="h-4 w-4" />

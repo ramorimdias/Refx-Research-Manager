@@ -697,7 +697,7 @@ function MapsPageContent() {
   const [hoveredDocumentId, setHoveredDocumentId] = useState<string | null>(null)
   const [hoveredWorkReferenceId, setHoveredWorkReferenceId] = useState<string | null>(null)
   const [hoveredRelationId, setHoveredRelationId] = useState<string | null>(null)
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(focusDocumentId)
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null)
   const [selectedWorkReferenceId, setSelectedWorkReferenceId] = useState<string | null>(null)
   const [selectedRelationId, setSelectedRelationId] = useState<string | null>(null)
   const [manualVisibleDocumentIds, setManualVisibleDocumentIds] = useState<string[]>([])
@@ -849,16 +849,11 @@ function MapsPageContent() {
       yearMin: activeGraphView.yearMin,
       yearMax: activeGraphView.yearMax,
     }
-    const nextSelectedDocumentId = activeGraphView.selectedDocumentId ?? null
-
     setGraphPreferences((currentPreferences) => (
       areGraphPreferencesEqual(currentPreferences, nextPreferences) ? currentPreferences : nextPreferences
     ))
     setManualVisibleDocumentIds((currentIds) => (
       areStringArraysEqual(currentIds, activeGraphView.documentIds) ? currentIds : activeGraphView.documentIds
-    ))
-    setSelectedDocumentId((currentId) => (
-      currentId === nextSelectedDocumentId ? currentId : nextSelectedDocumentId
     ))
   }, [activeGraphView])
 
@@ -1300,8 +1295,19 @@ function MapsPageContent() {
     setManualVisibleDocumentIds((currentIds) => (
       currentIds.includes(focusDocumentId) ? currentIds : [...currentIds, focusDocumentId]
     ))
-    setSelectedDocumentId(focusDocumentId)
   }, [focusDocumentId, libraryDocumentIds])
+
+  useEffect(() => {
+    setSelectedDocumentId(null)
+    setSelectedWorkReferenceId(null)
+    setSelectedRelationId(null)
+
+    const frame = window.requestAnimationFrame(() => {
+      reactFlow.fitView({ padding: 0.2, duration: 250 })
+    })
+
+    return () => window.cancelAnimationFrame(frame)
+  }, [activeLibrary?.id, activeGraphViewId, reactFlow])
 
   useEffect(() => {
     if (selectedDocumentId && !libraryDocumentIds.has(selectedDocumentId)) {
@@ -2500,6 +2506,7 @@ function MapsPageContent() {
                   size="sm"
                   variant="outline"
                   onClick={handleOpenCreateMapDialog}
+                  data-tour-id="maps-new-view"
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   {t('mapsPage.newMap')}
@@ -2519,7 +2526,7 @@ function MapsPageContent() {
                 ) : null}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button size="sm" onClick={handleOpenSaveViewDialog}>
+                    <Button size="sm" onClick={handleOpenSaveViewDialog} data-tour-id="maps-save-as-view">
                       <Save className="mr-2 h-4 w-4" />
                       {activeGraphView ? t('mapsPage.saveAsNewView') : t('mapsPage.saveView')}
                     </Button>
@@ -2535,6 +2542,7 @@ function MapsPageContent() {
                       variant="outline"
                       onClick={() => void handleReheatLayout()}
                       disabled={isReheatingLayout || visibleDocuments.length === 0}
+                      data-tour-id="maps-rebuild-layout"
                     >
                       <WandSparkles className={cn('mr-2 h-4 w-4', isReheatingLayout && 'animate-pulse')} />
                       {t('mapsPage.rebuildLayout')}
@@ -2545,12 +2553,16 @@ function MapsPageContent() {
                   </TooltipContent>
                 </Tooltip>
               </div>
-              {activeGraphView ? (
-                <Button size="sm" variant="outline" onClick={() => setIsDeleteWorkspaceDialogOpen(true)}>
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  {t('mapsPage.deleteMap')}
-                </Button>
-              ) : null}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setIsDeleteWorkspaceDialogOpen(true)}
+                disabled={!activeGraphView}
+                data-tour-id="maps-delete-map"
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                {t('mapsPage.deleteMap')}
+              </Button>
             </div>
           </div>
 
@@ -2630,6 +2642,7 @@ function MapsPageContent() {
                         role="combobox"
                         aria-expanded={isAddDocumentPopoverOpen}
                         className="min-w-0 flex-1 justify-between bg-white/90 text-left whitespace-normal h-auto py-2"
+                        data-tour-id="maps-add-document"
                       >
                         <span className="min-w-0 flex-1 break-words pr-2">
                           {pendingConnectionDirection
@@ -2684,54 +2697,58 @@ function MapsPageContent() {
                       </div>
                     </PopoverContent>
                   </Popover>
-                  {myWorkDocuments.length > 0 ? (
-                    <Select
-                      key={selectedMyWorkPickerResetKey}
-                      onValueChange={(value) => {
-                        void handleAddDocumentToMap(value)
-                        setSelectedMyWorkPickerResetKey((currentKey) => currentKey + 1)
-                      }}
-                    >
-                      <SelectTrigger className="w-[220px] shrink-0 bg-background/90">
-                        <SelectValue placeholder={t('mapsPage.selectWork')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {myWorkDocuments.map((document) => (
-                          <SelectItem key={document.id} value={document.id}>
-                            {document.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <p className="min-w-0 flex-1 text-xs text-muted-foreground whitespace-normal break-words">
-                      {t('mapsPage.noWorksRegisteredPrefix')}{' '}
-                      <Link href="/references" className="font-medium text-foreground underline underline-offset-4">
-                        {t('referencesPage.title')}
-                      </Link>{' '}
-                      {t('mapsPage.noWorksRegisteredSuffix')}
-                    </p>
-                  )}
+                  <div data-tour-id="maps-add-work">
+                    {myWorkDocuments.length > 0 ? (
+                      <Select
+                        key={selectedMyWorkPickerResetKey}
+                        onValueChange={(value) => {
+                          void handleAddDocumentToMap(value)
+                          setSelectedMyWorkPickerResetKey((currentKey) => currentKey + 1)
+                        }}
+                      >
+                        <SelectTrigger className="w-[220px] shrink-0 bg-background/90">
+                          <SelectValue placeholder={t('mapsPage.selectWork')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {myWorkDocuments.map((document) => (
+                            <SelectItem key={document.id} value={document.id}>
+                              {document.title}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="min-w-0 flex-1 text-xs text-muted-foreground whitespace-normal break-words">
+                        {t('mapsPage.noWorksRegisteredPrefix')}{' '}
+                        <Link href="/references" className="font-medium text-foreground underline underline-offset-4">
+                          {t('referencesPage.title')}
+                        </Link>{' '}
+                        {t('mapsPage.noWorksRegisteredSuffix')}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             </Card>
 
-            <DocumentGraphControls
-              colorMode={graphPreferences.colorMode}
-              onColorModeChange={(value) => setGraphPreferences((current) => ({ ...current, colorMode: value }))}
-              sizeMode={graphPreferences.sizeMode}
-              onSizeModeChange={(value) => setGraphPreferences((current) => ({ ...current, sizeMode: value }))}
-              neighborhoodDepth={graphPreferences.neighborhoodDepth}
-              onNeighborhoodDepthChange={(value) => setGraphPreferences((current) => ({
-                ...current,
-                neighborhoodDepth: value,
-                focusMode: value !== 'full',
-              }))}
-              searchQuery={searchQuery}
-              onSearchQueryChange={setSearchQuery}
-              searchResults={searchResults}
-              onJumpToDocument={handleJumpToDocument}
-            />
+            <div data-tour-id="maps-layout-filter">
+              <DocumentGraphControls
+                colorMode={graphPreferences.colorMode}
+                onColorModeChange={(value) => setGraphPreferences((current) => ({ ...current, colorMode: value }))}
+                sizeMode={graphPreferences.sizeMode}
+                onSizeModeChange={(value) => setGraphPreferences((current) => ({ ...current, sizeMode: value }))}
+                neighborhoodDepth={graphPreferences.neighborhoodDepth}
+                onNeighborhoodDepthChange={(value) => setGraphPreferences((current) => ({
+                  ...current,
+                  neighborhoodDepth: value,
+                  focusMode: value !== 'full',
+                }))}
+                searchQuery={searchQuery}
+                onSearchQueryChange={setSearchQuery}
+                searchResults={searchResults}
+                onJumpToDocument={handleJumpToDocument}
+              />
+            </div>
           </div>
           ) : null}
         </div>

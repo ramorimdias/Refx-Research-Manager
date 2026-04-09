@@ -1698,7 +1698,7 @@ function RealDocumentDetailPage({
           ) : null}
 
           <div className="space-y-6">
-        <Card>
+        <Card data-tour-id="documents-information">
           <Collapsible open={detailsExpanded} onOpenChange={setDetailsExpanded}>
             <CardHeader>
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
@@ -1715,7 +1715,7 @@ function RealDocumentDetailPage({
                 <div className="mb-4 flex justify-end">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" onClick={() => void handleFetchOnlineMetadata()} disabled={isFetchingOnlineMetadata}>
+                    <Button variant="outline" size="sm" onClick={() => void handleFetchOnlineMetadata()} disabled={isFetchingOnlineMetadata} data-tour-id="documents-fetch-metadata">
                       <Globe className="mr-2 h-4 w-4" />
                       {isFetchingOnlineMetadata ? 'Searchingâ€¦' : 'Find Metadata Online'}
                     </Button>
@@ -1931,53 +1931,67 @@ function RealDocumentDetailPage({
           </Collapsible>
         </Card>
 
-        <Card>
+        <Card data-tour-id="documents-tags">
           <Collapsible open={tagsExpanded} onOpenChange={setTagsExpanded}>
-            <CardHeader>
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Tag className="h-4 w-4 text-muted-foreground" />
-                  <CardTitle>{t('documentDetailPage.tagsAndClassification', { count: document.tags.length })}</CardTitle>
+            <CardHeader className="gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Tag className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <CardTitle className="min-w-0">
+                    {t('documentDetailPage.tagsAndClassification', { count: document.tags.length })}
+                  </CardTitle>
                 </div>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${tagsExpanded ? 'rotate-180' : ''}`} />
-              </CollapsibleTrigger>
-              <div className="flex items-center justify-end gap-2">
-                <Tooltip>
-                  <TooltipTrigger asChild>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 px-0"
+                        onClick={() => void handleRefreshLocalTags()}
+                        disabled={isFetchingAiTags || !isDesktopApp}
+                      >
+                        {isFetchingAiTags ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Search className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>Refresh local tags</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 px-0"
+                        onClick={() => void handleFetchTagsWithAi()}
+                        disabled={isFetchingAiTags || !isDesktopApp}
+                      >
+                        {isFetchingAiTags ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" sideOffset={8}>Fetch tags with AI</TooltipContent>
+                  </Tooltip>
+                  <CollapsibleTrigger asChild>
                     <Button
                       type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleRefreshLocalTags()}
-                      disabled={isFetchingAiTags || !isDesktopApp}
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      aria-label={tagsExpanded ? 'Collapse tags card' : 'Expand tags card'}
                     >
-                      {isFetchingAiTags ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Search className="h-4 w-4" />
-                      )}
+                      <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${tagsExpanded ? 'rotate-180' : ''}`} />
                     </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" sideOffset={8}>Refresh local tags</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void handleFetchTagsWithAi()}
-                      disabled={isFetchingAiTags || !isDesktopApp}
-                    >
-                      {isFetchingAiTags ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" sideOffset={8}>Fetch tags with AI</TooltipContent>
-                </Tooltip>
+                  </CollapsibleTrigger>
+                </div>
               </div>
             </CardHeader>
             <CollapsibleContent>
@@ -2216,34 +2230,42 @@ function RealDocumentDetailPage({
           </Collapsible>
         </Card>
 
-        <Card>
+        <Card data-tour-id="documents-references">
           <Collapsible open={linksExpanded} onOpenChange={setLinksExpanded}>
-            <CardHeader>
-              <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 text-left">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Link2 className="h-4 w-4 text-muted-foreground" />
-                  <div className="flex items-center gap-2 min-w-0">
-                    <CardTitle>
-                      {t('documentDetailPage.referencesAndCitations', {
-                        outgoing: relationItems.outgoing.length + doiReferenceBuckets.matched.length + doiReferenceBuckets.unmatched.length,
-                        incoming: relationItems.incoming.length + incomingDoiMatches.length,
-                      })}
-                    </CardTitle>
-                  </div>
+            <CardHeader className="gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <Link2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <CardTitle className="min-w-0">
+                    {t('documentDetailPage.referencesAndCitations', {
+                      outgoing: relationItems.outgoing.length + doiReferenceBuckets.matched.length + doiReferenceBuckets.unmatched.length,
+                      incoming: relationItems.incoming.length + incomingDoiMatches.length,
+                    })}
+                  </CardTitle>
                 </div>
-                <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${linksExpanded ? 'rotate-180' : ''}`} />
-              </CollapsibleTrigger>
-              <div className="flex justify-end">
-                <Button type="button" variant="outline" size="sm" onClick={() => void handleFindReferences()} disabled={isFindingReferences}>
-                  {isFindingReferences ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Finding...
-                    </>
-                  ) : (
-                    t('documentDetailPage.findReferences')
-                  )}
-                </Button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => void handleFindReferences()} disabled={isFindingReferences}>
+                    {isFindingReferences ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Finding...
+                      </>
+                    ) : (
+                      t('documentDetailPage.findReferences')
+                    )}
+                  </Button>
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      aria-label={linksExpanded ? 'Collapse references card' : 'Expand references card'}
+                    >
+                      <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${linksExpanded ? 'rotate-180' : ''}`} />
+                    </Button>
+                  </CollapsibleTrigger>
+                </div>
               </div>
             </CardHeader>
             <CollapsibleContent>
@@ -2462,11 +2484,6 @@ export default function DocumentDetailPage() {
   const id = params.get('id')
   const metadataMode = params.get('metadata')
   const autoSearchMetadata = params.get('autoSearchMetadata') === '1'
-  const isTourDemo = params.get('tourDemo') === '1'
-
-  if (isTourDemo) {
-    return <DocumentDetailTourDemo />
-  }
 
   if (!id) {
     return <div className="p-6">Missing document id.</div>

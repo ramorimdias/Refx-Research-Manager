@@ -36,7 +36,7 @@ import { useUiStore } from '@/lib/stores/ui-store'
 export function CommandBar() {
   const t = useT()
   const router = useRouter()
-  const { closeAppTour } = useAppTour()
+  const { closeCurrentPageTour } = useAppTour()
   const commandPaletteOpen = useUiStore((state) => state.commandPaletteOpen)
   const toggleCommandPalette = useUiStore((state) => state.toggleCommandPalette)
   const libraries = useLibraryStore((state) => state.libraries)
@@ -110,7 +110,7 @@ export function CommandBar() {
             <span>{t('nav.notes')}</span>
           </CommandItem>
           <CommandItem onSelect={() => runCommand(() => {
-            closeAppTour()
+            closeCurrentPageTour()
             router.push('/settings')
           })}>
             <Settings className="mr-2 h-4 w-4" />
@@ -128,7 +128,7 @@ export function CommandBar() {
             </CommandItem>
           )}
           <CommandItem onSelect={() => runCommand(() => {
-            closeAppTour()
+            closeCurrentPageTour()
             router.push('/settings')
           })}>
             <Keyboard className="mr-2 h-4 w-4" />

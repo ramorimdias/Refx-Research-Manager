@@ -12,28 +12,28 @@ import {
   type CSSProperties,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { ArrowRight, ChevronLeft, Lightbulb, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { APP_TOUR_STEPS, type AppTourDynamicPath, type AppTourPlacement } from '@/lib/app-tour'
+import { APP_PAGE_TOURS, type AppTourPlacement } from '@/lib/app-tour'
 import { translate, type AppLocale, useLocale } from '@/lib/localization'
-import { useDocumentStore } from '@/lib/stores/document-store'
 import { cn } from '@/lib/utils'
 
 type AppTourContextValue = {
   isOpen: boolean
-  startAppTour: () => void
-  closeAppTour: () => void
+  startCurrentPageTour: () => void
+  closeCurrentPageTour: () => void
   nextTourStep: () => void
   previousTourStep: () => void
-  skipAppTour: () => void
+  skipCurrentPageTour: () => void
+  canStartCurrentPageTour: boolean
+  hasCurrentPageTour: boolean
+  currentPageTourUnavailableReason: string | null
 }
 
 type AppTourProviderProps = {
   children: React.ReactNode
   enabled: boolean
-  shouldAutostart: boolean
-  onTourCompleted: () => Promise<void> | void
 }
 
 type SpotlightRect = {
@@ -146,11 +146,14 @@ const APP_TOUR_TRANSLATIONS: Partial<Record<AppLocale, Record<string, string>>> 
 
 const AppTourContext = createContext<AppTourContextValue>({
   isOpen: false,
-  startAppTour: () => undefined,
-  closeAppTour: () => undefined,
+  startCurrentPageTour: () => undefined,
+  closeCurrentPageTour: () => undefined,
   nextTourStep: () => undefined,
   previousTourStep: () => undefined,
-  skipAppTour: () => undefined,
+  skipCurrentPageTour: () => undefined,
+  canStartCurrentPageTour: false,
+  hasCurrentPageTour: false,
+  currentPageTourUnavailableReason: null,
 })
 
 function clamp(value: number, min: number, max: number) {
@@ -159,6 +162,21 @@ function clamp(value: number, min: number, max: number) {
 
 function queryTourTarget(targetTourId: string) {
   return document.querySelector<HTMLElement>(`${TARGET_SELECTOR_PREFIX}${targetTourId}"]`)
+}
+
+function measureTourTarget(targetTourId: string): SpotlightRect | null {
+  const element = queryTourTarget(targetTourId)
+  if (!element) return null
+
+  const rect = element.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return null
+
+  return {
+    top: rect.top,
+    left: rect.left,
+    width: rect.width,
+    height: rect.height,
+  }
 }
 
 function translateTour(locale: AppLocale, key: string, params?: Record<string, string | number>) {
@@ -171,54 +189,6 @@ function translateTour(locale: AppLocale, key: string, params?: Record<string, s
   }
 
   return translate(locale, key, params)
-}
-
-function resolveDynamicPath(
-  dynamicPath: AppTourDynamicPath,
-  documents: ReturnType<typeof useDocumentStore.getState>['documents'],
-) {
-  if (dynamicPath === 'first-document-comments') {
-    const firstCommentableDocument = [...documents]
-      .filter((document) => document.documentType === 'pdf' || document.documentType === 'physical_book' || document.documentType === 'my_work')
-      .sort((left, right) => {
-        const titleComparison = left.title.localeCompare(right.title)
-        if (titleComparison !== 0) return titleComparison
-        return left.createdAt.getTime() - right.createdAt.getTime()
-      })[0]
-
-    if (!firstCommentableDocument) return null
-    return `/comments?id=${firstCommentableDocument.id}`
-  }
-
-  if (dynamicPath !== 'first-pdf-reader') return null
-
-  const firstReadablePdf = [...documents]
-    .filter((document) => document.documentType === 'pdf' && document.filePath)
-    .sort((left, right) => {
-      const titleComparison = left.title.localeCompare(right.title)
-      if (titleComparison !== 0) return titleComparison
-      return left.createdAt.getTime() - right.createdAt.getTime()
-    })[0]
-
-  if (!firstReadablePdf) return null
-  return `/reader/view?id=${firstReadablePdf.id}`
-}
-
-function normalizeRouteLocation(path: string | null) {
-  if (!path) return null
-  try {
-    const url = new URL(path, 'http://refx.local')
-    const normalizedSearchParams = new URLSearchParams(url.search)
-    normalizedSearchParams.sort()
-    const query = normalizedSearchParams.toString()
-    return query ? `${url.pathname}?${query}` : url.pathname
-  } catch {
-    const [pathname, rawQuery = ''] = path.split('?')
-    const normalizedSearchParams = new URLSearchParams(rawQuery)
-    normalizedSearchParams.sort()
-    const query = normalizedSearchParams.toString()
-    return query ? `${pathname ?? path}?${query}` : (pathname ?? path)
-  }
 }
 
 function computePlacement(
@@ -291,26 +261,26 @@ function Spotlight({
   rect,
   title,
   body,
-  stepLabel,
   locale,
   placement,
   onBack,
   onNext,
-  onSkip,
+  onClose,
   isFirstStep,
   isLastStep,
+  progressPercent,
 }: {
   rect: SpotlightRect
   title: string
   body: string
-  stepLabel: string
   locale: AppLocale
   placement: AppTourPlacement
   onBack: () => void
   onNext: () => void
-  onSkip: () => void
+  onClose: () => void
   isFirstStep: boolean
   isLastStep: boolean
+  progressPercent: number
 }) {
   const balloonStyle = buildBalloonStyle(rect, placement)
   const arrowPath = buildArrowPath(rect, balloonStyle)
@@ -353,7 +323,7 @@ function Spotlight({
       />
 
       <div
-        className="pointer-events-auto absolute rounded-3xl border border-amber-200/50 bg-background/98 p-5 shadow-[0_28px_90px_rgba(15,23,42,0.42)]"
+        className="pointer-events-auto absolute overflow-hidden rounded-3xl border border-amber-200/50 bg-background/98 p-5 shadow-[0_28px_90px_rgba(15,23,42,0.42)]"
         style={balloonStyle}
         role="dialog"
         aria-modal="true"
@@ -363,13 +333,12 @@ function Spotlight({
             <Lightbulb className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-medium uppercase tracking-[0.18em] text-primary/80">{stepLabel}</div>
-            <h2 className="mt-1 text-lg font-semibold tracking-tight">{title}</h2>
+            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
           </div>
           <button
             type="button"
-            onClick={onSkip}
+            onClick={onClose}
             className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             aria-label={translateTour(locale, 'tour.close')}
           >
@@ -377,20 +346,22 @@ function Spotlight({
           </button>
         </div>
 
-        <div className="mt-5 flex items-center justify-between gap-3">
-          <Button variant="ghost" size="sm" onClick={onSkip}>
-            {translateTour(locale, 'tour.skip')}
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onBack} disabled={isFirstStep}>
+            <ChevronLeft className="h-4 w-4" />
+            {translateTour(locale, 'tour.back')}
           </Button>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onBack} disabled={isFirstStep}>
-              <ChevronLeft className="h-4 w-4" />
-              {translateTour(locale, 'tour.back')}
-            </Button>
-            <Button size="sm" onClick={onNext}>
-              {isLastStep ? translateTour(locale, 'tour.finish') : translateTour(locale, 'tour.next')}
-              {!isLastStep ? <ArrowRight className="h-4 w-4" /> : null}
-            </Button>
-          </div>
+          <Button size="sm" onClick={onNext}>
+            {isLastStep ? translateTour(locale, 'tour.finish') : translateTour(locale, 'tour.next')}
+            {!isLastStep ? <ArrowRight className="h-4 w-4" /> : null}
+          </Button>
+        </div>
+
+        <div className="absolute inset-x-0 bottom-0 h-1.5 bg-amber-100/70">
+          <div
+            className="h-full bg-amber-400 transition-[width] duration-200"
+            style={{ width: `${progressPercent}%` }}
+          />
         </div>
       </div>
     </div>,
@@ -401,112 +372,128 @@ function Spotlight({
 export function AppTourProvider({
   children,
   enabled,
-  shouldAutostart,
-  onTourCompleted,
 }: AppTourProviderProps) {
   const { locale } = useLocale()
-  const router = useRouter()
   const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const documents = useDocumentStore((state) => state.documents)
   const [isOpen, setIsOpen] = useState(false)
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [rect, setRect] = useState<SpotlightRect | null>(null)
   const [resolvedPlacement, setResolvedPlacement] = useState<AppTourPlacement>('bottom')
-  const hasAutostartedRef = useRef(false)
-  const completeOnceRef = useRef(false)
+  const [currentPageTargetsReady, setCurrentPageTargetsReady] = useState(false)
+  const previousPathnameRef = useRef<string | null>(null)
+  const currentPageTourSteps = useMemo(
+    () => APP_PAGE_TOURS[pathname] ?? [],
+    [pathname],
+  )
+  const hasCurrentPageTour = currentPageTourSteps.length > 0
 
-  const completeTour = useCallback(async () => {
-    if (completeOnceRef.current) return
-    completeOnceRef.current = true
-    await onTourCompleted()
-  }, [onTourCompleted])
-
-  const closeTour = useCallback(() => {
+  const closeCurrentPageTour = useCallback(() => {
     setIsOpen(false)
     setRect(null)
   }, [])
 
-  const startAppTour = useCallback(() => {
-    if (!enabled) return
-    completeOnceRef.current = false
+  const canStartCurrentPageTour = enabled && hasCurrentPageTour && currentPageTargetsReady
+  const currentPageTourUnavailableReason = canStartCurrentPageTour
+    ? null
+    : translate(locale, 'topBar.pageGuideUnavailable')
+
+  const startCurrentPageTour = useCallback(() => {
+    if (!canStartCurrentPageTour) return
     setCurrentStepIndex(0)
     setRect(null)
     setIsOpen(true)
-  }, [enabled])
+  }, [canStartCurrentPageTour])
 
-  const finishTour = useCallback(async () => {
-    await completeTour()
-    closeTour()
-  }, [closeTour, completeTour])
-
-  const skipAppTour = useCallback(() => {
-    void (async () => {
-      await completeTour()
-      closeTour()
-      router.push('/')
-    })()
-  }, [closeTour, completeTour, router])
+  const skipCurrentPageTour = useCallback(() => {
+    closeCurrentPageTour()
+  }, [closeCurrentPageTour])
 
   const nextTourStep = useCallback(() => {
     setRect(null)
     setCurrentStepIndex((current) => {
-      if (current >= APP_TOUR_STEPS.length - 1) {
-        void finishTour()
+      if (current >= currentPageTourSteps.length - 1) {
+        closeCurrentPageTour()
         return current
       }
       return current + 1
     })
-  }, [finishTour])
+  }, [closeCurrentPageTour, currentPageTourSteps.length])
 
   const previousTourStep = useCallback(() => {
     setRect(null)
     setCurrentStepIndex((current) => Math.max(0, current - 1))
   }, [])
 
-  const currentStep = APP_TOUR_STEPS[currentStepIndex] ?? null
-  const currentStepPath = useMemo(() => {
-    if (!currentStep) return null
-    if (currentStep.path) return currentStep.path
-    if (currentStep.dynamicPath) return resolveDynamicPath(currentStep.dynamicPath, documents)
-    return null
-  }, [currentStep, documents])
-  const currentRoute = useMemo(
-    () => normalizeRouteLocation(
-      searchParams.toString().length > 0 ? `${pathname}?${searchParams.toString()}` : pathname,
-    ),
-    [pathname, searchParams],
-  )
-  const currentStepRoute = useMemo(
-    () => normalizeRouteLocation(currentStepPath),
-    [currentStepPath],
-  )
-
   useEffect(() => {
-    if (!enabled || !shouldAutostart || hasAutostartedRef.current) return
-    hasAutostartedRef.current = true
-    startAppTour()
-  }, [enabled, shouldAutostart, startAppTour])
-
-  useEffect(() => {
-    if (!isOpen || !currentStep) return
-    if (!currentStepPath) {
-      if (currentStep.skipIfUnavailable) {
-        nextTourStep()
-      }
+    if (typeof document === 'undefined' || !enabled || !hasCurrentPageTour) {
+      setCurrentPageTargetsReady(false)
       return
     }
-    if (currentRoute === currentStepRoute) return
-    setRect(null)
-    router.push(currentStepPath)
-  }, [currentRoute, currentStep, currentStepPath, currentStepRoute, isOpen, nextTourStep, router])
+
+    let frameId = 0
+    const evaluateTargets = () => {
+      setCurrentPageTargetsReady(
+        currentPageTourSteps.every((step) => Boolean(measureTourTarget(step.targetTourId))),
+      )
+    }
+    const scheduleEvaluation = () => {
+      if (frameId) return
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0
+        evaluateTargets()
+      })
+    }
+
+    scheduleEvaluation()
+
+    const observer = new MutationObserver(() => {
+      scheduleEvaluation()
+    })
+
+    observer.observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+    })
+
+    window.addEventListener('resize', scheduleEvaluation)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', scheduleEvaluation)
+      if (frameId) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [currentPageTourSteps, enabled, hasCurrentPageTour, pathname])
+
+  useEffect(() => {
+    if (!enabled && isOpen) {
+      closeCurrentPageTour()
+    }
+  }, [closeCurrentPageTour, enabled, isOpen])
+
+  useEffect(() => {
+    if (previousPathnameRef.current === null) {
+      previousPathnameRef.current = pathname
+      return
+    }
+
+    if (previousPathnameRef.current !== pathname && isOpen) {
+      closeCurrentPageTour()
+    }
+
+    previousPathnameRef.current = pathname
+  }, [closeCurrentPageTour, isOpen, pathname])
+
+  const currentStep = currentPageTourSteps[currentStepIndex] ?? null
 
   useEffect(() => {
     if (!isOpen) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        void skipAppTour()
+        skipCurrentPageTour()
       }
       if (event.key === 'ArrowRight') {
         event.preventDefault()
@@ -519,10 +506,10 @@ export function AppTourProvider({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, nextTourStep, previousTourStep, skipAppTour])
+  }, [isOpen, nextTourStep, previousTourStep, skipCurrentPageTour])
 
   useLayoutEffect(() => {
-    if (!isOpen || !currentStep || !currentStepRoute || currentRoute !== currentStepRoute) return
+    if (!isOpen || !currentStep) return
 
     let cancelled = false
     let frameId = 0
@@ -530,24 +517,19 @@ export function AppTourProvider({
 
     const measure = () => {
       if (cancelled) return
-      const element = queryTourTarget(currentStep.targetTourId)
-      if (!element) {
+      const spotlightRect = measureTourTarget(currentStep.targetTourId)
+      if (!spotlightRect) {
         if (Date.now() >= deadline) {
-          nextTourStep()
+          closeCurrentPageTour()
           return
         }
         frameId = window.requestAnimationFrame(measure)
         return
       }
 
+      const element = queryTourTarget(currentStep.targetTourId)
+      if (!element) return
       element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' })
-      const nextRect = element.getBoundingClientRect()
-      const spotlightRect = {
-        top: nextRect.top,
-        left: nextRect.left,
-        width: nextRect.width,
-        height: nextRect.height,
-      }
       setRect(spotlightRect)
       setResolvedPlacement(
         computePlacement(currentStep.placement, spotlightRect, window.innerWidth, window.innerHeight),
@@ -562,21 +544,14 @@ export function AppTourProvider({
         window.cancelAnimationFrame(frameId)
       }
     }
-  }, [currentRoute, currentStep, currentStepRoute, isOpen, nextTourStep])
+  }, [closeCurrentPageTour, currentStep, isOpen])
 
   useEffect(() => {
-    if (!isOpen || !currentStep || !currentStepRoute || currentRoute !== currentStepRoute || !rect) return
+    if (!isOpen || !currentStep || !rect) return
 
     const updateRect = () => {
-      const element = queryTourTarget(currentStep.targetTourId)
-      if (!element) return
-      const nextRect = element.getBoundingClientRect()
-      const spotlightRect = {
-        top: nextRect.top,
-        left: nextRect.left,
-        width: nextRect.width,
-        height: nextRect.height,
-      }
+      const spotlightRect = measureTourTarget(currentStep.targetTourId)
+      if (!spotlightRect) return
       setRect(spotlightRect)
       setResolvedPlacement(
         computePlacement(currentStep.placement, spotlightRect, window.innerWidth, window.innerHeight),
@@ -589,26 +564,36 @@ export function AppTourProvider({
       window.removeEventListener('resize', updateRect)
       window.removeEventListener('scroll', updateRect, true)
     }
-  }, [currentRoute, currentStep, currentStepRoute, isOpen, rect])
+  }, [currentStep, isOpen, rect])
 
   const value = useMemo<AppTourContextValue>(
     () => ({
       isOpen,
-      startAppTour,
-      closeAppTour: closeTour,
+      startCurrentPageTour,
+      closeCurrentPageTour,
       nextTourStep,
       previousTourStep,
-      skipAppTour,
+      skipCurrentPageTour,
+      canStartCurrentPageTour,
+      hasCurrentPageTour,
+      currentPageTourUnavailableReason,
     }),
-    [closeTour, isOpen, nextTourStep, previousTourStep, skipAppTour, startAppTour],
+    [
+      canStartCurrentPageTour,
+      closeCurrentPageTour,
+      currentPageTourUnavailableReason,
+      hasCurrentPageTour,
+      isOpen,
+      nextTourStep,
+      previousTourStep,
+      skipCurrentPageTour,
+      startCurrentPageTour,
+    ],
   )
 
-  const stepLabel = currentStep
-    ? translateTour(locale, 'tour.stepCounter', {
-        current: currentStepIndex + 1,
-        total: APP_TOUR_STEPS.length,
-      })
-    : ''
+  const progressPercent = currentStep
+    ? ((currentStepIndex + 1) / Math.max(currentPageTourSteps.length, 1)) * 100
+    : 0
   const hasVisibleSpotlight = Boolean(isOpen && currentStep && rect)
   const spotlightRect = rect
 
@@ -620,14 +605,14 @@ export function AppTourProvider({
           rect={spotlightRect}
           title={translateTour(locale, currentStep.titleKey)}
           body={translateTour(locale, currentStep.bodyKey)}
-          stepLabel={stepLabel}
           locale={locale}
           placement={resolvedPlacement}
           onBack={previousTourStep}
           onNext={nextTourStep}
-          onSkip={skipAppTour}
+          onClose={skipCurrentPageTour}
           isFirstStep={currentStepIndex === 0}
-          isLastStep={currentStepIndex === APP_TOUR_STEPS.length - 1}
+          isLastStep={currentStepIndex === currentPageTourSteps.length - 1}
+          progressPercent={progressPercent}
         />
       ) : null}
     </AppTourContext.Provider>

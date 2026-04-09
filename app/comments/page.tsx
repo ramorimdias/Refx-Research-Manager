@@ -419,12 +419,5 @@ function RealCommentsPage() {
 }
 
 export default function CommentsPage() {
-  const params = useSearchParams()
-  const isTourDemo = params.get('tourDemo') === '1'
-
-  if (isTourDemo) {
-    return <CommentsTourDemo />
-  }
-
   return <RealCommentsPage />
 }
