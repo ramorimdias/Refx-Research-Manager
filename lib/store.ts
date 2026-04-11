@@ -44,6 +44,13 @@ import {
 } from '@/lib/stores/shared'
 import { dbDocumentToUi } from '@/lib/utils/document-mapper'
 import type {
+  RemoteVaultStatus,
+  RemoteStorageMode,
+} from '@/lib/remote-storage-state'
+import {
+  setRemoteVaultStatus,
+} from '@/lib/remote-storage-state'
+import type {
   Document,
   DocumentRelation,
   GraphView,
@@ -64,10 +71,13 @@ interface RuntimeStoreState {
   isDesktopApp: boolean
   annotations: AppAnnotation[]
   notes: AppNote[]
+  remoteStorageMode: RemoteStorageMode
+  remoteVaultStatus: RemoteVaultStatus | null
   setInitialized: (initialized: boolean) => void
   setIsDesktopApp: (isDesktopApp: boolean) => void
   setAnnotations: (annotations: AppAnnotation[]) => void
   setNotes: (notes: AppNote[]) => void
+  setRemoteVaultStatus: (status: RemoteVaultStatus | null) => void
   resetRuntime: (isDesktopApp?: boolean) => void
 }
 
@@ -78,6 +88,8 @@ interface AppState {
   documents: Document[]
   annotations: AppAnnotation[]
   notes: AppNote[]
+  remoteStorageMode: RemoteStorageMode
+  remoteVaultStatus: RemoteVaultStatus | null
   relations: DocumentRelation[]
   graphViews: GraphView[]
   graphViewLayouts: GraphViewNodeLayout[]
@@ -174,15 +186,26 @@ const useRuntimeStore = create<RuntimeStoreState>((set) => ({
   isDesktopApp: false,
   annotations: [],
   notes: [],
+  remoteStorageMode: 'local',
+  remoteVaultStatus: null,
   setInitialized: (initialized) => set({ initialized }),
   setIsDesktopApp: (isDesktopApp) => set({ isDesktopApp }),
   setAnnotations: (annotations) => set({ annotations }),
   setNotes: (notes) => set({ notes }),
+  setRemoteVaultStatus: (remoteVaultStatus) => {
+    setRemoteVaultStatus(remoteVaultStatus)
+    set({
+      remoteVaultStatus,
+      remoteStorageMode: remoteVaultStatus?.mode ?? 'local',
+    })
+  },
   resetRuntime: (isDesktopApp = false) => set({
     initialized: true,
     isDesktopApp,
     annotations: [],
     notes: [],
+    remoteStorageMode: 'local',
+    remoteVaultStatus: null,
   }),
 }))
 
@@ -219,7 +242,10 @@ function syncDesktopData(data: Awaited<ReturnType<typeof fetchDesktopData>>) {
     isDesktopApp: true,
     notes: data.notes,
     annotations: data.annotations,
+    remoteStorageMode: data.remoteVaultStatus?.mode ?? 'local',
+    remoteVaultStatus: data.remoteVaultStatus,
   })
+  setRemoteVaultStatus(data.remoteVaultStatus)
   useLibraryStore.setState({
     libraries: data.libraries,
     activeLibraryId: nextActiveLibraryId,
@@ -301,7 +327,7 @@ appActions.initialize = async () => {
   }
 
   try {
-    syncDesktopData(await withTimeout(fetchDesktopData(), DESKTOP_BOOTSTRAP_TIMEOUT_MS, 'Desktop bootstrap'))
+    syncDesktopData(await withTimeout(fetchDesktopData({ pullRemote: true, acquireLease: true }), DESKTOP_BOOTSTRAP_TIMEOUT_MS, 'Desktop bootstrap'))
   } catch (error) {
     console.error('Desktop bootstrap failed; starting with a safe empty workspace.', error)
     resetPreviewData(true)

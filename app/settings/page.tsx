@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Database, Download, HardDrive, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Cloud, Database, Download, FolderOpen, HardDrive, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -43,11 +43,17 @@ import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
 import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
+import { getRemoteVaultDisplayMessage, getRemoteVaultModeLabel } from '@/lib/remote-vault-copy'
 import { APP_VERSION, getAppVersion } from '@/lib/app-version'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
 import { useRuntimeActions, useRuntimeState } from '@/lib/stores/runtime-store'
 
 type SettingsSection = 'general' | 'display' | 'processing' | 'data' | 'about'
+type SettingsBackupMetadata = repo.DbBackupFileMetadata | repo.DbRemoteVaultBackupMetadata
+
+const isRemoteVaultBackup = (backup: SettingsBackupMetadata): backup is repo.DbRemoteVaultBackupMetadata => (
+  'revision' in backup
+)
 
 export default function SettingsPage() {
   const t = useT()
@@ -63,7 +69,7 @@ export default function SettingsPage() {
   const [isScanningOcr, setIsScanningOcr] = useState(false)
   const [isCreatingBackup, setIsCreatingBackup] = useState(false)
   const [isRestoringBackup, setIsRestoringBackup] = useState(false)
-  const [backups, setBackups] = useState<repo.DbBackupFileMetadata[]>([])
+  const [backups, setBackups] = useState<SettingsBackupMetadata[]>([])
   const [backupStatus, setBackupStatus] = useState<string | null>(null)
   const [settings, setSettings] = useState<StoredAppSettings>(DEFAULT_APP_SETTINGS)
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false)
@@ -79,10 +85,14 @@ export default function SettingsPage() {
   const [isClassifyingDocuments, setIsClassifyingDocuments] = useState(false)
   const [isRecheckingDoiReferences, setIsRecheckingDoiReferences] = useState(false)
   const [doiReferenceStatus, setDoiReferenceStatus] = useState<string | null>(null)
+  const [remoteVaultStatus, setRemoteVaultStatus] = useState<repo.DbRemoteVaultStatus | null>(null)
+  const [remoteVaultMessage, setRemoteVaultMessage] = useState<string | null>(null)
+  const [isRemoteVaultBusy, setIsRemoteVaultBusy] = useState(false)
   const [restoreTargetPath, setRestoreTargetPath] = useState<string | null>(null)
   const [isRestoreWarningOpen, setIsRestoreWarningOpen] = useState(false)
   const [isClearDataDialogOpen, setIsClearDataDialogOpen] = useState(false)
   const [backupDeleteTargetPath, setBackupDeleteTargetPath] = useState<string | null>(null)
+  const [isJoinAnotherVaultDialogOpen, setIsJoinAnotherVaultDialogOpen] = useState(false)
   const hasLoadedSettingsRef = useRef(false)
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false)
   const isDevSplashPreviewAvailable = process.env.NODE_ENV === 'development'
@@ -242,15 +252,29 @@ export default function SettingsPage() {
           rechecking: 'Verificando novamente...',
           recheckDoiLinks: 'Verificar links DOI novamente',
           backups: 'Backups',
+          vaultBackups: 'Backups do vault',
+          vaultBackupsDescription: 'Quando o Remote Vault esta ativo, os backups ficam dentro da pasta do vault para proteger a fonte compartilhada, nao apenas este dispositivo.',
           backupsDescription: 'Backups locais em arquivo único para documentos, notas, mapas e configurações.',
           automaticBackups: 'Backups automáticos',
           automaticBackupsDescription: 'Backups gerenciados pelo app criados ao iniciar quando necessário.',
+          vaultAutomaticBackupsDescription: 'Backups automaticos agora sao criados no vault quando este dispositivo tem a permissao de escrita.',
           backupScope: 'Escopo do backup',
           everything: 'Tudo',
           documentsOnly: 'Somente documentos',
           settingsOnly: 'Somente configurações',
           frequencyInDays: 'Frequência em dias',
           keepBackups: 'Manter backups',
+          manualVaultBackup: 'Backup manual do vault',
+          createVaultBackup: 'Criar backup do vault',
+          vaultBackupCreated: 'Backup do vault criado: {fileName}',
+          vaultSafetyBackupCreated: 'Backup de seguranca do vault criado: {fileName}',
+          vaultBackupRestored: 'Backup do vault restaurado: {fileName}',
+          vaultBackupList: 'Backups do vault',
+          noVaultBackupsYet: 'Ainda nao ha backups no vault.',
+          vaultBackupRestoreSafetyDescription: 'Isto e destrutivo. O REFX vai restaurar a snapshot selecionada para o Remote Vault e atualizar o cache deste dispositivo.',
+          vaultBackupRestoreSafetyDescription2: 'O REFX criara primeiro um backup de seguranca do estado atual do vault. Outros dispositivos vao ver a versao restaurada na proxima sincronizacao.',
+          vaultBackupRestoreSafetyDescription3: 'Continue apenas se quiser substituir o estado atual do vault pelo backup selecionado.',
+          restoreVaultBackup: 'Restaurar backup do vault',
           manualBackupExport: 'Exportação manual de backup',
           restoreFile: 'Restaurar arquivo',
           refresh: 'Atualizar',
@@ -302,8 +326,11 @@ export default function SettingsPage() {
           rechecking: 'Nouvelle vérification...',
           recheckDoiLinks: 'Revérifier les liens DOI',
           backups: 'Sauvegardes',
+          vaultBackups: 'Sauvegardes du vault',
+          vaultBackupsDescription: 'Quand le Remote Vault est actif, les sauvegardes restent dans le dossier du vault pour proteger la source partagee, pas seulement cet appareil.',
           backupsDescription: 'Sauvegardes locales en fichier unique pour les documents, notes, cartes et réglages.',
           automaticBackups: 'Sauvegardes automatiques',
+          vaultAutomaticBackupsDescription: 'Les sauvegardes automatiques sont creees dans le vault quand cet appareil detient le bail d ecriture.',
           automaticBackupsDescription: 'Sauvegardes gérées par l’application créées au démarrage lorsque nécessaire.',
           backupScope: 'Portée de la sauvegarde',
           everything: 'Tout',
@@ -311,6 +338,17 @@ export default function SettingsPage() {
           settingsOnly: 'Réglages seulement',
           frequencyInDays: 'Fréquence en jours',
           keepBackups: 'Conserver les sauvegardes',
+          manualVaultBackup: 'Sauvegarde manuelle du vault',
+          createVaultBackup: 'Creer une sauvegarde du vault',
+          vaultBackupCreated: 'Sauvegarde du vault creee : {fileName}',
+          vaultSafetyBackupCreated: 'Sauvegarde de securite du vault creee : {fileName}',
+          vaultBackupRestored: 'Sauvegarde du vault restauree : {fileName}',
+          vaultBackupList: 'Sauvegardes du vault',
+          noVaultBackupsYet: 'Aucune sauvegarde du vault pour le moment.',
+          vaultBackupRestoreSafetyDescription: 'Cette operation est destructive. REFX restaurera le snapshot selectionne dans le Remote Vault et actualisera le cache de cet appareil.',
+          vaultBackupRestoreSafetyDescription2: 'REFX creera d abord une sauvegarde de securite de l etat actuel du vault. Les autres appareils verront la version restauree a la prochaine synchronisation.',
+          vaultBackupRestoreSafetyDescription3: 'Continuez seulement si vous voulez remplacer l etat actuel du vault par la sauvegarde selectionnee.',
+          restoreVaultBackup: 'Restaurer la sauvegarde du vault',
           manualBackupExport: 'Export manuel de sauvegarde',
           restoreFile: 'Restaurer un fichier',
           refresh: 'Actualiser',
@@ -362,8 +400,11 @@ export default function SettingsPage() {
           rechecking: 'Rechecking...',
           recheckDoiLinks: 'Recheck DOI Links',
           backups: 'Backups',
+          vaultBackups: 'Vault Backups',
+          vaultBackupsDescription: 'When Remote Vault is enabled, backups are stored inside the vault folder so they protect the shared source of truth, not just this device.',
           backupsDescription: 'Single-file local backups for documents, notes, maps, and settings.',
           automaticBackups: 'Automatic Backups',
+          vaultAutomaticBackupsDescription: 'Automatic backups are created in the vault when this device holds the write lease.',
           automaticBackupsDescription: 'App-managed backups created on startup when due.',
           backupScope: 'Backup Scope',
           everything: 'Everything',
@@ -371,6 +412,17 @@ export default function SettingsPage() {
           settingsOnly: 'Settings Only',
           frequencyInDays: 'Frequency in days',
           keepBackups: 'Keep backups',
+          manualVaultBackup: 'Manual Vault Backup',
+          createVaultBackup: 'Create Vault Backup',
+          vaultBackupCreated: 'Vault backup created: {fileName}',
+          vaultSafetyBackupCreated: 'Vault safety backup created: {fileName}',
+          vaultBackupRestored: 'Vault backup restored: {fileName}',
+          vaultBackupList: 'Vault backups',
+          noVaultBackupsYet: 'No vault backups yet.',
+          vaultBackupRestoreSafetyDescription: 'This is destructive. REFX will restore the selected snapshot into the Remote Vault and refresh this device cache.',
+          vaultBackupRestoreSafetyDescription2: 'REFX will create a current vault safety backup first. Other devices will see the restored version on their next sync.',
+          vaultBackupRestoreSafetyDescription3: 'Continue only if you want to replace the current vault state with the selected backup.',
+          restoreVaultBackup: 'Restore vault backup',
           manualBackupExport: 'Manual Backup Export',
           restoreFile: 'Restore File',
           refresh: 'Refresh',
@@ -393,6 +445,12 @@ export default function SettingsPage() {
         }
     }
   }, [locale])
+
+  const isRemoteVaultBackupMode = Boolean(remoteVaultStatus?.enabled ?? settings.remoteVaultEnabled)
+  const canWriteRemoteVaultBackups = !isRemoteVaultBackupMode || remoteVaultStatus?.mode === 'remoteWriter'
+  const hasRemoteVault = Boolean(remoteVaultStatus?.enabled ?? settings.remoteVaultEnabled)
+  const canPushRemoteVault = remoteVaultStatus?.mode === 'remoteWriter'
+  const canReleaseRemoteLease = remoteVaultStatus?.mode === 'remoteWriter'
 
   const handlePreviewLoadingSplash = () => {
     if (typeof window === 'undefined') return
@@ -455,9 +513,13 @@ export default function SettingsPage() {
     void applyAndSave()
   }, [isDesktopApp, setTheme, settings])
 
-  const loadBackups = async () => {
+  const loadBackups = async (remoteEnabled = isRemoteVaultBackupMode) => {
     if (!isDesktopApp) {
       setBackups([])
+      return
+    }
+    if (remoteEnabled) {
+      setBackups(await repo.listRemoteVaultBackups())
       return
     }
     const nextBackups = await repo.listBackups()
@@ -467,7 +529,103 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!isDesktopApp) return
     void loadBackups()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDesktopApp, isRemoteVaultBackupMode])
+
+  const applyRemoteVaultStatusToSettings = (status: repo.DbRemoteVaultStatus | null) => {
+    if (!status) return
+    setRemoteVaultStatus(status)
+    setSettings((current) => ({
+      ...current,
+      remoteVaultEnabled: status.enabled,
+      remoteVaultPath: status.path ?? '',
+      remoteVaultId: status.vaultId ?? '',
+      remoteDeviceId: status.deviceId ?? current.remoteDeviceId,
+      remoteLastPulledAt: status.remoteLastPulledAt ?? current.remoteLastPulledAt,
+      remoteLastPushedAt: status.remoteLastPushedAt ?? current.remoteLastPushedAt,
+    }))
+  }
+
+  const loadRemoteVaultStatus = async () => {
+    if (!isDesktopApp) {
+      setRemoteVaultStatus(null)
+      return
+    }
+    try {
+      const status = await repo.getRemoteVaultStatus()
+      applyRemoteVaultStatusToSettings(status)
+      setRemoteVaultMessage(getRemoteVaultDisplayMessage(t, status))
+    } catch (error) {
+      setRemoteVaultMessage(error instanceof Error ? error.message : t('settings.remoteVault.readStatusFailed'))
+    }
+  }
+
+  const getRemoteVaultErrorMessage = (error: unknown) => {
+    const message = error instanceof Error ? error.message : ''
+    if (message.includes('already contains a populated Refx vault')) {
+      return t('settings.remoteVault.migrationTargetExists')
+    }
+    if (message.includes('moving the library back to local storage')) {
+      return t('settings.remoteVault.moveToLocalFailed')
+    }
+    return message || t('settings.remoteVault.actionFailed')
+  }
+
+  useEffect(() => {
+    if (!isDesktopApp) return
+    void loadRemoteVaultStatus()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDesktopApp])
+
+  const withRemoteVaultBusy = async (action: () => Promise<repo.DbRemoteVaultStatus | repo.DbRemoteVaultActionResult>) => {
+    if (!isDesktopApp) return
+    setIsRemoteVaultBusy(true)
+    setRemoteVaultMessage(null)
+    try {
+      const result = await action()
+      const nextStatus = 'status' in result ? result.status : result
+      if ('status' in result) {
+        applyRemoteVaultStatusToSettings(result.status)
+        setRemoteVaultMessage(result.message || getRemoteVaultDisplayMessage(t, result.status))
+      } else {
+        applyRemoteVaultStatusToSettings(result)
+        setRemoteVaultMessage(getRemoteVaultDisplayMessage(t, result))
+      }
+      await loadBackups(nextStatus.enabled)
+      await refreshData()
+    } catch (error) {
+      setRemoteVaultMessage(getRemoteVaultErrorMessage(error))
+    } finally {
+      setIsRemoteVaultBusy(false)
+    }
+  }
+
+  const handleChooseRemoteVaultFolder = async () => {
+    if (!isDesktopApp) return
+    const selected = await open({ directory: true, multiple: false })
+    if (!selected || Array.isArray(selected)) return
+    await withRemoteVaultBusy(() => repo.configureRemoteVault(selected, settings.remoteCacheLimitMb))
+  }
+
+  const handleJoinRemoteVault = async () => {
+    if (!isDesktopApp) return
+    const selected = await open({ directory: true, multiple: false })
+    if (!selected || Array.isArray(selected)) return
+    await withRemoteVaultBusy(async () => {
+      await repo.configureRemoteVault(selected, settings.remoteCacheLimitMb)
+      return repo.pullRemoteVault()
+    })
+  }
+
+  const handleMigrateRemoteVault = async () => {
+    let path = settings.remoteVaultPath
+    if (!path) {
+      const selected = await open({ directory: true, multiple: false })
+      if (!selected || Array.isArray(selected)) return
+      path = selected
+    }
+    await withRemoteVaultBusy(() => repo.migrateToRemoteVault(path))
+  }
 
   const applySettingsImmediately = () => {
     const accentVariant = getThemeAccentVariant(settings.theme)
@@ -694,6 +852,20 @@ export default function SettingsPage() {
 
   const handleCreateBackup = async (scope: repo.DbBackupScope) => {
     if (!isDesktopApp) return
+    if (isRemoteVaultBackupMode) {
+      setIsCreatingBackup(true)
+      setBackupStatus(null)
+      try {
+        const backup = await repo.createRemoteVaultBackup(false)
+        setBackupStatus(settingsUiCopy.vaultBackupCreated.replace('{fileName}', backup.fileName))
+        await loadBackups(true)
+        await loadRemoteVaultStatus()
+      } finally {
+        setIsCreatingBackup(false)
+      }
+      return
+    }
+
     const backupPath = await save({
       defaultPath: `refx-${scope}-${new Date().toISOString().slice(0, 10)}.refxbackup.json`,
       filters: [{ name: 'REFX Backup', extensions: ['json'] }],
@@ -720,11 +892,19 @@ export default function SettingsPage() {
     setIsRestoringBackup(true)
     setBackupStatus(null)
     try {
-      const result = await repo.restoreBackup(restoreTargetPath)
-      const restoredSettings = await loadAppSettings(isDesktopApp)
-      setSettings(restoredSettings)
+      if (isRemoteVaultBackupMode) {
+        const result = await repo.restoreRemoteVaultBackup(restoreTargetPath)
+        applyRemoteVaultStatusToSettings(result.status)
+        setBackupStatus(
+          `${settingsUiCopy.vaultBackupRestored.replace('{fileName}', result.backup.fileName)} ${settingsUiCopy.vaultSafetyBackupCreated.replace('{fileName}', result.safetyBackup.fileName)}`,
+        )
+      } else {
+        const result = await repo.restoreBackup(restoreTargetPath)
+        const restoredSettings = await loadAppSettings(isDesktopApp)
+        setSettings(restoredSettings)
+        setBackupStatus(`Backup restored. Safety backup created: ${result.safetyBackup.fileName}`)
+      }
       await refreshData()
-      setBackupStatus(`Backup restored. Safety backup created: ${result.safetyBackup.fileName}`)
       await loadBackups()
       setIsRestoreWarningOpen(false)
       setRestoreTargetPath(null)
@@ -735,6 +915,7 @@ export default function SettingsPage() {
 
   const handleRestoreFromFile = async () => {
     if (!isDesktopApp) return
+    if (isRemoteVaultBackupMode) return
     const selected = await open({
       multiple: false,
       filters: [{ name: 'REFX Backup', extensions: ['json'] }],
@@ -745,7 +926,11 @@ export default function SettingsPage() {
 
   const handleDeleteBackup = async (path: string) => {
     if (!isDesktopApp) return
-    await repo.deleteBackup(path)
+    if (isRemoteVaultBackupMode) {
+      await repo.deleteRemoteVaultBackup(path)
+    } else {
+      await repo.deleteBackup(path)
+    }
     await loadBackups()
     setBackupDeleteTargetPath(null)
   }
@@ -788,6 +973,17 @@ export default function SettingsPage() {
       setUpdateStatus(error instanceof Error ? error.message : t('settings.updateInstallFailed'))
       setIsInstallingUpdate(false)
     }
+  }
+
+  const formatRemoteBytes = (bytes?: number | null) => {
+    const value = bytes ?? 0
+    if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`
+    return `${(value / 1024 / 1024).toFixed(1)} MB`
+  }
+
+  const formatRemoteDate = (value?: string | null) => {
+    if (!value) return t('settings.remoteVault.never')
+    return new Date(value).toLocaleString()
   }
 
   if (!isSettingsLoaded) {
@@ -1291,15 +1487,169 @@ export default function SettingsPage() {
               <>
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">{settingsUiCopy.backups}</CardTitle>
-                    <CardDescription>{settingsUiCopy.backupsDescription}</CardDescription>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Cloud className="h-4 w-4" />
+                      {t('settings.remoteVault.title')}
+                    </CardTitle>
+                    <CardDescription>{t('settings.remoteVault.description')}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-5">
+                    <div className="grid gap-4 md:grid-cols-[1fr_180px]">
+                      <div>
+                        <Label className="text-sm">{t('settings.remoteVault.path')}</Label>
+                        <Input
+                          className="mt-1.5"
+                          value={settings.remoteVaultPath || remoteVaultStatus?.path || ''}
+                          readOnly
+                          placeholder={t('settings.remoteVault.notConfigured')}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-sm">{t('settings.remoteVault.cacheLimit')}</Label>
+                        <Input
+                          className="mt-1.5"
+                          type="number"
+                          min={64}
+                          step={64}
+                          value={settings.remoteCacheLimitMb}
+                          onChange={(event) =>
+                            updateSettings(
+                              'remoteCacheLimitMb',
+                              Math.max(64, Number.parseInt(event.target.value || '2048', 10) || 2048),
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-border/80 bg-muted/20 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium">{t('settings.remoteVault.status')}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {getRemoteVaultDisplayMessage(t, remoteVaultStatus)}
+                          </p>
+                        </div>
+                        <Badge variant={remoteVaultStatus?.isWritable ? 'default' : 'secondary'}>
+                          {getRemoteVaultModeLabel(t, remoteVaultStatus)}
+                        </Badge>
+                      </div>
+                      <div className="mt-4 grid gap-3 text-xs text-muted-foreground md:grid-cols-4">
+                        <span>{t('settings.remoteVault.revision')}: {remoteVaultStatus?.revision ?? '-'}</span>
+                        <span>{t('settings.remoteVault.lastPulled')}: {formatRemoteDate(remoteVaultStatus?.remoteLastPulledAt)}</span>
+                        <span>{t('settings.remoteVault.lastPushed')}: {formatRemoteDate(remoteVaultStatus?.remoteLastPushedAt)}</span>
+                        <span>{t('settings.remoteVault.cache')}: {formatRemoteBytes(remoteVaultStatus?.cacheBytes)}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-border/80 bg-background/70 p-4">
+                        <p className="text-sm font-medium">{t('settings.remoteVault.setupTitle')}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {hasRemoteVault
+                            ? t('settings.remoteVault.connectedSetupDescription')
+                            : t('settings.remoteVault.localOnlySetupDescription')}
+                        </p>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {!hasRemoteVault ? (
+                            <>
+                              <Button variant="outline" onClick={() => void handleJoinRemoteVault()} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                <Download className="mr-2 h-4 w-4" />
+                                {t('settings.remoteVault.joinExisting')}
+                              </Button>
+                              <Button onClick={() => void handleMigrateRemoteVault()} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                {isRemoteVaultBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                                {t('settings.remoteVault.createRemote')}
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              <Button variant="outline" onClick={() => void handleChooseRemoteVaultFolder()} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                <FolderOpen className="mr-2 h-4 w-4" />
+                                {t('settings.remoteVault.changeFolder')}
+                              </Button>
+                              <Button variant="outline" onClick={() => setIsJoinAnotherVaultDialogOpen(true)} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                <Download className="mr-2 h-4 w-4" />
+                                {t('settings.remoteVault.joinAnother')}
+                              </Button>
+                              <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.migrateRemoteVaultToLocal())} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                <HardDrive className="mr-2 h-4 w-4" />
+                                {t('settings.remoteVault.migrateToLocal')}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {hasRemoteVault ? (
+                        <>
+                          <div className="rounded-xl border border-border/80 bg-background/70 p-4">
+                            <p className="text-sm font-medium">{t('settings.remoteVault.syncTitle')}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{t('settings.remoteVault.syncDescription')}</p>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                              <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.pullRemoteVault())} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                <Download className="mr-2 h-4 w-4" />
+                                {t('settings.remoteVault.pull')}
+                              </Button>
+                              {canPushRemoteVault ? (
+                                <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.pushRemoteVault())} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                  <Upload className="mr-2 h-4 w-4" />
+                                  {t('settings.remoteVault.push')}
+                                </Button>
+                              ) : null}
+                              <Button variant="ghost" onClick={() => void loadRemoteVaultStatus()} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                <RefreshCw className="mr-2 h-4 w-4" />
+                                {t('settings.remoteVault.refreshStatus')}
+                              </Button>
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-border/80 bg-background/70 p-4">
+                            <p className="text-sm font-medium">{t('settings.remoteVault.maintenanceTitle')}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{t('settings.remoteVault.maintenanceDescription')}</p>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                              {canReleaseRemoteLease ? (
+                                <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.releaseRemoteVaultLease())} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                  <RotateCcw className="mr-2 h-4 w-4" />
+                                  {t('settings.remoteVault.releaseLease')}
+                                </Button>
+                              ) : null}
+                              <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.clearRemoteCache())} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                <HardDrive className="mr-2 h-4 w-4" />
+                                {t('settings.remoteVault.freeLocalSpace')}
+                              </Button>
+                            </div>
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                    {remoteVaultMessage ? (
+                      <p className="text-xs text-muted-foreground">
+                        {isRemoteVaultBusy ? t('settings.remoteVault.working') : remoteVaultMessage}
+                      </p>
+                    ) : null}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">
+                      {isRemoteVaultBackupMode ? settingsUiCopy.vaultBackups : settingsUiCopy.backups}
+                    </CardTitle>
+                    <CardDescription>
+                      {isRemoteVaultBackupMode ? settingsUiCopy.vaultBackupsDescription : settingsUiCopy.backupsDescription}
+                    </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-5">
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <div>
                           <Label className="text-sm font-medium">{settingsUiCopy.automaticBackups}</Label>
-                          <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.automaticBackupsDescription}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {isRemoteVaultBackupMode
+                              ? settingsUiCopy.vaultAutomaticBackupsDescription
+                              : settingsUiCopy.automaticBackupsDescription}
+                          </p>
                         </div>
                         <Checkbox
                           checked={settings.autoBackupEnabled}
@@ -1308,22 +1658,24 @@ export default function SettingsPage() {
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-3">
-                        <div>
-                          <Label className="text-sm">{settingsUiCopy.backupScope}</Label>
-                          <Select
-                            value={settings.autoBackupScope}
-                            onValueChange={(value) => updateSettings('autoBackupScope', value as StoredAppSettings['autoBackupScope'])}
-                          >
-                            <SelectTrigger className="mt-1.5">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="full">{settingsUiCopy.everything}</SelectItem>
-                              <SelectItem value="documents">{settingsUiCopy.documentsOnly}</SelectItem>
-                              <SelectItem value="settings">{settingsUiCopy.settingsOnly}</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                        {!isRemoteVaultBackupMode ? (
+                          <div>
+                            <Label className="text-sm">{settingsUiCopy.backupScope}</Label>
+                            <Select
+                              value={settings.autoBackupScope}
+                              onValueChange={(value) => updateSettings('autoBackupScope', value as StoredAppSettings['autoBackupScope'])}
+                            >
+                              <SelectTrigger className="mt-1.5">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="full">{settingsUiCopy.everything}</SelectItem>
+                                <SelectItem value="documents">{settingsUiCopy.documentsOnly}</SelectItem>
+                                <SelectItem value="settings">{settingsUiCopy.settingsOnly}</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ) : null}
 
                         <div>
                           <Label className="text-sm">{settingsUiCopy.frequencyInDays}</Label>
@@ -1367,24 +1719,39 @@ export default function SettingsPage() {
                     <Separator />
 
                     <div className="space-y-3">
-                      <Label className="text-sm font-medium">{settingsUiCopy.manualBackupExport}</Label>
+                      <Label className="text-sm font-medium">
+                        {isRemoteVaultBackupMode ? settingsUiCopy.manualVaultBackup : settingsUiCopy.manualBackupExport}
+                      </Label>
                       <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" onClick={() => void handleCreateBackup('full')} disabled={isCreatingBackup}>
-                          <Download className="mr-2 h-4 w-4" />
-                          {settingsUiCopy.everything}
-                        </Button>
-                        <Button variant="outline" onClick={() => void handleCreateBackup('documents')} disabled={isCreatingBackup}>
-                          <Download className="mr-2 h-4 w-4" />
-                          {settingsUiCopy.documentsOnly}
-                        </Button>
-                        <Button variant="outline" onClick={() => void handleCreateBackup('settings')} disabled={isCreatingBackup}>
-                          <Download className="mr-2 h-4 w-4" />
-                          {settingsUiCopy.settingsOnly}
-                        </Button>
-                        <Button variant="outline" onClick={() => void handleRestoreFromFile()} disabled={isRestoringBackup}>
-                          <Upload className="mr-2 h-4 w-4" />
-                          {settingsUiCopy.restoreFile}
-                        </Button>
+                        {isRemoteVaultBackupMode ? (
+                          <Button
+                            variant="outline"
+                            onClick={() => void handleCreateBackup('full')}
+                            disabled={isCreatingBackup || !canWriteRemoteVaultBackups}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            {settingsUiCopy.createVaultBackup}
+                          </Button>
+                        ) : (
+                          <>
+                            <Button variant="outline" onClick={() => void handleCreateBackup('full')} disabled={isCreatingBackup}>
+                              <Download className="mr-2 h-4 w-4" />
+                              {settingsUiCopy.everything}
+                            </Button>
+                            <Button variant="outline" onClick={() => void handleCreateBackup('documents')} disabled={isCreatingBackup}>
+                              <Download className="mr-2 h-4 w-4" />
+                              {settingsUiCopy.documentsOnly}
+                            </Button>
+                            <Button variant="outline" onClick={() => void handleCreateBackup('settings')} disabled={isCreatingBackup}>
+                              <Download className="mr-2 h-4 w-4" />
+                              {settingsUiCopy.settingsOnly}
+                            </Button>
+                            <Button variant="outline" onClick={() => void handleRestoreFromFile()} disabled={isRestoringBackup}>
+                              <Upload className="mr-2 h-4 w-4" />
+                              {settingsUiCopy.restoreFile}
+                            </Button>
+                          </>
+                        )}
                       </div>
                       {backupStatus ? <p className="text-xs text-muted-foreground">{backupStatus}</p> : null}
                     </div>
@@ -1393,7 +1760,9 @@ export default function SettingsPage() {
 
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <Label className="text-sm font-medium">{settingsUiCopy.automaticBackups}</Label>
+                        <Label className="text-sm font-medium">
+                          {isRemoteVaultBackupMode ? settingsUiCopy.vaultBackupList : settingsUiCopy.automaticBackups}
+                        </Label>
                         <Button variant="ghost" size="sm" onClick={() => void loadBackups()}>
                           <RotateCcw className="mr-2 h-4 w-4" />
                           {settingsUiCopy.refresh}
@@ -1402,7 +1771,7 @@ export default function SettingsPage() {
 
                       {backups.length === 0 ? (
                         <div className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">
-                          {settingsUiCopy.noAutomaticBackupsYet}
+                          {isRemoteVaultBackupMode ? settingsUiCopy.noVaultBackupsYet : settingsUiCopy.noAutomaticBackupsYet}
                         </div>
                       ) : (
                         <div className="space-y-2">
@@ -1412,15 +1781,27 @@ export default function SettingsPage() {
                                 <div className="min-w-0">
                                   <p className="truncate text-sm font-medium">{backup.fileName}</p>
                                   <p className="mt-1 text-xs text-muted-foreground">
-                                    {backup.scope} • {backup.documentCount} docs • {backup.noteCount} notes • {backup.relationCount} links
+                                    {isRemoteVaultBackup(backup)
+                                      ? `revision ${backup.revision} | ${backup.documentCount} docs | ${backup.noteCount} notes | ${backup.relationCount} links | ${backup.blobCount} files | ${formatRemoteBytes(backup.fileSize)}`
+                                      : `${backup.scope} | ${backup.documentCount} docs | ${backup.noteCount} notes | ${backup.relationCount} links`}
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">{new Date(backup.createdAt).toLocaleString()}</p>
                                 </div>
                                 <div className="flex gap-2">
-                                  <Button variant="outline" size="sm" onClick={() => handleOpenRestoreWarning(backup.path)} disabled={isRestoringBackup}>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleOpenRestoreWarning(backup.path)}
+                                    disabled={isRestoringBackup || (isRemoteVaultBackupMode && !canWriteRemoteVaultBackups)}
+                                  >
                                     {settingsUiCopy.restore}
                                   </Button>
-                                  <Button variant="ghost" size="icon-sm" onClick={() => setBackupDeleteTargetPath(backup.path)}>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={() => setBackupDeleteTargetPath(backup.path)}
+                                    disabled={isRemoteVaultBackupMode && !canWriteRemoteVaultBackups}
+                                  >
                                     <Trash2 className="h-4 w-4" />
                                   </Button>
                                 </div>
@@ -1581,6 +1962,38 @@ export default function SettingsPage() {
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog
+        open={isJoinAnotherVaultDialogOpen}
+        onOpenChange={(open) => {
+          if (!isRemoteVaultBusy) {
+            setIsJoinAnotherVaultDialogOpen(open)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('settings.remoteVault.joinAnotherTitle')}</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <span className="block">{t('settings.remoteVault.joinAnotherDescription')}</span>
+              <span className="block">{t('settings.remoteVault.joinAnotherDescription2')}</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRemoteVaultBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                void (async () => {
+                  setIsJoinAnotherVaultDialogOpen(false)
+                  await handleJoinRemoteVault()
+                })()
+              }}
+              disabled={isRemoteVaultBusy}
+            >
+              {t('settings.remoteVault.confirmJoinAnother')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
         open={isRestoreWarningOpen}
         onOpenChange={(open) => {
           if (!isRestoringBackup) {
@@ -1593,11 +2006,25 @@ export default function SettingsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.restoreBackupTitle')}</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isRemoteVaultBackupMode ? settingsUiCopy.restoreVaultBackup : t('settings.restoreBackupTitle')}
+            </AlertDialogTitle>
             <AlertDialogDescription className="space-y-3">
-              <span className="block">{settingsUiCopy.restoreBackupSafetyDescription}</span>
-              <span className="block">{settingsUiCopy.restoreBackupSafetyDescription2}</span>
-              <span className="block font-medium text-foreground">{settingsUiCopy.restoreBackupSafetyDescription3}</span>
+              <span className="block">
+                {isRemoteVaultBackupMode
+                  ? settingsUiCopy.vaultBackupRestoreSafetyDescription
+                  : settingsUiCopy.restoreBackupSafetyDescription}
+              </span>
+              <span className="block">
+                {isRemoteVaultBackupMode
+                  ? settingsUiCopy.vaultBackupRestoreSafetyDescription2
+                  : settingsUiCopy.restoreBackupSafetyDescription2}
+              </span>
+              <span className="block font-medium text-foreground">
+                {isRemoteVaultBackupMode
+                  ? settingsUiCopy.vaultBackupRestoreSafetyDescription3
+                  : settingsUiCopy.restoreBackupSafetyDescription3}
+              </span>
               {restoreTargetPath ? (
                 <span className="block rounded-md border border-border/80 bg-muted/40 px-3 py-2 text-xs text-foreground/80">
                   {settingsUiCopy.restoreSource.replace('{path}', restoreTargetPath)}
@@ -1608,7 +2035,11 @@ export default function SettingsPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isRestoringBackup}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => void handleRestoreBackup()} disabled={isRestoringBackup}>
-              {isRestoringBackup ? settingsUiCopy.restoring : settingsUiCopy.createSafetyBackupAndRestore}
+              {isRestoringBackup
+                ? settingsUiCopy.restoring
+                : isRemoteVaultBackupMode
+                  ? settingsUiCopy.restoreVaultBackup
+                  : settingsUiCopy.createSafetyBackupAndRestore}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

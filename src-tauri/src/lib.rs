@@ -1,5 +1,6 @@
 mod commands;
 mod backup;
+mod remote_vault;
 
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
@@ -169,6 +170,20 @@ pub fn run() {
             backup::delete_backup,
             backup::restore_backup,
             backup::run_scheduled_backup_if_due,
+            remote_vault::configure_remote_vault,
+            remote_vault::migrate_to_remote_vault,
+            remote_vault::get_remote_vault_status,
+            remote_vault::pull_remote_vault,
+            remote_vault::push_remote_vault,
+            remote_vault::release_remote_vault_lease,
+            remote_vault::migrate_remote_vault_to_local,
+            remote_vault::cache_remote_document_file,
+            remote_vault::clear_remote_cache,
+            remote_vault::create_remote_vault_backup,
+            remote_vault::list_remote_vault_backups,
+            remote_vault::delete_remote_vault_backup,
+            remote_vault::restore_remote_vault_backup,
+            remote_vault::run_scheduled_remote_vault_backup_if_due,
         ])
         .setup(|app| {
             #[cfg(desktop)]

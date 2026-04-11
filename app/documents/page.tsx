@@ -153,7 +153,8 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
 
       try {
         const pdfjs = await loadPdfJsModule()
-        const bytes = await readFile(document.filePath)
+        const resolvedPath = await repo.ensureDocumentPdfInStorage(document.id)
+        const bytes = await readFile(resolvedPath ?? document.filePath)
         const task = pdfjs.getDocument({
           data: new Uint8Array(bytes),
           useWorkerFetch: false,
@@ -190,7 +191,7 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
       setPdfDocument(null)
       void loadedPdf?.destroy?.()
     }
-  }, [document.filePath])
+  }, [document.filePath, document.id])
 
   useEffect(() => {
     let cancelled = false

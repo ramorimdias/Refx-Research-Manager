@@ -173,8 +173,19 @@ export function toUiGraphViewNodeLayout(layout: repo.DbGraphViewNodeLayout): Gra
   }
 }
 
-export async function fetchDesktopData() {
-  const libraries = await bootstrapDesktop()
+export async function fetchDesktopData(options: { pullRemote?: boolean, acquireLease?: boolean } = {}) {
+  await bootstrapDesktop()
+  let remoteVaultStatus = await repo.getRemoteVaultStatus({ acquireLease: options.acquireLease ?? false }).catch(() => null)
+  if (options.pullRemote && remoteVaultStatus?.enabled && !remoteVaultStatus.isOffline) {
+    try {
+      const pulled = await repo.pullRemoteVault()
+      remoteVaultStatus = pulled.status
+    } catch (error) {
+      console.warn('Remote vault startup pull failed:', error)
+    }
+  }
+
+  const libraries = await repo.listLibraries()
   const [documents, notes, annotations, relationGroups, graphViewGroups] = await Promise.all([
     repo.listAllDocuments(),
     repo.listNotes(),
@@ -209,6 +220,7 @@ export async function fetchDesktopData() {
     annotations,
     relations: relationGroups.flat().map(toUiRelation),
     graphViews: graphViewGroups.flat().map(toUiGraphView),
+    remoteVaultStatus,
   }
 }
 

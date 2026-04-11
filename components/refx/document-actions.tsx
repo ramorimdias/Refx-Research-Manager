@@ -66,7 +66,8 @@ function useDocumentActionState(document: Document) {
 
   const handleOpenFileLocation = async () => {
     if (!document.filePath) return
-    await repo.openDocumentFileLocation(document.filePath)
+    const resolvedPath = await repo.ensureDocumentPdfInStorage(document.id)
+    await repo.openDocumentFileLocation(resolvedPath ?? document.filePath)
   }
 
   const handleDeleteDocument = async () => {

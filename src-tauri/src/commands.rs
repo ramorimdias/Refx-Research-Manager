@@ -37,9 +37,14 @@ pub struct Library {
     pub name: String,
     pub description: String,
     pub color: String,
+    #[serde(default = "default_library_icon")]
     pub icon: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+fn default_library_icon() -> String {
+    "library-big".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1701,6 +1706,21 @@ pub fn ensure_document_pdf_in_storage(
     let Some((library_id, imported_file_path, source_path)) = document_row else {
         return Ok(None);
     };
+
+    if let Some(path) = imported_file_path.as_deref() {
+        let existing = PathBuf::from(path);
+        if existing.exists() && existing.is_file() {
+            return Ok(Some(existing.to_string_lossy().to_string()));
+        }
+    }
+
+    match crate::remote_vault::cache_remote_document_file_for_document(&app, &document_id) {
+        Ok(Some(remote_cache_path)) => return Ok(Some(remote_cache_path)),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("Remote PDF cache lookup failed for {document_id}: {error}");
+        }
+    }
 
     let base_path = app.path().app_data_dir().map_err(|_| AppError::PathError)?;
     let pdf_root = base_path.join("pdfs");

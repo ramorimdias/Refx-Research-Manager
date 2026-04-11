@@ -38,6 +38,7 @@ import {
   type AppUpdateSummary,
 } from '@/lib/services/app-update-service'
 import { getCurrentWindow, isTauri, WebviewWindow } from '@/lib/tauri/client'
+import { getRemoteVaultStatusSnapshot, getRemoteVaultSyncPhaseSnapshot } from '@/lib/remote-storage-state'
 
 interface AppProviderProps {
   children: React.ReactNode
@@ -46,6 +47,7 @@ interface AppProviderProps {
 const DEBUG_LOADING_SPLASH_UNTIL_KEY = 'refx.debug.loading-splash-until'
 const SETTINGS_LOAD_TIMEOUT_MS = 8000
 const STARTUP_WATCHDOG_TIMEOUT_MS = 15000
+const REMOTE_VAULT_IDLE_LEASE_RELEASE_MS = 15 * 60 * 1000
 
 function isLikelyMacDesktop() {
   if (typeof window === 'undefined') return false
@@ -176,11 +178,13 @@ export function AppProvider({ children }: AppProviderProps) {
         document.documentElement.style.fontSize = `${settings.fontSize}px`
 
         if (isDesktopApp && settings.autoBackupEnabled) {
-          void repo.runScheduledBackupIfDue(
-            settings.autoBackupScope,
-            Number(settings.autoBackupIntervalDays),
-            Number(settings.autoBackupKeepCount),
-          ).catch((error) => {
+          const intervalDays = Number(settings.autoBackupIntervalDays)
+          const keepCount = Number(settings.autoBackupKeepCount)
+          const backupTask = settings.remoteVaultEnabled
+            ? repo.runScheduledRemoteVaultBackupIfDue(intervalDays, keepCount)
+            : repo.runScheduledBackupIfDue(settings.autoBackupScope, intervalDays, keepCount)
+
+          void backupTask.catch((error) => {
             console.error('Automatic backup failed:', error)
           })
         }
@@ -317,6 +321,72 @@ export function AppProvider({ children }: AppProviderProps) {
     if (!initialized || !isUiPrefsReady || typeof window === 'undefined') return
     window.localStorage.setItem('refx.ui.sidebar-collapsed', String(sidebarCollapsed))
   }, [initialized, isUiPrefsReady, sidebarCollapsed])
+
+  useEffect(() => {
+    if (!initialized || !isDesktopApp || !isTauri() || typeof window === 'undefined') return
+
+    let idleTimer: number | null = null
+    let reacquiringLease = false
+
+    const clearIdleTimer = () => {
+      if (idleTimer !== null) {
+        window.clearTimeout(idleTimer)
+        idleTimer = null
+      }
+    }
+
+    const releaseLeaseIfIdle = () => {
+      const status = getRemoteVaultStatusSnapshot()
+      if (!status.enabled || status.mode !== 'remoteWriter') return
+      if (getRemoteVaultSyncPhaseSnapshot() !== 'idle') {
+        scheduleIdleTimer()
+        return
+      }
+
+      void repo.releaseRemoteVaultLease().catch((error) => {
+        console.warn('Remote vault idle lease release failed:', error)
+      })
+    }
+
+    const scheduleIdleTimer = () => {
+      clearIdleTimer()
+      idleTimer = window.setTimeout(releaseLeaseIfIdle, REMOTE_VAULT_IDLE_LEASE_RELEASE_MS)
+    }
+
+    const reacquireLeaseIfNeeded = () => {
+      const status = getRemoteVaultStatusSnapshot()
+      if (!status.enabled || status.mode !== 'remoteReader' || status.activeLease || reacquiringLease) return
+
+      reacquiringLease = true
+      void repo.getRemoteVaultStatus({ acquireLease: true })
+        .catch((error) => {
+          console.warn('Remote vault idle lease reacquire failed:', error)
+        })
+        .finally(() => {
+          reacquiringLease = false
+        })
+    }
+
+    const recordActivity = () => {
+      scheduleIdleTimer()
+      reacquireLeaseIfNeeded()
+    }
+
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'wheel']
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, recordActivity, { passive: true })
+    })
+    window.addEventListener('touchstart', recordActivity, { passive: true })
+    scheduleIdleTimer()
+
+    return () => {
+      clearIdleTimer()
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, recordActivity)
+      })
+      window.removeEventListener('touchstart', recordActivity)
+    }
+  }, [initialized, isDesktopApp])
 
   useEffect(() => {
     if (typeof window === 'undefined') return

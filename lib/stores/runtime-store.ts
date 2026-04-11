@@ -8,6 +8,8 @@ export function useRuntimeState() {
     isDesktopApp: useAppStore((state) => state.isDesktopApp),
     notes: useAppStore((state) => state.notes),
     annotations: useAppStore((state) => state.annotations),
+    remoteStorageMode: useAppStore((state) => state.remoteStorageMode),
+    remoteVaultStatus: useAppStore((state) => state.remoteVaultStatus),
     loadNotes: useAppStore((state) => state.loadNotes),
     refreshData: useAppStore((state) => state.refreshData),
     initialize: useAppStore((state) => state.initialize),

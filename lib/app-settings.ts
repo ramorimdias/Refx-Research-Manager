@@ -55,6 +55,13 @@ export type StoredAppSettings = {
   geminiModel: string
   keywordExtractionMode: 'page1' | 'full'
   dailyAiAutoLimit: string
+  remoteVaultEnabled: boolean
+  remoteVaultPath: string
+  remoteVaultId: string
+  remoteDeviceId: string
+  remoteCacheLimitMb: number
+  remoteLastPulledAt: string
+  remoteLastPushedAt: string
 }
 
 export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
@@ -83,6 +90,13 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   geminiModel: 'gemini-2.5-flash',
   keywordExtractionMode: 'page1',
   dailyAiAutoLimit: '3',
+  remoteVaultEnabled: false,
+  remoteVaultPath: '',
+  remoteVaultId: '',
+  remoteDeviceId: '',
+  remoteCacheLimitMb: 2048,
+  remoteLastPulledAt: '',
+  remoteLastPushedAt: '',
 }
 
 function normalizeKeywordEngine(value: StoredAppSettings['keywordEngine'] | 'local_keybert' | undefined) {
@@ -213,6 +227,13 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       geminiModel: parsed.geminiModel ?? DEFAULT_APP_SETTINGS.geminiModel,
       keywordExtractionMode: parsed.keywordExtractionMode ?? DEFAULT_APP_SETTINGS.keywordExtractionMode,
       dailyAiAutoLimit: parsed.dailyAiAutoLimit ?? DEFAULT_APP_SETTINGS.dailyAiAutoLimit,
+      remoteVaultEnabled: parsed.remoteVaultEnabled ?? DEFAULT_APP_SETTINGS.remoteVaultEnabled,
+      remoteVaultPath: parsed.remoteVaultPath ?? DEFAULT_APP_SETTINGS.remoteVaultPath,
+      remoteVaultId: parsed.remoteVaultId ?? DEFAULT_APP_SETTINGS.remoteVaultId,
+      remoteDeviceId: parsed.remoteDeviceId ?? DEFAULT_APP_SETTINGS.remoteDeviceId,
+      remoteCacheLimitMb: parsed.remoteCacheLimitMb ?? DEFAULT_APP_SETTINGS.remoteCacheLimitMb,
+      remoteLastPulledAt: parsed.remoteLastPulledAt ?? DEFAULT_APP_SETTINGS.remoteLastPulledAt,
+      remoteLastPushedAt: parsed.remoteLastPushedAt ?? DEFAULT_APP_SETTINGS.remoteLastPushedAt,
     }
   }
 
@@ -259,6 +280,13 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       DEFAULT_APP_SETTINGS.keywordExtractionMode,
     ),
     dailyAiAutoLimit: parseValue(stored.dailyAiAutoLimit, DEFAULT_APP_SETTINGS.dailyAiAutoLimit),
+    remoteVaultEnabled: parseValue(stored.remoteVaultEnabled, DEFAULT_APP_SETTINGS.remoteVaultEnabled),
+    remoteVaultPath: parseValue(stored.remoteVaultPath, DEFAULT_APP_SETTINGS.remoteVaultPath),
+    remoteVaultId: parseValue(stored.remoteVaultId, DEFAULT_APP_SETTINGS.remoteVaultId),
+    remoteDeviceId: parseValue(stored.remoteDeviceId, DEFAULT_APP_SETTINGS.remoteDeviceId),
+    remoteCacheLimitMb: parseValue(stored.remoteCacheLimitMb, DEFAULT_APP_SETTINGS.remoteCacheLimitMb),
+    remoteLastPulledAt: parseValue(stored.remoteLastPulledAt, DEFAULT_APP_SETTINGS.remoteLastPulledAt),
+    remoteLastPushedAt: parseValue(stored.remoteLastPushedAt, DEFAULT_APP_SETTINGS.remoteLastPushedAt),
   }
 }
 
@@ -298,6 +326,13 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     geminiModel: JSON.stringify(settings.geminiModel),
     keywordExtractionMode: JSON.stringify(settings.keywordExtractionMode),
     dailyAiAutoLimit: JSON.stringify(settings.dailyAiAutoLimit),
+    remoteVaultEnabled: JSON.stringify(settings.remoteVaultEnabled),
+    remoteVaultPath: JSON.stringify(settings.remoteVaultPath),
+    remoteVaultId: JSON.stringify(settings.remoteVaultId),
+    remoteDeviceId: JSON.stringify(settings.remoteDeviceId),
+    remoteCacheLimitMb: JSON.stringify(settings.remoteCacheLimitMb),
+    remoteLastPulledAt: JSON.stringify(settings.remoteLastPulledAt),
+    remoteLastPushedAt: JSON.stringify(settings.remoteLastPushedAt),
   })
 
   if (typeof window !== 'undefined') {

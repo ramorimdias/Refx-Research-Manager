@@ -1,14 +1,84 @@
 'use client'
 
-import { useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Command, Search, Settings } from 'lucide-react'
+import { Cloud, Command, DownloadCloud, Eye, PencilLine, Search, Settings, Unplug, UploadCloud } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppTour } from '@/components/refx/app-tour-provider'
 import { useUiStore } from '@/lib/stores/ui-store'
 import { useT } from '@/lib/localization'
+import { cn } from '@/lib/utils'
+import { getRemoteVaultDisplayMessage } from '@/lib/remote-vault-copy'
+import {
+  getRemoteVaultStatusSnapshot,
+  getRemoteVaultSyncPhaseSnapshot,
+  subscribeRemoteVaultStatus,
+  subscribeRemoteVaultSyncPhase,
+  type RemoteVaultStatus,
+  type RemoteVaultSyncPhase,
+} from '@/lib/remote-storage-state'
+
+function getRemoteVaultBadge(status: RemoteVaultStatus, syncPhase: RemoteVaultSyncPhase, t: ReturnType<typeof useT>) {
+  if (syncPhase === 'pulling') {
+    return {
+      Icon: DownloadCloud,
+      loading: true,
+      label: t('topBar.remoteVaultReceiving'),
+      tooltip: t('topBar.remoteVaultReceivingTooltip'),
+      className: 'border-sky-300/80 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-sky-950/50 dark:text-sky-200',
+    }
+  }
+
+  if (syncPhase === 'pushing') {
+    return {
+      Icon: UploadCloud,
+      loading: true,
+      label: t('topBar.remoteVaultSending'),
+      tooltip: t('topBar.remoteVaultSendingTooltip'),
+      className: 'border-sky-300/80 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-sky-950/50 dark:text-sky-200',
+    }
+  }
+
+  if (status.mode === 'remoteOfflineCache') {
+    return {
+      Icon: Unplug,
+      loading: false,
+      label: t('topBar.remoteVaultOffline'),
+      tooltip: getRemoteVaultDisplayMessage(t, status),
+      className: 'border-red-300/80 bg-red-50 text-red-900 dark:border-red-500/40 dark:bg-red-950/50 dark:text-red-200',
+    }
+  }
+
+  if (status.mode === 'remoteWriter') {
+    return {
+      Icon: PencilLine,
+      loading: false,
+      label: t('topBar.remoteVaultWriter'),
+      tooltip: getRemoteVaultDisplayMessage(t, status),
+      className: 'border-emerald-300/80 bg-emerald-50 text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-950/50 dark:text-emerald-200',
+    }
+  }
+
+  if (status.mode === 'remoteReader') {
+    return {
+      Icon: Eye,
+      loading: false,
+      label: t('topBar.remoteVaultReadOnly'),
+      tooltip: getRemoteVaultDisplayMessage(t, status),
+      className: 'border-slate-300/80 bg-slate-50 text-slate-800 dark:border-slate-500/40 dark:bg-slate-900/70 dark:text-slate-200',
+    }
+  }
+
+  return {
+    Icon: Cloud,
+    loading: false,
+    label: t('topBar.remoteVaultConnected'),
+    tooltip: getRemoteVaultDisplayMessage(t, status),
+    className: 'border-border bg-muted/60 text-muted-foreground',
+  }
+}
 
 export function TopBar() {
   const t = useT()
@@ -20,6 +90,8 @@ export function TopBar() {
     startCurrentPageTour,
   } = useAppTour()
   const inputRef = useRef<HTMLInputElement>(null)
+  const [remoteVaultStatus, setRemoteVaultStatus] = useState(getRemoteVaultStatusSnapshot)
+  const [remoteVaultSyncPhase, setRemoteVaultSyncPhase] = useState(getRemoteVaultSyncPhaseSnapshot)
   const globalSearchQuery = useUiStore((state) => state.globalSearchQuery)
   const setGlobalSearchQuery = useUiStore((state) => state.setGlobalSearchQuery)
   const setPersistentSearch = useUiStore((state) => state.setPersistentSearch)
@@ -29,6 +101,13 @@ export function TopBar() {
     setPersistentSearch({ query: globalSearchQuery.trim() })
     router.push(`/search?q=${encodeURIComponent(globalSearchQuery.trim())}`)
   }
+
+  useEffect(() => subscribeRemoteVaultStatus(setRemoteVaultStatus), [])
+  useEffect(() => subscribeRemoteVaultSyncPhase(setRemoteVaultSyncPhase), [])
+
+  const remoteVaultBadge = remoteVaultStatus.enabled
+    ? getRemoteVaultBadge(remoteVaultStatus, remoteVaultSyncPhase, t)
+    : null
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b border-border/80 bg-background/92 px-5 backdrop-blur">
@@ -61,6 +140,38 @@ export function TopBar() {
           <span className="hidden lg:inline">{t('topBar.command')}</span>
           <span className="hidden text-[11px] text-muted-foreground md:inline">Ctrl K</span>
         </Button>
+
+        {remoteVaultBadge ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div
+                className={cn(
+                  'relative flex h-9 w-9 items-center justify-center',
+                )}
+                aria-label={remoteVaultBadge.label}
+                role="status"
+              >
+                {remoteVaultBadge.loading ? (
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-[-3px] rounded-full border-2 border-sky-200/70 border-t-sky-500 animate-spin dark:border-sky-900/80 dark:border-t-sky-400"
+                  />
+                ) : null}
+                <span
+                  className={cn(
+                    'flex h-9 w-9 items-center justify-center rounded-full border text-base shadow-sm',
+                    remoteVaultBadge.className,
+                  )}
+                >
+                  <remoteVaultBadge.Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {remoteVaultBadge.tooltip}
+            </TooltipContent>
+          </Tooltip>
+        ) : null}
 
         <Tooltip>
           <TooltipTrigger asChild>

@@ -1,6 +1,13 @@
 'use client'
 
 import { invoke } from '@/lib/tauri/client'
+import {
+  assertRemoteWriteAllowed,
+  beginRemoteVaultSyncPhase,
+  scheduleRemoteVaultPush,
+  setRemoteVaultStatus,
+  type RemoteVaultStatus,
+} from '@/lib/remote-storage-state'
 
 export type DbLibrary = {
   id: string
@@ -442,6 +449,26 @@ export type DbBackupFileMetadata = {
   relationCount: number
 }
 
+export type DbRemoteVaultBackupMetadata = {
+  id: string
+  fileName: string
+  path: string
+  createdAt: string
+  revision: number
+  fileSize: number
+  automatic: boolean
+  documentCount: number
+  noteCount: number
+  relationCount: number
+  blobCount: number
+}
+
+export type DbRestoreRemoteVaultBackupResult = {
+  backup: DbRemoteVaultBackupMetadata
+  safetyBackup: DbRemoteVaultBackupMetadata
+  status: DbRemoteVaultStatus
+}
+
 export type DbUpsertGraphViewNodeLayoutInput = {
   graphViewId: string
   documentId: string
@@ -456,6 +483,30 @@ export type DbDocumentPdfPayload = {
   bytes: number[]
 }
 
+export type DbRemoteVaultStatus = RemoteVaultStatus
+
+export type DbRemoteVaultActionResult = {
+  status: DbRemoteVaultStatus
+  message: string
+  safetyBackupPath?: string | null
+  copiedFileCount: number
+  copiedByteCount: number
+}
+
+async function invokeWrite<T>(command: string, args?: Record<string, unknown>) {
+  assertRemoteWriteAllowed()
+  const result = await invoke<T>(command, args)
+  scheduleRemoteVaultPush()
+  return result
+}
+
+function rememberRemoteVaultStatus<T extends { status?: DbRemoteVaultStatus }>(result: T) {
+  if (result.status) {
+    setRemoteVaultStatus(result.status)
+  }
+  return result
+}
+
 export async function listLibraries() {
   return invoke<DbLibrary[]>('list_libraries')
 }
@@ -465,15 +516,15 @@ export async function listAllDocuments() {
 }
 
 export async function createLibrary(input: { name: string; description?: string; color?: string; icon?: string }) {
-  return invoke<DbLibrary>('create_library', { input })
+  return invokeWrite<DbLibrary>('create_library', { input })
 }
 
 export async function updateLibrary(id: string, input: { name?: string; description?: string; color?: string; icon?: string }) {
-  return invoke<DbLibrary | null>('update_library', { id, input })
+  return invokeWrite<DbLibrary | null>('update_library', { id, input })
 }
 
 export async function deleteLibrary(id: string) {
-  return invoke<boolean>('delete_library', { id })
+  return invokeWrite<boolean>('delete_library', { id })
 }
 
 export async function listDocumentsByLibrary(libraryId: string) {
@@ -485,23 +536,23 @@ export async function getDocumentById(id: string) {
 }
 
 export async function createDocument(input: DbCreateDocumentInput) {
-  return invoke<DbDocument>('create_document', { input })
+  return invokeWrite<DbDocument>('create_document', { input })
 }
 
 export async function updateDocumentMetadata(id: string, input: DbUpdateDocumentMetadataInput) {
-  return invoke<DbDocument | null>('update_document_metadata', { id, input })
+  return invokeWrite<DbDocument | null>('update_document_metadata', { id, input })
 }
 
 export async function deleteDocument(id: string) {
-  return invoke<boolean>('delete_document', { id })
+  return invokeWrite<boolean>('delete_document', { id })
 }
 
 export async function mergeDocuments(input: DbMergeDocumentsInput) {
-  return invoke<DbDocument | null>('merge_documents', { input })
+  return invokeWrite<DbDocument | null>('merge_documents', { input })
 }
 
 export async function moveDocumentsToLibrary(documentIds: string[], targetLibraryId: string) {
-  return invoke<DbDocument[]>('move_documents_to_library', { documentIds, targetLibraryId })
+  return invokeWrite<DbDocument[]>('move_documents_to_library', { documentIds, targetLibraryId })
 }
 
 export async function openDocumentFileLocation(path: string) {
@@ -517,7 +568,7 @@ export async function loadDocumentPdfPayload(documentId: string) {
 }
 
 export async function importBookCover(sourcePath: string) {
-  return invoke<string>('import_book_cover', { sourcePath })
+  return invokeWrite<string>('import_book_cover', { sourcePath })
 }
 
 export async function startBookCoverUploadSession() {
@@ -529,11 +580,11 @@ export async function getBookCoverUploadSessionStatus(token: string) {
 }
 
 export async function addTagToDocument(documentId: string, tagName: string) {
-  return invoke<void>('add_tag_to_document', { documentId, tagName })
+  return invokeWrite<void>('add_tag_to_document', { documentId, tagName })
 }
 
 export async function removeTagFromDocument(documentId: string, tagName: string) {
-  return invoke<void>('remove_tag_from_document', { documentId, tagName })
+  return invokeWrite<void>('remove_tag_from_document', { documentId, tagName })
 }
 
 export async function listAnnotationsForDocument(documentId: string) {
@@ -545,23 +596,23 @@ export async function listAllAnnotations() {
 }
 
 export async function createAnnotation(input: DbCreateAnnotationInput) {
-  return invoke<DbAnnotation>('create_annotation', { input })
+  return invokeWrite<DbAnnotation>('create_annotation', { input })
 }
 
 export async function deleteAnnotation(id: string) {
-  return invoke<boolean>('delete_annotation', { id })
+  return invokeWrite<boolean>('delete_annotation', { id })
 }
 
 export async function createRelation(input: DbCreateDocumentRelationInput) {
-  return invoke<DbDocumentRelation>('create_document_relation', { input })
+  return invokeWrite<DbDocumentRelation>('create_document_relation', { input })
 }
 
 export async function updateRelation(id: string, input: DbUpdateDocumentRelationInput) {
-  return invoke<DbDocumentRelation | null>('update_document_relation', { id, input })
+  return invokeWrite<DbDocumentRelation | null>('update_document_relation', { id, input })
 }
 
 export async function deleteRelation(id: string) {
-  return invoke<boolean>('delete_document_relation', { id })
+  return invokeWrite<boolean>('delete_document_relation', { id })
 }
 
 export async function listRelationsForLibrary(libraryId: string) {
@@ -573,11 +624,11 @@ export async function listReferences() {
 }
 
 export async function createReference(input: DbCreateReferenceInput) {
-  return invoke<DbReference>('create_reference', { input })
+  return invokeWrite<DbReference>('create_reference', { input })
 }
 
 export async function updateReference(id: string, input: DbUpdateReferenceInput) {
-  return invoke<DbReference | null>('update_reference', { id, input })
+  return invokeWrite<DbReference | null>('update_reference', { id, input })
 }
 
 export async function listWorkReferences(workDocumentId: string) {
@@ -585,19 +636,19 @@ export async function listWorkReferences(workDocumentId: string) {
 }
 
 export async function createWorkReference(input: DbCreateWorkReferenceInput) {
-  return invoke<DbWorkReference>('create_work_reference', { input })
+  return invokeWrite<DbWorkReference>('create_work_reference', { input })
 }
 
 export async function deleteWorkReference(id: string) {
-  return invoke<boolean>('delete_work_reference', { id })
+  return invokeWrite<boolean>('delete_work_reference', { id })
 }
 
 export async function reorderWorkReferences(workDocumentId: string, workReferenceIds: string[]) {
-  return invoke<DbWorkReference[]>('reorder_work_references', { workDocumentId, workReferenceIds })
+  return invokeWrite<DbWorkReference[]>('reorder_work_references', { workDocumentId, workReferenceIds })
 }
 
 export async function recheckWorkReferenceMatches(workDocumentId?: string) {
-  return invoke<DbWorkReference[]>('recheck_work_reference_matches', { workDocumentId })
+  return invokeWrite<DbWorkReference[]>('recheck_work_reference_matches', { workDocumentId })
 }
 
 export async function listDocumentDoiReferencesForDocument(documentId: string) {
@@ -616,7 +667,7 @@ export async function replaceDocumentKeywords(
   documentId: string,
   keywords: DbInsertDocumentKeywordInput[],
 ) {
-  return invoke<void>('replace_document_keywords', { documentId, keywords })
+  return invokeWrite<void>('replace_document_keywords', { documentId, keywords })
 }
 
 export async function getUsageCounter(key: string) {
@@ -628,21 +679,21 @@ export async function setUsageCounter(key: string, value: string) {
 }
 
 export async function replaceDocumentDoiReferences(input: DbReplaceDocumentDoiReferencesInput) {
-  return invoke<DbDocumentDoiReference[]>('replace_document_doi_references', { input })
+  return invokeWrite<DbDocumentDoiReference[]>('replace_document_doi_references', { input })
 }
 
 export async function recheckDocumentDoiReferences() {
-  return invoke<DbDocumentDoiReference[]>('recheck_document_doi_references')
+  return invokeWrite<DbDocumentDoiReference[]>('recheck_document_doi_references')
 }
 
 export async function rebuildAutoCitationRelations(libraryId: string) {
-  return invoke<DbDocumentRelation[]>('rebuild_auto_citation_relations', {
+  return invokeWrite<DbDocumentRelation[]>('rebuild_auto_citation_relations', {
     input: { libraryId },
   })
 }
 
 export async function rebuildAutoCitationRelationsForDocument(documentId: string) {
-  return invoke<DbDocumentRelation[]>('rebuild_auto_citation_relations_for_document', {
+  return invokeWrite<DbDocumentRelation[]>('rebuild_auto_citation_relations_for_document', {
     input: { documentId },
   })
 }
@@ -652,19 +703,19 @@ export async function listGraphViews(libraryId: string) {
 }
 
 export async function createGraphView(input: DbCreateGraphViewInput) {
-  return invoke<DbGraphView>('create_graph_view', { input })
+  return invokeWrite<DbGraphView>('create_graph_view', { input })
 }
 
 export async function updateGraphView(id: string, input: DbUpdateGraphViewInput) {
-  return invoke<DbGraphView | null>('update_graph_view', { id, input })
+  return invokeWrite<DbGraphView | null>('update_graph_view', { id, input })
 }
 
 export async function deleteGraphView(id: string) {
-  return invoke<boolean>('delete_graph_view', { id })
+  return invokeWrite<boolean>('delete_graph_view', { id })
 }
 
 export async function duplicateGraphView(id: string) {
-  return invoke<DbGraphView>('duplicate_graph_view', { id })
+  return invokeWrite<DbGraphView>('duplicate_graph_view', { id })
 }
 
 export async function listGraphViewNodeLayouts(graphViewId: string) {
@@ -672,11 +723,11 @@ export async function listGraphViewNodeLayouts(graphViewId: string) {
 }
 
 export async function upsertGraphViewNodeLayout(input: DbUpsertGraphViewNodeLayoutInput) {
-  return invoke<DbGraphViewNodeLayout>('upsert_graph_view_node_layout', { input })
+  return invokeWrite<DbGraphViewNodeLayout>('upsert_graph_view_node_layout', { input })
 }
 
 export async function resetGraphViewNodeLayouts(graphViewId: string, documentId?: string) {
-  return invoke<void>('reset_graph_view_node_layouts', { graphViewId, documentId })
+  return invokeWrite<void>('reset_graph_view_node_layouts', { graphViewId, documentId })
 }
 
 export async function createNote(input: {
@@ -689,7 +740,7 @@ export async function createNote(input: {
   title: string
   content: string
 }) {
-  return invoke<DbNote>('create_note', { input })
+  return invokeWrite<DbNote>('create_note', { input })
 }
 
 export async function updateNote(id: string, input: {
@@ -701,7 +752,7 @@ export async function updateNote(id: string, input: {
   title?: string
   content?: string
 }) {
-  return invoke<DbNote | null>('update_note', { id, input })
+  return invokeWrite<DbNote | null>('update_note', { id, input })
 }
 
 export async function listNotes() {
@@ -709,7 +760,7 @@ export async function listNotes() {
 }
 
 export async function deleteNote(id: string) {
-  return invoke<boolean>('delete_note', { id })
+  return invokeWrite<boolean>('delete_note', { id })
 }
 
 export async function getSettings() {
@@ -725,7 +776,7 @@ export async function getDefaultGeminiApiKey() {
 }
 
 export async function clearLocalData() {
-  return invoke<void>('clear_local_data')
+  return invokeWrite<void>('clear_local_data')
 }
 
 export async function createBackup(scope: DbBackupScope, automatic?: boolean, outputPath?: string) {
@@ -743,7 +794,7 @@ export async function deleteBackup(path: string) {
 }
 
 export async function restoreBackup(path: string) {
-  return invoke<DbRestoreBackupResult>('restore_backup', {
+  return invokeWrite<DbRestoreBackupResult>('restore_backup', {
     input: { path },
   })
 }
@@ -752,4 +803,113 @@ export async function runScheduledBackupIfDue(scope: DbBackupScope, intervalDays
   return invoke<DbBackupFileMetadata | null>('run_scheduled_backup_if_due', {
     input: { scope, intervalDays, keepCount },
   })
+}
+
+export async function createRemoteVaultBackup(automatic?: boolean) {
+  const endSyncPhase = beginRemoteVaultSyncPhase('pushing')
+  try {
+    return await invoke<DbRemoteVaultBackupMetadata>('create_remote_vault_backup', {
+      input: { automatic },
+    })
+  } finally {
+    endSyncPhase()
+  }
+}
+
+export async function listRemoteVaultBackups() {
+  return invoke<DbRemoteVaultBackupMetadata[]>('list_remote_vault_backups')
+}
+
+export async function deleteRemoteVaultBackup(path: string) {
+  return invoke<boolean>('delete_remote_vault_backup', { path })
+}
+
+export async function restoreRemoteVaultBackup(path: string) {
+  const endSyncPhase = beginRemoteVaultSyncPhase('pushing')
+  try {
+    return rememberRemoteVaultStatus(await invoke<DbRestoreRemoteVaultBackupResult>('restore_remote_vault_backup', { path }))
+  } finally {
+    endSyncPhase()
+  }
+}
+
+export async function runScheduledRemoteVaultBackupIfDue(intervalDays: number, keepCount: number) {
+  const endSyncPhase = beginRemoteVaultSyncPhase('pushing')
+  try {
+    return await invoke<DbRemoteVaultBackupMetadata | null>('run_scheduled_remote_vault_backup_if_due', {
+      input: { intervalDays, keepCount },
+    })
+  } finally {
+    endSyncPhase()
+  }
+}
+
+export async function configureRemoteVault(path: string, cacheLimitMb?: number) {
+  const status = await invoke<DbRemoteVaultStatus>('configure_remote_vault', {
+    input: { path, cacheLimitMb },
+  })
+  setRemoteVaultStatus(status)
+  return status
+}
+
+export async function migrateToRemoteVault(path: string) {
+  const endSyncPhase = beginRemoteVaultSyncPhase('pushing')
+  try {
+    return rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('migrate_to_remote_vault', {
+      input: { path },
+    }))
+  } finally {
+    endSyncPhase()
+  }
+}
+
+export async function getRemoteVaultStatus(options?: { acquireLease?: boolean }) {
+  const status = await invoke<DbRemoteVaultStatus>('get_remote_vault_status', {
+    input: { acquireLease: options?.acquireLease ?? false },
+  })
+  setRemoteVaultStatus(status)
+  return status
+}
+
+export async function pullRemoteVault() {
+  const endSyncPhase = beginRemoteVaultSyncPhase('pulling')
+  try {
+    return rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('pull_remote_vault'))
+  } finally {
+    endSyncPhase()
+  }
+}
+
+export async function pushRemoteVault() {
+  const endSyncPhase = beginRemoteVaultSyncPhase('pushing')
+  try {
+    return rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('push_remote_vault'))
+  } finally {
+    endSyncPhase()
+  }
+}
+
+export async function releaseRemoteVaultLease() {
+  const status = await invoke<DbRemoteVaultStatus>('release_remote_vault_lease')
+  setRemoteVaultStatus(status)
+  return status
+}
+
+export async function migrateRemoteVaultToLocal(clearRemoteCache = true) {
+  const endSyncPhase = beginRemoteVaultSyncPhase('pulling')
+  try {
+    return rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('migrate_remote_vault_to_local', {
+      input: { clearRemoteCache },
+    }))
+  } finally {
+    endSyncPhase()
+  }
+}
+
+export async function cacheRemoteDocumentFile(documentId: string) {
+  return invoke<string | null>('cache_remote_document_file', { documentId })
+}
+
+export async function clearRemoteCache() {
+  return rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('clear_remote_cache'))
 }
