@@ -79,24 +79,36 @@ function splitAuthors(raw?: string) {
 
 export function extractNormalizedDoi(input?: string) {
   if (!input) return undefined
-  const match = input.match(/\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i)?.[0]
-  if (!match) return undefined
+  const normalizedInput = input
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/https?:\/\/(?:dx\.)?doi\.org\//gi, 'doi:')
 
-  const cleaned = match
-    .replace(/[)\]}>,;:"']+$/g, '')
-    .replace(/(?:https?:\/\/\S+|www\.\S+)$/i, '')
-    .replace(/(?:fig|table|vol|issue|pages?)\.?$/i, '')
-    .trim()
+  const candidates = [
+    ...normalizedInput.matchAll(/\bdoi:\s*(10\.\d{4,9}\s*\/\s*[-._;()/:A-Z0-9\s]+)\b/gi),
+    ...normalizedInput.matchAll(/\b(10\.\d{4,9}\s*\/\s*[-._;()/:A-Z0-9\s]+)\b/gi),
+  ]
 
-  const slashIndex = cleaned.indexOf('/')
-  if (slashIndex <= 0) return undefined
+  for (const candidate of candidates) {
+    const rawMatch = candidate[1] ?? candidate[0] ?? ''
+    const compact = rawMatch
+      .replace(/\s+/g, '')
+      .replace(/[)\]}>,;:"']+$/g, '')
+      .replace(/(?:fig|table|vol|issue|pages?)\.?$/i, '')
+      .trim()
 
-  const prefix = cleaned.slice(0, slashIndex)
-  let suffix = cleaned.slice(slashIndex + 1)
-  suffix = suffix.replace(/[^A-Z0-9\-._;()/:]+$/i, '')
-  suffix = suffix.replace(/[-._;:/()]+$/g, '')
-  if (!/^10\.\d{4,9}$/i.test(prefix) || suffix.length < 3) return undefined
-  return `${prefix}/${suffix}`
+    const slashIndex = compact.indexOf('/')
+    if (slashIndex <= 0) continue
+
+    const prefix = compact.slice(0, slashIndex)
+    let suffix = compact.slice(slashIndex + 1)
+    suffix = suffix.replace(/[^A-Z0-9\-._;()/:]+$/i, '')
+    suffix = suffix.replace(/[-._;:/()]+$/g, '')
+    if (!/^10\.\d{4,9}$/i.test(prefix) || suffix.length < 3) continue
+
+    return `${prefix}/${suffix}`
+  }
+
+  return undefined
 }
 
 function parseDoi(input?: string) {

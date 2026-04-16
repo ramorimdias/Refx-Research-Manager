@@ -1,6 +1,7 @@
 'use client'
 
 import { readFile } from '@tauri-apps/plugin-fs'
+import { extractNormalizedDoi } from '@/lib/services/document-metadata-service'
 import type { SuggestedTag } from '@/lib/types'
 
 export type SniffedPdfMetadata = {
@@ -104,7 +105,7 @@ function splitAuthors(raw?: string) {
 }
 
 function parseDoi(input: string) {
-  return input.match(/10\.\d{4,9}\/[\-._;()/:A-Z0-9]+/i)?.[0]
+  return extractNormalizedDoi(input)
 }
 
 function parseYear(input: string) {
