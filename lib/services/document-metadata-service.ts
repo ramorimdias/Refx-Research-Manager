@@ -77,33 +77,82 @@ function splitAuthors(raw?: string) {
     .filter(Boolean)
 }
 
+const DOI_STOP_WORDS = [
+  'received',
+  'accepted',
+  'available',
+  'corresponding',
+  'contents',
+  'sciencedirect',
+  'journal',
+  'article',
+  'published',
+  'revised',
+  'online',
+  'homepage',
+  'author',
+  'address',
+  'email',
+  'e-mail',
+  'abstract',
+  'keywords',
+  'introduction',
+]
+
+function trimTrailingDoiNoise(value: string) {
+  let suffix = value
+    .replace(/[)\]}>,;:"']+$/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+
+  for (const word of DOI_STOP_WORDS) {
+    const pattern = new RegExp(`${word}.*$`, 'i')
+    suffix = suffix.replace(pattern, '')
+  }
+
+  suffix = suffix.replace(/(?:fig|table|vol|issue|pages?)\.?$/i, '')
+  suffix = suffix.replace(/[^A-Z0-9\-._;()/:]+$/i, '')
+  suffix = suffix.replace(/[-._;:/()]+$/g, '')
+  return suffix
+}
+
+function findDoiCandidates(input: string) {
+  const matches: string[] = []
+  const prefixPattern = /\b(?:doi:\s*)?(10\.\d{4,9})\s*\/\s*/gi
+
+  for (const match of input.matchAll(prefixPattern)) {
+    const prefix = match[1]
+    const matchText = match[0] ?? ''
+    const start = (match.index ?? 0) + matchText.length
+    const tail = input.slice(start, start + 180)
+    if (!tail) continue
+
+    const compactTail = tail.replace(/[\u200B-\u200D\uFEFF]/g, '')
+    const suffixMatch = compactTail.match(/^([A-Z0-9\-._;()/:/\s]{3,180})/i)?.[1] ?? ''
+    const suffix = trimTrailingDoiNoise(suffixMatch)
+    if (!suffix) continue
+
+    matches.push(`${prefix}/${suffix}`)
+  }
+
+  return matches
+}
+
 export function extractNormalizedDoi(input?: string) {
   if (!input) return undefined
   const normalizedInput = input
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/https?:\/\/(?:dx\.)?doi\.org\//gi, 'doi:')
-
-  const candidates = [
-    ...normalizedInput.matchAll(/\bdoi:\s*(10\.\d{4,9}\s*\/\s*[-._;()/:A-Z0-9\s]+)\b/gi),
-    ...normalizedInput.matchAll(/\b(10\.\d{4,9}\s*\/\s*[-._;()/:A-Z0-9\s]+)\b/gi),
-  ]
+  const candidates = findDoiCandidates(normalizedInput)
 
   for (const candidate of candidates) {
-    const rawMatch = candidate[1] ?? candidate[0] ?? ''
-    const compact = rawMatch
-      .replace(/\s+/g, '')
-      .replace(/[)\]}>,;:"']+$/g, '')
-      .replace(/(?:fig|table|vol|issue|pages?)\.?$/i, '')
-      .trim()
-
-    const slashIndex = compact.indexOf('/')
+    const slashIndex = candidate.indexOf('/')
     if (slashIndex <= 0) continue
 
-    const prefix = compact.slice(0, slashIndex)
-    let suffix = compact.slice(slashIndex + 1)
-    suffix = suffix.replace(/[^A-Z0-9\-._;()/:]+$/i, '')
-    suffix = suffix.replace(/[-._;:/()]+$/g, '')
+    const prefix = candidate.slice(0, slashIndex)
+    const suffix = candidate.slice(slashIndex + 1)
     if (!/^10\.\d{4,9}$/i.test(prefix) || suffix.length < 3) continue
+    if (!/[a-z0-9]$/i.test(suffix)) continue
 
     return `${prefix}/${suffix}`
   }
