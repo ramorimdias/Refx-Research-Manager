@@ -54,8 +54,8 @@ type PdfJsModule = {
 }
 
 let pdfJsPromise: Promise<PdfJsModule> | null = null
-const BROWSER_PDFJS_MODULE_PATH = '/pdfjs/pdf.js' as string
-const BROWSER_PDFJS_WORKER_PATH = '/pdfjs/pdf.worker.js'
+const BROWSER_PDFJS_MODULE_PATH = '/pdfjs/pdf.mjs' as string
+const BROWSER_PDFJS_WORKER_PATH = '/pdfjs/pdf.worker.mjs'
 
 function resolvePdfJsCandidate(importedModule: unknown) {
   const candidate = (
