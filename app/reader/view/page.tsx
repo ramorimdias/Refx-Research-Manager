@@ -546,6 +546,7 @@ function RealReaderViewPage() {
         objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
         const task = pdfjs.getDocument({
           data: bytes,
+          disableWorker: true,
           useWorkerFetch: false,
           isEvalSupported: false,
           stopAtErrors: false,
@@ -1290,6 +1291,7 @@ function RealReaderViewPage() {
       const bytes = await readFile(filePath)
       const loadingTask = pdfjs.getDocument({
         data: new Uint8Array(bytes),
+        disableWorker: true,
         useWorkerFetch: false,
         isEvalSupported: false,
         stopAtErrors: false,

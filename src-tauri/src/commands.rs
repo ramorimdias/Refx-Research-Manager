@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Manager};
 use base64::Engine;
+use crate::backup;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -479,6 +481,13 @@ struct BookCoverUploadSession {
     expires_at_unix: i64,
 }
 
+#[derive(Debug, Clone)]
+struct BackupDownloadSession {
+    file_path: String,
+    file_name: String,
+    expires_at_unix: i64,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PhoneCoverUploadPayload {
@@ -489,8 +498,26 @@ struct PhoneCoverUploadPayload {
 
 static BOOK_COVER_UPLOAD_SESSIONS: OnceLock<Mutex<HashMap<String, BookCoverUploadSession>>> =
     OnceLock::new();
+static BACKUP_DOWNLOAD_SESSIONS: OnceLock<Mutex<HashMap<String, BackupDownloadSession>>> =
+    OnceLock::new();
 static BOOK_COVER_UPLOAD_SERVER: OnceLock<()> = OnceLock::new();
 const BOOK_COVER_UPLOAD_PORT: u16 = 38473;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartBackupDownloadSessionInput {
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupDownloadSessionResult {
+    pub token: String,
+    pub file_name: String,
+    pub url: String,
+    pub urls: Vec<String>,
+    pub expires_at: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
