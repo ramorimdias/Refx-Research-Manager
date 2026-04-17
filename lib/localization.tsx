@@ -1584,7 +1584,7 @@ const translations = {
       addDocumentLinkHelp: 'Busque na biblioteca, adicione o documento ao mapa e conecte tudo em um único passo.',
       findReferencedDocument: 'Encontrar documento referenciado',
       findCitingDocument: 'Encontrar documento citante',
-      addDocumentToMap: 'Adicionar documento ao mapa',
+      addDocumentToMap: 'Adicionar documento',
       myWork: 'Meu trabalho',
       noDocumentsControls: 'Nenhum documento corresponde aos controles atuais.',
       noLinksControls: 'Nenhum link corresponde aos controles atuais.',
