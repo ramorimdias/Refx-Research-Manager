@@ -144,7 +144,7 @@ export function DiscoverRightPane({
         </div>
 
         <div className="flex flex-col gap-2">
-          {currentMode !== 'references' ? (
+          {(!showStepFilters || currentMode !== 'references') ? (
             <Button
               className="justify-start gap-2 bg-sky-600 text-white hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-500"
               disabled={noReferences}
@@ -154,7 +154,7 @@ export function DiscoverRightPane({
               <span>{noReferences ? 'No references found' : `Discover references (${referencesCount ?? '...'})`}</span>
             </Button>
           ) : null}
-          {currentMode !== 'citations' ? (
+          {(!showStepFilters || currentMode !== 'citations') ? (
             <Button
               variant="outline"
               className="justify-start gap-2 border-rose-300 text-rose-700 hover:border-rose-400 hover:bg-rose-50 disabled:border-slate-200 disabled:text-slate-500"
