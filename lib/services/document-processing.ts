@@ -54,9 +54,7 @@ type PdfJsModule = {
 }
 
 let pdfJsPromise: Promise<PdfJsModule> | null = null
-const BROWSER_PDFJS_MODULE_PATH = '/pdfjs/pdf.js' as string
 const BROWSER_PDFJS_WORKER_PATH = '/pdfjs/pdf.worker.js'
-const PDFJS_BUNDLED_MODULE_PATH = 'pdfjs-dist/legacy/build/pdf.mjs'
 
 function resolvePdfJsCandidate(importedModule: unknown) {
   const candidate = (
@@ -362,14 +360,14 @@ export async function loadPdfJsModule() {
       let packageImportError: unknown = null
 
       try {
-        candidate = resolvePdfJsCandidate(await import(PDFJS_BUNDLED_MODULE_PATH))
+        candidate = resolvePdfJsCandidate(await import('pdfjs-dist/legacy/build/pdf.mjs'))
       } catch (error) {
         packageImportError = error
       }
 
       if (!candidate && typeof window !== 'undefined') {
         try {
-          candidate = resolvePdfJsCandidate(await import(/* webpackIgnore: true */ BROWSER_PDFJS_MODULE_PATH))
+          candidate = resolvePdfJsCandidate(await import(/* webpackIgnore: true */ '/pdfjs/pdf.js'))
         } catch (error) {
           if (packageImportError) {
             console.warn('Falling back to public PDF.js asset after bundled import failed:', packageImportError)

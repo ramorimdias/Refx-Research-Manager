@@ -11,7 +11,7 @@ import {
   type NodeProps,
   useStore,
 } from 'reactflow'
-import { ArrowRight, Plus } from 'lucide-react'
+import { BookOpen, Plus, Star } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import * as repo from '@/lib/repositories/local-db'
 import type { DocumentGraphNodeData } from '@/lib/services/document-relation-service'
@@ -31,10 +31,25 @@ export type ReferenceGraphNodeData = {
   label: string
   isSelected?: boolean
   isHovered?: boolean
+  isDimmed?: boolean
 }
 export type AnyGraphNodeData = GraphNodeData | ReferenceGraphNodeData
+const MAP_BUBBLE_RADIUS = 28
 
-const MY_WORK_HEXAGON_CLIP_PATH = 'polygon(25% 6%, 75% 6%, 98% 50%, 75% 94%, 25% 94%, 2% 50%)'
+function trimLineToBubbleEdge(sourceCenter: { x: number; y: number }, targetCenter: { x: number; y: number }) {
+  const dx = targetCenter.x - sourceCenter.x
+  const dy = targetCenter.y - sourceCenter.y
+  const distance = Math.hypot(dx, dy) || 1
+  const ux = dx / distance
+  const uy = dy / distance
+
+  return {
+    sourceX: sourceCenter.x + ux * MAP_BUBBLE_RADIUS,
+    sourceY: sourceCenter.y + uy * MAP_BUBBLE_RADIUS,
+    targetX: targetCenter.x - ux * MAP_BUBBLE_RADIUS,
+    targetY: targetCenter.y - uy * MAP_BUBBLE_RADIUS,
+  }
+}
 
 function RelationshipEdge({
   id,
@@ -49,13 +64,8 @@ function RelationshipEdge({
   selected,
   data,
 }: EdgeProps) {
-  const zoom = useStore((state) => state.transform[2])
-  const [edgePath, labelX, labelY] = getStraightPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-  })
+  const trimmed = trimLineToBubbleEdge({ x: sourceX, y: sourceY }, { x: targetX, y: targetY })
+  const [edgePath, labelX, labelY] = getStraightPath(trimmed)
   const edgeData = (data ?? {}) as {
     confidence?: number
     isHovered?: boolean
@@ -64,39 +74,13 @@ function RelationshipEdge({
     relationStatus?: string
   }
   const connectedDirection = edgeData.connectionDirection
-  const connectedClasses = connectedDirection === 'outgoing'
-    ? 'border-sky-300 bg-sky-50 text-sky-700'
-    : connectedDirection === 'incoming'
-      ? 'border-rose-300 bg-rose-50 text-rose-700'
-      : 'border-slate-300 bg-white text-slate-700'
   const confidence = typeof edgeData.confidence === 'number'
     ? Math.round(edgeData.confidence * 100)
     : null
-  const arrowAngle = Math.atan2(sourceY - targetY, sourceX - targetX) * (180 / Math.PI)
 
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerStart={markerStart} markerEnd={markerEnd} style={style} />
-      <EdgeLabelRenderer>
-        <div
-          className={cn(
-            'pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border shadow-sm',
-            selected
-              ? 'border-amber-300 bg-white text-amber-600'
-              : edgeData.isConnectedToSelectedDocument
-                ? connectedClasses
-                : 'border-slate-200/80 bg-white/92 text-slate-500',
-          )}
-          style={{
-            left: labelX,
-            top: labelY,
-            transform: `translate(-50%, -50%) rotate(${arrowAngle}deg) scale(${1 / Math.max(zoom, 0.001)})`,
-            transformOrigin: 'center',
-          }}
-        >
-          <ArrowRight className="h-3.5 w-3.5" />
-        </div>
-      </EdgeLabelRenderer>
       {(label && selected) ? (
         <EdgeLabelRenderer>
           <div
@@ -129,84 +113,99 @@ function RelationshipEdge({
 
 function DocumentGraphNode({ data }: NodeProps<GraphNodeData>) {
   const t = useT()
+  const zoom = useStore((state) => state.transform[2])
   const {
     document,
-    fillColor,
-    borderColor,
     connectionDirection,
-    isFocused,
     isHovered,
-    isSearchMatch,
+    isDimmed,
     isSelected,
     onStartConnection,
     pendingConnectionDirection,
   } = data
   const authorText = document.authors.length > 0
-    ? document.authors.slice(0, 2).join(', ')
+    ? document.authors[0]
     : t('searchPage.unknownAuthor')
+  const authorTokens = authorText.split(/\s+/).filter(Boolean)
+  const authorLabel = authorTokens.length > 0 ? authorTokens[authorTokens.length - 1] : authorText
+  const baseLabel = `${authorLabel}${document.year ? `, ${document.year}` : ''}`
   const canCreateInboundLinks = document.documentType !== 'my_work'
-  const isMyWork = document.documentType === 'my_work'
+  const showExpandedLabel = Boolean(isHovered)
+  const showStar = Boolean(document.favorite)
+  const showMyWorkIcon = document.documentType === 'my_work'
+  const bubbleBorder = isSelected
+    ? 'border-amber-400'
+    : connectionDirection === 'outgoing'
+      ? 'border-sky-500'
+      : connectionDirection === 'incoming'
+        ? 'border-rose-500'
+        : 'border-slate-700'
+  const bubbleGlow = isSelected
+    ? 'shadow-[0_0_0_10px_rgba(251,191,36,0.16)]'
+    : connectionDirection === 'outgoing'
+      ? 'shadow-[inset_0_0_0_2px_rgba(59,130,246,0.55),inset_0_0_18px_rgba(59,130,246,0.18)]'
+      : connectionDirection === 'incoming'
+        ? 'shadow-[inset_0_0_0_2px_rgba(244,63,94,0.55),inset_0_0_18px_rgba(244,63,94,0.18)]'
+        : 'shadow-sm'
 
   return (
     <div
       data-document-node-id={document.id}
       className={cn(
-        'relative z-10 flex h-full w-full items-center justify-center overflow-visible text-center shadow-[0_16px_40px_rgba(15,23,42,0.08)] backdrop-blur transition-all',
-        isMyWork ? 'rounded-none' : 'rounded-full',
+        'relative z-10 h-full w-full overflow-visible transition-all',
         pendingConnectionDirection && 'ring-4 ring-teal-100',
-        isSelected && 'ring-4 ring-yellow-300 shadow-[0_0_0_10px_rgba(250,204,21,0.26),0_16px_40px_rgba(15,23,42,0.12)]',
-        connectionDirection === 'outgoing' && !isSelected && 'ring-[5px] ring-sky-300 shadow-[0_0_0_10px_rgba(59,130,246,0.22),0_18px_44px_rgba(15,23,42,0.12)]',
-        connectionDirection === 'incoming' && !isSelected && 'ring-[5px] ring-rose-300 shadow-[0_0_0_10px_rgba(244,63,94,0.2),0_18px_44px_rgba(15,23,42,0.12)]',
-        isFocused && !isSelected && 'ring-4 ring-violet-100',
-        isHovered && !isSelected && 'ring-2 ring-sky-100',
-        isSearchMatch && 'shadow-[0_0_0_4px_rgba(245,158,11,0.18),0_16px_40px_rgba(15,23,42,0.08)]',
+        isHovered && !isSelected && 'scale-[1.03]',
+        isDimmed && 'opacity-20',
       )}
-      style={{
-        background: fillColor
-          ? `radial-gradient(circle at 30% 20%, rgba(255,255,255,0.98), ${fillColor})`
-          : undefined,
-        border: `2px solid ${borderColor ?? '#cbd5e1'}`,
-        clipPath: isMyWork ? MY_WORK_HEXAGON_CLIP_PATH : undefined,
-      }}
     >
-      {isMyWork && (isSelected || isHovered || isFocused || isSearchMatch || connectionDirection) ? (
-        <div
-          className={cn(
-            'pointer-events-none absolute inset-[-10px] z-0',
-            isSelected
-              ? 'opacity-100'
-              : isHovered || isFocused || isSearchMatch || connectionDirection
-                ? 'opacity-85'
-                : 'opacity-0',
-          )}
-          style={{
-            clipPath: MY_WORK_HEXAGON_CLIP_PATH,
-            background: isSelected
-              ? 'rgba(250, 204, 21, 0.24)'
-              : connectionDirection === 'outgoing'
-                ? 'rgba(59, 130, 246, 0.18)'
-                : connectionDirection === 'incoming'
-                  ? 'rgba(244, 63, 94, 0.18)'
-                  : isFocused
-                    ? 'rgba(124, 58, 237, 0.16)'
-                    : isSearchMatch
-                      ? 'rgba(245, 158, 11, 0.16)'
-                      : 'rgba(14, 165, 233, 0.14)',
-            filter: isSelected
-              ? 'drop-shadow(0 0 20px rgba(250, 204, 21, 0.48))'
-              : 'drop-shadow(0 0 12px rgba(15, 23, 42, 0.12))',
-          }}
-        />
-      ) : null}
-
-      <div className={cn('space-y-2', isMyWork ? 'px-14 py-6' : 'px-5')}>
-        <p className={cn('font-semibold text-slate-900', isMyWork ? 'line-clamp-4 text-[18px] leading-[1.05]' : 'line-clamp-3 text-sm leading-5')}>
-          {document.title}
-        </p>
-        <p className={cn('text-slate-700', isMyWork ? 'line-clamp-2 text-[13px] leading-[1.2]' : 'line-clamp-2 text-xs leading-5')}>{authorText}</p>
-        <div className={cn('flex items-center justify-center gap-2 uppercase tracking-[0.18em] text-slate-600', isMyWork ? 'text-[11px]' : 'text-[10px]')}>
-          {document.year ? <span>{document.year}</span> : null}
+      <div className="flex h-full w-full items-center justify-center">
+        <div className={cn('flex h-[56px] w-[56px] items-center justify-center rounded-full border bg-background transition', bubbleBorder, bubbleGlow)}>
+          {showMyWorkIcon || showStar ? (
+            <div className="flex items-center justify-center">
+              {showMyWorkIcon ? (
+                <BookOpen className="h-4 w-4 text-amber-700" strokeWidth={2.1} />
+              ) : null}
+              {showStar ? (
+                <Star
+                  className={cn('h-3.5 w-3.5 fill-amber-400 text-amber-400', showMyWorkIcon && '-ml-1.5')}
+                  strokeWidth={2.1}
+                />
+              ) : null}
+            </div>
+          ) : null}
         </div>
+      </div>
+      <div
+        className={cn('pointer-events-none absolute top-0 w-[240px] text-center transition', isDimmed && 'opacity-20')}
+        style={{
+          left: 28,
+          top: 68,
+          transform: `translateX(-50%) scale(${1 / Math.max(zoom, 0.001)})`,
+          transformOrigin: 'top center',
+        }}
+      >
+        <div
+          className="text-sm font-semibold text-foreground"
+          style={{
+            WebkitTextStroke: '3px rgba(255,255,255,0.98)',
+            paintOrder: 'stroke fill',
+            textShadow: '0 1px 6px rgba(255,255,255,0.95), 0 0 10px rgba(255,255,255,0.9)',
+          }}
+        >
+          {baseLabel}
+        </div>
+        {showExpandedLabel ? (
+          <div
+            className="mx-auto mt-1 max-w-[240px] text-xs leading-4 text-muted-foreground"
+            style={{
+              WebkitTextStroke: '2px rgba(255,255,255,0.96)',
+              paintOrder: 'stroke fill',
+              textShadow: '0 1px 6px rgba(255,255,255,0.92), 0 0 10px rgba(255,255,255,0.88)',
+            }}
+          >
+            {document.title}
+          </div>
+        ) : null}
       </div>
 
       <Handle
@@ -322,21 +321,47 @@ function DocumentGraphNode({ data }: NodeProps<GraphNodeData>) {
 }
 
 function ReferenceGraphNode({ data, selected }: NodeProps<ReferenceGraphNodeData>) {
+  const zoom = useStore((state) => state.transform[2])
   return (
     <div
       className={cn(
-        'flex h-full w-full items-center justify-center rounded-full border-2 border-dashed bg-background/95 px-4 text-center shadow-sm backdrop-blur transition-all',
-        selected && 'ring-4 ring-amber-300 shadow-[0_0_0_8px_rgba(251,191,36,0.18)]',
-        data.isHovered && !selected && 'ring-2 ring-sky-100 shadow-[0_0_0_6px_rgba(14,165,233,0.12)]',
+        'relative flex h-full w-full items-center justify-center overflow-visible rounded-full border border-slate-700 bg-background shadow-sm transition-all',
+        data.isDimmed && 'opacity-40',
+        selected && 'border-amber-400 shadow-[0_0_0_10px_rgba(251,191,36,0.16)]',
+        data.isHovered && !selected && 'scale-[1.03]',
       )}
     >
-      <div className="space-y-2">
-        <p className="line-clamp-3 text-sm font-semibold leading-5 text-slate-900">
-          {data.workReference.reference.title}
-        </p>
-        <p className="line-clamp-2 text-xs leading-5 text-slate-600">
-          {data.label}
-        </p>
+      <div
+        className="pointer-events-none absolute top-0 w-[240px] text-center"
+        style={{
+          left: 28,
+          top: 68,
+          transform: `translateX(-50%) scale(${1 / Math.max(zoom, 0.001)})`,
+          transformOrigin: 'top center',
+        }}
+      >
+        <div
+          className="text-sm font-semibold text-foreground"
+          style={{
+            WebkitTextStroke: '3px rgba(255,255,255,0.98)',
+            paintOrder: 'stroke fill',
+            textShadow: '0 1px 6px rgba(255,255,255,0.95), 0 0 10px rgba(255,255,255,0.9)',
+          }}
+        >
+          Reference
+        </div>
+        {data.isHovered ? (
+          <div
+            className="mx-auto mt-1 max-w-[240px] text-xs leading-4 text-muted-foreground"
+            style={{
+              WebkitTextStroke: '2px rgba(255,255,255,0.96)',
+              paintOrder: 'stroke fill',
+              textShadow: '0 1px 6px rgba(255,255,255,0.92), 0 0 10px rgba(255,255,255,0.88)',
+            }}
+          >
+            {data.workReference.reference.title}
+          </div>
+        ) : null}
       </div>
       <Handle
         id="center-target"

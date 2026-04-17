@@ -125,7 +125,7 @@ export default function ReferencesPage() {
   const libraries = useLibraryStore((state) => state.libraries)
   const activeLibraryId = useLibraryStore((state) => state.activeLibraryId)
   const documents = useDocumentStore((state) => state.documents)
-  const { createDocumentRecord, deleteDocument } = useDocumentActions()
+  const { createDocumentRecord, deleteDocument, updateDocument } = useDocumentActions()
   const myWorks = useMemo(
     () =>
       documents
@@ -140,7 +140,13 @@ export default function ReferencesPage() {
   const [isLoadingReferences, setIsLoadingReferences] = useState(false)
   const [isAddingWork, setIsAddingWork] = useState(false)
   const [newWorkTitle, setNewWorkTitle] = useState('')
+  const [newWorkAuthors, setNewWorkAuthors] = useState('')
+  const [newWorkYear, setNewWorkYear] = useState('')
   const [isSavingWork, setIsSavingWork] = useState(false)
+  const [editWorkAuthors, setEditWorkAuthors] = useState('')
+  const [editWorkYear, setEditWorkYear] = useState('')
+  const [isUpdatingWorkMetadata, setIsUpdatingWorkMetadata] = useState(false)
+  const [isEditingSelectedWork, setIsEditingSelectedWork] = useState(false)
   const [isAddingReference, setIsAddingReference] = useState(false)
   const [referenceForm, setReferenceForm] = useState<ReferenceFormState>(DEFAULT_REFERENCE_FORM)
   const [preferredMatchDocumentId, setPreferredMatchDocumentId] = useState<string | null>(null)
@@ -244,6 +250,12 @@ export default function ReferencesPage() {
     () => myWorks.find((document) => document.id === selectedWorkId) ?? null,
     [myWorks, selectedWorkId],
   )
+
+  useEffect(() => {
+    setEditWorkAuthors(selectedWork?.authors.join(', ') ?? '')
+    setEditWorkYear(selectedWork?.year ? String(selectedWork.year) : '')
+    setIsEditingSelectedWork(false)
+  }, [selectedWork?.authors, selectedWork?.id, selectedWork?.year])
 
   const documentById = useMemo(
     () => new Map(documents.map((document) => [document.id, document])),
@@ -371,15 +383,24 @@ export default function ReferencesPage() {
     setIsSavingWork(true)
     setStatusMessage(null)
     try {
+      const authors = newWorkAuthors
+        .split(',')
+        .map((author) => author.trim())
+        .filter(Boolean)
+      const parsedYear = newWorkYear.trim() ? Number.parseInt(newWorkYear.trim(), 10) : undefined
       const created = await createDocumentRecord({
         libraryId,
         title,
         documentType: 'my_work',
+        authors,
+        year: Number.isFinite(parsedYear) ? parsedYear : undefined,
       })
 
       if (created) {
         setSelectedWorkId(created.id)
         setNewWorkTitle('')
+        setNewWorkAuthors('')
+        setNewWorkYear('')
         setIsAddingWork(false)
         setStatusMessage(t('referencesPage.createdWork', { title: created.title }))
       }
@@ -387,6 +408,30 @@ export default function ReferencesPage() {
       setStatusMessage(error instanceof Error ? error.message : t('referencesPage.couldNotCreateWork'))
     } finally {
       setIsSavingWork(false)
+    }
+  }
+
+  const handleUpdateSelectedWorkMetadata = async () => {
+    if (!selectedWork) return
+
+    const authors = editWorkAuthors
+      .split(',')
+      .map((author) => author.trim())
+      .filter(Boolean)
+    const parsedYear = editWorkYear.trim() ? Number.parseInt(editWorkYear.trim(), 10) : undefined
+
+    setIsUpdatingWorkMetadata(true)
+    setStatusMessage(null)
+    try {
+      await updateDocument(selectedWork.id, {
+        authors,
+        year: Number.isFinite(parsedYear) ? parsedYear : undefined,
+      })
+      setStatusMessage(t('referencesPage.updatedWorkMetadata'))
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : t('referencesPage.couldNotUpdateWorkMetadata'))
+    } finally {
+      setIsUpdatingWorkMetadata(false)
     }
   }
 
@@ -668,16 +713,59 @@ export default function ReferencesPage() {
                       {t('referencesPage.referencesCount', { count: workReferences.length, suffix: workReferences.length === 1 ? '' : 's' })}
                     </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setIsDeleteWorkDialogOpen(true)}
-                    aria-label={t('referencesPage.deleteWork')}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 rounded-full px-3 text-xs"
+                      onClick={() => setIsEditingSelectedWork((current) => !current)}
+                    >
+                      {isEditingSelectedWork ? t('referencesPage.cancel') : 'Edit'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsDeleteWorkDialogOpen(true)}
+                      aria-label={t('referencesPage.deleteWork')}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
+                {isEditingSelectedWork ? (
+                  <div className="mt-4 space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="selected-work-authors">{t('metadataFields.authors')}</Label>
+                      <Input
+                        id="selected-work-authors"
+                        value={editWorkAuthors}
+                        onChange={(event) => setEditWorkAuthors(event.target.value)}
+                        placeholder={t('libraries.authorsPlaceholder')}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="selected-work-year">{t('metadataFields.year')}</Label>
+                      <Input
+                        id="selected-work-year"
+                        value={editWorkYear}
+                        onChange={(event) => setEditWorkYear(event.target.value)}
+                        placeholder="2026"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => void handleUpdateSelectedWorkMetadata()}
+                      disabled={isUpdatingWorkMetadata}
+                    >
+                      {isUpdatingWorkMetadata ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                      {t('referencesPage.saveWorkMetadata')}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <EmptyState
@@ -907,6 +995,26 @@ export default function ReferencesPage() {
               onChange={(event) => setNewWorkTitle(event.target.value)}
               placeholder={t('referencesPage.workNamePlaceholder')}
             />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="new-work-authors">{t('metadataFields.authors')}</Label>
+              <Input
+                id="new-work-authors"
+                value={newWorkAuthors}
+                onChange={(event) => setNewWorkAuthors(event.target.value)}
+                placeholder={t('libraries.authorsPlaceholder')}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-work-year">{t('metadataFields.year')}</Label>
+              <Input
+                id="new-work-year"
+                value={newWorkYear}
+                onChange={(event) => setNewWorkYear(event.target.value)}
+                placeholder="2026"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setIsAddingWork(false)}>

@@ -25,6 +25,7 @@ export type DocumentGraphNodeData = {
 const GRID_COLUMNS = 4
 const NODE_X_GAP = 280
 const NODE_Y_GAP = 180
+const MAP_BUBBLE_SIZE = 56
 
 function buildDeterministicPosition(index: number) {
   const column = index % GRID_COLUMNS
@@ -49,8 +50,6 @@ export function buildDocumentGraphNodes(
 
   return documents.map((document, index) => {
     const nodeAppearance = appearance?.[document.id] ?? {}
-    const sizePx = nodeAppearance.sizePx ?? 220
-    const isMyWork = document.documentType === 'my_work'
 
     return {
       id: document.id,
@@ -64,16 +63,12 @@ export function buildDocumentGraphNodes(
         ...nodeAppearance,
       },
       style: {
-        width: sizePx,
-        height: sizePx,
-        borderRadius: isMyWork ? 0 : 9999,
-        border: isMyWork ? 'none' : `1px solid ${nodeAppearance.borderColor ?? 'oklch(0.88 0.01 264)'}`,
-        background: isMyWork
-          ? 'transparent'
-          : nodeAppearance.fillColor
-            ? `linear-gradient(180deg, ${nodeAppearance.fillColor} 0%, rgba(255,255,255,0.96) 100%)`
-            : 'linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(246,248,252,0.96) 100%)',
-        boxShadow: isMyWork ? 'none' : '0 14px 40px rgba(15, 23, 42, 0.08)',
+        width: MAP_BUBBLE_SIZE,
+        height: MAP_BUBBLE_SIZE,
+        borderRadius: 9999,
+        border: 'none',
+        background: 'transparent',
+        boxShadow: 'none',
         fontSize: 12,
         opacity: nodeAppearance.isDimmed ? 0.42 : 1,
       },
@@ -123,16 +118,7 @@ export function buildDocumentGraphEdges(
             ? '#94a3b8'
             : '#0f766e'
     const selectedColor = '#f59e0b'
-    const connectedNodeColor = connectionDirection === 'outgoing'
-      ? '#2563eb'
-      : connectionDirection === 'incoming'
-        ? '#dc2626'
-        : '#f59e0b'
-    const strokeColor = isSelected
-      ? selectedColor
-      : isConnectedToSelectedDocument
-        ? connectedNodeColor
-        : baseColor
+    const strokeColor = isSelected ? selectedColor : baseColor
 
     return {
       id: relation.id,
@@ -144,8 +130,8 @@ export function buildDocumentGraphEdges(
       animated: false,
       markerStart: {
         type: MarkerType.ArrowClosed,
-        width: isSelected ? 30 : isConnectedToSelectedDocument ? 24 : 18,
-        height: isSelected ? 30 : isConnectedToSelectedDocument ? 24 : 18,
+        width: isSelected ? 24 : 18,
+        height: isSelected ? 24 : 18,
         color: strokeColor,
       },
       markerEnd: undefined,
@@ -155,16 +141,14 @@ export function buildDocumentGraphEdges(
       style: {
         stroke: strokeColor,
         strokeWidth: isSelected
-          ? 6
-          : isConnectedToSelectedDocument
-            ? 5.8
-            : isProposed
-              ? 2.6
-              : isCitation
-                ? 2.2
-                : isAuto
-                  ? 1.6
-                  : 2.4,
+          ? 4
+          : isProposed
+            ? 2.6
+            : isCitation
+              ? 2.2
+              : isAuto
+                ? 1.6
+                : 2.4,
         strokeDasharray: isProposed
           ? '4 4'
           : isCitation
@@ -174,22 +158,16 @@ export function buildDocumentGraphEdges(
               : isAuto
                 ? '6 4'
                 : undefined,
-        filter: isSelected || isConnectedToSelectedDocument
+        filter: isSelected
           ? `drop-shadow(0 0 10px ${
-            isConnectedToSelectedDocument && !isSelected
-              ? connectionDirection === 'outgoing'
-                ? 'rgba(37, 99, 235, 0.48)'
-                : connectionDirection === 'incoming'
-                  ? 'rgba(220, 38, 38, 0.44)'
-                  : 'rgba(245, 158, 11, 0.35)'
-              : isProposed
+            isProposed
               ? 'rgba(217, 119, 6, 0.32)'
               : isCitation
                 ? 'rgba(109, 40, 217, 0.32)'
                 : 'rgba(15, 118, 110, 0.35)'
           })`
           : undefined,
-        opacity: isConnectedToSelectedDocument && !isSelected ? 0.95 : 1,
+        opacity: 1,
       },
       labelStyle: {
         fill: isSelected ? '#0f172a' : '#334155',

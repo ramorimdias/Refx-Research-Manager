@@ -11,6 +11,7 @@ import {
   Brackets,
   StickyNote,
   Waypoints,
+  Telescope,
   CloudDownload,
   BarChart3,
   ChevronLeft,
@@ -44,6 +45,7 @@ const mainNavItems = [
   { href: '/references', labelKey: 'nav.references', icon: Brackets },
   { href: '/notes', labelKey: 'nav.notes', icon: StickyNote },
   { href: '/maps', labelKey: 'nav.maps', icon: Waypoints },
+  { href: '/discover', labelKey: 'nav.discover', icon: Telescope },
   { href: '/metadata', labelKey: 'nav.metadata', icon: CloudDownload },
   { href: '/reports', labelKey: 'nav.reports', icon: BarChart3 },
 ]

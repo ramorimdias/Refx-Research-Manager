@@ -357,6 +357,55 @@ export interface TopicCluster {
   color: string
 }
 
+export type DiscoverMode = 'references' | 'citations'
+
+export type DiscoverExternalTag = 'favorite' | 'interesting' | 'save_for_later'
+
+export type DiscoverFilterState = {
+  yearMin?: number | null
+  yearMax?: number | null
+}
+
+export type DiscoverWork = {
+  id: string
+  doi?: string | null
+  openAlexId?: string | null
+  semanticScholarId?: string | null
+  title: string
+  authors: string[]
+  firstAuthorLabel: string
+  year?: number | null
+  abstract?: string | null
+  journal?: string | null
+  url?: string | null
+  citedByCount?: number | null
+  referencedWorksCount?: number | null
+  inLibrary: boolean
+  libraryDocumentId?: string | null
+  userTags?: DiscoverExternalTag[]
+  relationKind?: 'reference' | 'citation' | 'manual_link' | 'auto_link'
+  fromLocalLibrary?: boolean
+  isStarred?: boolean
+}
+
+export type DiscoverJourneyStep = {
+  id: string
+  sourceWork: DiscoverWork
+  mode: DiscoverMode
+  items: DiscoverWork[]
+  filters: DiscoverFilterState
+  createdAt: string
+  cacheKey: string
+}
+
+export type DiscoverJourney = {
+  id: string
+  name: string
+  steps: DiscoverJourneyStep[]
+  createdAt: string
+  updatedAt: string
+}
+
 // UI State Types
 export interface DocumentFilters {
   search?: string

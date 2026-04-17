@@ -102,6 +102,7 @@ import {
   buildDocumentGraphNodes,
   type DocumentGraphNodeData,
 } from '@/lib/services/document-relation-service'
+import { computeHoverFocus } from '@/lib/services/map-hover-focus-service'
 import { formatReference } from '@/lib/services/work-reference-service'
 import type { GraphView, GraphViewNodeLayout } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -1464,12 +1465,12 @@ function MapsPageContent() {
             isHovered: hoveredWorkReferenceId === reference.id,
           },
           style: {
-            width: 220,
-            height: 220,
+            width: 56,
+            height: 56,
             borderRadius: 9999,
-            border: '2px dashed oklch(0.72 0.01 250)',
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,248,252,0.96) 100%)',
-            boxShadow: '0 14px 32px rgba(15, 23, 42, 0.08)',
+            border: 'none',
+            background: 'transparent',
+            boxShadow: 'none',
           },
         }))
     })
@@ -1510,17 +1511,56 @@ function MapsPageContent() {
       }),
     )
 
+    const documentEdges = buildDocumentGraphEdges(
+      visibleRelations,
+      selectedDocumentId,
+      selectedRelationId,
+      hoveredRelationId,
+    )
+    const allNodes = [...nextDocumentNodes, ...referenceNodes]
+    const allEdges = [...documentEdges, ...syntheticReferenceEdges]
+    const hoverTargetId = hoveredWorkReferenceId
+      ? `work-reference-node-${hoveredWorkReferenceId}`
+      : hoveredDocumentId
+    const hoverFocus = computeHoverFocus(
+      hoverTargetId,
+      allNodes.map((node) => ({ id: node.id })),
+      allEdges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+    )
+    const focusedNodes = allNodes.map((node) => {
+      const isDimmed = hoverFocus.dimmedNodeIds.has(node.id)
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          isDimmed,
+        },
+        style: {
+          ...node.style,
+          opacity: isDimmed ? 0.2 : 1,
+        },
+      }
+    })
+    const focusedEdges = allEdges.map((edge) => {
+      const isDimmed = hoverFocus.dimmedEdgeIds.has(edge.id)
+      const isEmphasized = hoverFocus.emphasizedEdgeIds.has(edge.id)
+      return {
+        ...edge,
+        style: {
+          ...edge.style,
+          opacity: isDimmed ? 0.2 : isEmphasized ? 1 : edge.style?.opacity ?? 1,
+        },
+      }
+    })
+
     const lockedPositions = isReheatingLayout
       ? undefined
       : new Map(
         Array.from(effectiveLayoutMap.values()).map((layout) => [layout.documentId, { x: layout.x, y: layout.y }]),
       )
 
-    setNodes((currentNodes) => preserveNodePositions([...nextDocumentNodes, ...referenceNodes], currentNodes, lockedPositions))
-    setEdges([
-      ...buildDocumentGraphEdges(visibleRelations, selectedDocumentId, selectedRelationId, hoveredRelationId),
-      ...syntheticReferenceEdges,
-    ])
+    setNodes((currentNodes) => preserveNodePositions(focusedNodes, currentNodes, lockedPositions))
+    setEdges(focusedEdges)
   }, [
     activeDocumentId,
     activeLibrary?.color,
@@ -2231,9 +2271,47 @@ function MapsPageContent() {
           },
         }
       })
+      const fallbackEdges = buildDocumentGraphEdges(
+        visibleRelations,
+        selectedDocumentId,
+        selectedRelationId,
+        hoveredRelationId,
+      )
+      const hoverFocus = computeHoverFocus(
+        hoveredDocumentId,
+        fallbackNodes.map((node) => ({ id: node.id })),
+        fallbackEdges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target })),
+      )
 
-      setNodes(fallbackNodes)
-      setEdges(buildDocumentGraphEdges(visibleRelations, selectedDocumentId, selectedRelationId, hoveredRelationId))
+      setNodes(
+        fallbackNodes.map((node) => {
+          const isDimmed = hoverFocus.dimmedNodeIds.has(node.id)
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              isDimmed,
+            },
+            style: {
+              ...node.style,
+              opacity: isDimmed ? 0.2 : 1,
+            },
+          }
+        }),
+      )
+      setEdges(
+        fallbackEdges.map((edge) => {
+          const isDimmed = hoverFocus.dimmedEdgeIds.has(edge.id)
+          const isEmphasized = hoverFocus.emphasizedEdgeIds.has(edge.id)
+          return {
+            ...edge,
+            style: {
+              ...edge.style,
+              opacity: isDimmed ? 0.2 : isEmphasized ? 1 : edge.style?.opacity ?? 1,
+            },
+          }
+        }),
+      )
 
       window.requestAnimationFrame(() => {
         reactFlow.fitView({ padding: 0.2, duration: 250 })
@@ -2243,7 +2321,6 @@ function MapsPageContent() {
     return () => window.clearTimeout(timer)
   }, [
     effectiveLayoutMap,
-    hoveredRelationId,
     nodes,
     pendingConnectionDirection,
     pendingConnectionDocumentId,
