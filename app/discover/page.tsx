@@ -146,7 +146,10 @@ function DiscoverPageContent() {
   }, [activeJourney?.id, activeJourney?.name])
 
   const handleSaveJourney = () => {
-    const savedName = journeyName || `${sourceWork.firstAuthorLabel} journey`
+    const fallbackLabel = sourceWork?.firstAuthorLabel
+      ?? activeJourney?.steps[0]?.sourceWork.firstAuthorLabel
+      ?? 'Discovery'
+    const savedName = journeyName || `${fallbackLabel} journey`
     saveCurrentJourney(savedName)
     setSaveFeedbackVisible(true)
     if (saveFeedbackTimeoutRef.current != null) {
