@@ -274,18 +274,18 @@ export async function mergeLocalRelations(
   allRelations: DocumentRelation[],
 ) {
   const externalByKey = new Map(externalItems.map((item) => [discoverKey(item), item]))
+  const localItems: DiscoverWork[] = []
 
-  const localItems = allRelations
-    .filter((relation) => relation.sourceDocumentId === sourceDocumentId)
-    .map((relation) => {
-      const target = allDocuments.find((document) => document.id === relation.targetDocumentId)
-      if (!target) return null
-      return {
-        ...documentToDiscoverWork(target),
-        relationKind: relation.linkOrigin === 'auto' ? 'auto_link' : 'manual_link',
-      } satisfies DiscoverWork
+  for (const relation of allRelations) {
+    if (relation.sourceDocumentId !== sourceDocumentId) continue
+    const target = allDocuments.find((document) => document.id === relation.targetDocumentId)
+    if (!target) continue
+
+    localItems.push({
+      ...documentToDiscoverWork(target),
+      relationKind: relation.linkOrigin === 'auto' ? 'auto_link' : 'manual_link',
     })
-    .filter((item): item is DiscoverWork => Boolean(item))
+  }
 
   for (const item of localItems) {
     const key = discoverKey(item)

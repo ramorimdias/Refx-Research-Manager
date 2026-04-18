@@ -368,7 +368,8 @@ export async function loadPdfJsModule() {
 
       if (!candidate && typeof window !== 'undefined') {
         try {
-          candidate = resolvePdfJsCandidate(await import(/* webpackIgnore: true */ '/pdfjs/pdf.js'))
+          const browserImport = new Function('return import("/pdfjs/pdf.js")') as () => Promise<unknown>
+          candidate = resolvePdfJsCandidate(await browserImport())
         } catch (error) {
           if (packageImportError) {
             console.warn('Falling back to public PDF.js asset after bundled import failed:', packageImportError)

@@ -335,11 +335,15 @@ export default function ReferencesPage() {
     setEditingWorkReferenceId(null)
   }
 
+  const isEditableFreeformReference = (workReference: repo.DbWorkReference, matchedDocument: Document | null) => (
+    !matchedDocument && !workReference.reference.documentId
+  )
+
   const openEditFreeformReference = (workReference: repo.DbWorkReference) => {
     setEditingWorkReferenceId(workReference.id)
     setPreferredMatchDocumentId(null)
     setReferenceForm({
-      type: 'manual',
+      type: workReference.reference.isManual ? 'manual' : (workReference.reference.type as ReferenceType) || 'misc',
       title: workReference.reference.title ?? '',
       authors: workReference.reference.authors ?? '',
       year: workReference.reference.year ? String(workReference.reference.year) : '',
@@ -542,20 +546,20 @@ export default function ReferencesPage() {
 
         await repo.updateReference(workReferenceToEdit.reference.id, {
           title,
-          type: 'misc',
-          isManual: true,
-          authors: undefined,
-          year: undefined,
-          doi: undefined,
-          volume: undefined,
-          issue: undefined,
-          chapter: undefined,
-          pages: undefined,
-          publisher: undefined,
-          journal: undefined,
-          booktitle: undefined,
-          url: undefined,
-          abstract: undefined,
+          type: referenceDraft.type,
+          isManual,
+          authors: referenceDraft.authors,
+          year: referenceDraft.year,
+          doi: referenceDraft.doi,
+          volume: referenceDraft.volume,
+          issue: referenceDraft.issue,
+          chapter: referenceDraft.chapter,
+          pages: referenceDraft.pages,
+          publisher: referenceDraft.publisher,
+          journal: referenceDraft.journal,
+          booktitle: referenceDraft.booktitle,
+          url: referenceDraft.url,
+          abstract: referenceDraft.abstract,
           documentId: undefined,
         })
         const nextReferences = await repo.listWorkReferences(selectedWork.id)
@@ -928,6 +932,7 @@ export default function ReferencesPage() {
                   const matchedDocument = workReference.matchedDocumentId
                     ? documentById.get(workReference.matchedDocumentId) ?? null
                     : null
+                  const canEditFreeformReference = isEditableFreeformReference(workReference, matchedDocument)
 
                   return (
                     <div
@@ -1013,7 +1018,7 @@ export default function ReferencesPage() {
                                   <Copy className="h-4 w-4" />
                                 )}
                               </Button>
-                              {workReference.reference.isManual ? (
+                              {canEditFreeformReference ? (
                                 <Button
                                   type="button"
                                   variant="outline"
