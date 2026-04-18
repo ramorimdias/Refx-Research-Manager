@@ -1,6 +1,6 @@
 {
   "name": "refx",
-  "version": "0.7.3",
+  "version": "0.7.5",
   "private": true,
   "browserslist": {
     "production": [
