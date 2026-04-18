@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, FileCheck, Star } from 'lucide-react'
 import { computeHoverFocus } from '@/lib/services/map-hover-focus-service'
-import { useDiscoverActions } from '@/lib/stores/discover-store'
+import { useDiscoverActions, useDiscoverStore } from '@/lib/stores/discover-store'
 import type { DiscoverMode, DiscoverWork } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -17,6 +17,8 @@ const GRID_X_GAP = 116
 const GRID_Y_GAP = 122
 const MIN_GRID_Y_GAP = 78
 const HOVER_RELEASE_DELAY_MS = 120
+const PORTAL_ENTER_DURATION_MS = 1100
+const PORTAL_REVEAL_DURATION_MS = 2300
 
 type PositionedWork = {
   work: DiscoverWork
@@ -258,6 +260,7 @@ export function DiscoverMap({
   selectedWorkId,
   hoveredWorkId,
   mode,
+  isLoading = false,
   starredLinks = [],
 }: {
   sourceWork: DiscoverWork
@@ -265,11 +268,14 @@ export function DiscoverMap({
   selectedWorkId: string | null
   hoveredWorkId: string | null
   mode?: DiscoverMode | 'starred'
+  isLoading?: boolean
   starredLinks?: Array<{ sourceId: string; targetId: string }>
 }) {
-  const { setSelectedWork, setHoveredWork } = useDiscoverActions()
+  const portalTransition = useDiscoverStore((state) => state.portalTransition)
+  const { finishPortalTransition, setPortalTransitionPhase, setSelectedWork, setHoveredWork } = useDiscoverActions()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const hoverReleaseTimeoutRef = useRef<number | null>(null)
+  const portalPhaseTimeoutRef = useRef<number | null>(null)
   const [canvasSize, setCanvasSize] = useState({ width: DEFAULT_CANVAS_WIDTH, height: DEFAULT_CANVAS_HEIGHT })
 
   useEffect(() => {
@@ -297,8 +303,45 @@ export function DiscoverMap({
       if (hoverReleaseTimeoutRef.current != null) {
         window.clearTimeout(hoverReleaseTimeoutRef.current)
       }
+      if (portalPhaseTimeoutRef.current != null) {
+        window.clearTimeout(portalPhaseTimeoutRef.current)
+      }
     }
   }, [])
+
+  useEffect(() => {
+    if (portalTransition?.phase !== 'holding') return
+    if (isLoading) return
+    setPortalTransitionPhase('revealing')
+  }, [isLoading, portalTransition?.phase, setPortalTransitionPhase])
+
+  useEffect(() => {
+    if (portalPhaseTimeoutRef.current != null) {
+      window.clearTimeout(portalPhaseTimeoutRef.current)
+      portalPhaseTimeoutRef.current = null
+    }
+
+    if (!portalTransition) return
+
+    if (portalTransition.phase === 'entering') {
+      portalPhaseTimeoutRef.current = window.setTimeout(() => {
+        if (isLoading) {
+          setPortalTransitionPhase('holding')
+        } else {
+          setPortalTransitionPhase('revealing')
+        }
+        portalPhaseTimeoutRef.current = null
+      }, PORTAL_ENTER_DURATION_MS)
+      return
+    }
+
+    if (portalTransition.phase === 'revealing') {
+      portalPhaseTimeoutRef.current = window.setTimeout(() => {
+        finishPortalTransition()
+        portalPhaseTimeoutRef.current = null
+      }, PORTAL_REVEAL_DURATION_MS)
+    }
+  }, [finishPortalTransition, isLoading, portalTransition, setPortalTransitionPhase])
 
   const positioned = useMemo<PositionedWork[]>(() => {
     const canvasWidth = canvasSize.width
@@ -406,6 +449,64 @@ export function DiscoverMap({
     [edges, hoveredWorkId, positioned],
   )
   const hoverActive = Boolean(hoveredWorkId)
+  const sourceNode = positioned[0]
+  const portalAnchorNode = portalTransition
+    ? positioned.find((node) => node.work.id === portalTransition.anchorWorkId) ?? sourceNode
+    : sourceNode
+  const stageTransformOrigin = portalAnchorNode
+    ? `${portalAnchorNode.x + BUBBLE_RADIUS}px ${portalAnchorNode.y + BUBBLE_RADIUS}px`
+    : '50% 50%'
+  const portalScale = Math.max(canvasSize.width, canvasSize.height) / NODE_SIZE + 5
+  const portalStageStyle = portalTransition?.phase === 'entering'
+    ? {
+      transform: 'scale(0.985)',
+      opacity: 0.16,
+      filter: 'saturate(0.98) blur(0.08px)',
+      transition: `opacity ${Math.round(PORTAL_ENTER_DURATION_MS * 0.7)}ms ease-out, transform ${PORTAL_ENTER_DURATION_MS}ms cubic-bezier(0.16,0.74,0.18,1), filter ${PORTAL_ENTER_DURATION_MS}ms cubic-bezier(0.16,0.74,0.18,1)`,
+    }
+    : portalTransition?.phase === 'holding'
+      ? {
+        transform: 'scale(0.985)',
+        opacity: 0.16,
+        filter: 'saturate(0.98) blur(0.08px)',
+        transition: 'none',
+      }
+      : portalTransition?.phase === 'revealing'
+        ? {
+          transform: 'scale(1)',
+          opacity: 1,
+          filter: 'saturate(1) blur(0)',
+          transition: `transform ${PORTAL_REVEAL_DURATION_MS}ms cubic-bezier(0.16,0.78,0.18,1), opacity ${PORTAL_REVEAL_DURATION_MS}ms cubic-bezier(0.16,0.78,0.18,1), filter ${PORTAL_REVEAL_DURATION_MS}ms cubic-bezier(0.16,0.78,0.18,1)`,
+        }
+        : {
+          transform: 'scale(1)',
+          opacity: 1,
+          filter: 'saturate(1) blur(0)',
+          transition: 'none',
+        }
+  const portalOverlayStyle = portalTransition?.phase === 'entering'
+    ? {
+      transform: `scale(${portalScale})`,
+      opacity: 1,
+      transition: 'none',
+    }
+    : portalTransition?.phase === 'holding'
+      ? {
+        transform: `scale(${portalScale})`,
+        opacity: 1,
+        transition: 'none',
+      }
+      : portalTransition?.phase === 'revealing'
+        ? {
+          transform: 'scale(0.92)',
+          opacity: 0,
+          transition: `transform ${PORTAL_REVEAL_DURATION_MS}ms cubic-bezier(0.16,0.78,0.18,1), opacity ${PORTAL_REVEAL_DURATION_MS}ms cubic-bezier(0.16,0.78,0.18,1)`,
+        }
+        : {
+          transform: 'scale(1)',
+          opacity: 0,
+          transition: 'none',
+        }
 
   const handleBubbleHover = (workId: string, hovered: boolean) => {
     if (hoverReleaseTimeoutRef.current != null) {
@@ -426,55 +527,150 @@ export function DiscoverMap({
 
   return (
     <div ref={containerRef} className="relative h-full min-h-[620px] overflow-hidden rounded-[28px] border bg-card/95">
-      <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
-        <defs>
-          <marker id="discover-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
-          </marker>
-        </defs>
-        {edges.map((edge) => (
-          <line
-            key={edge.id}
-            x1={edge.sourceX}
-            y1={edge.sourceY}
-            x2={edge.targetX}
-            y2={edge.targetY}
-            stroke="currentColor"
-            strokeWidth="1.8"
-            markerEnd="url(#discover-arrow)"
-            className={cn(
-              'text-slate-200 transition-opacity duration-500 ease-out',
-              hoverActive && hoverFocus.dimmedEdgeIds.has(edge.id) ? 'opacity-0' : hoverFocus.dimmedEdgeIds.has(edge.id) ? 'opacity-20' : 'opacity-90',
-            )}
+      <div
+        className={cn(
+          'absolute inset-0 transform-gpu will-change-transform',
+        )}
+        style={{
+          transformOrigin: stageTransformOrigin,
+          ...portalStageStyle,
+        }}
+      >
+        <svg className="absolute inset-0 h-full w-full" aria-hidden="true">
+          <defs>
+            <marker id="discover-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#e2e8f0" />
+            </marker>
+          </defs>
+          {edges.map((edge) => (
+            <line
+              key={edge.id}
+              x1={edge.sourceX}
+              y1={edge.sourceY}
+              x2={edge.targetX}
+              y2={edge.targetY}
+              stroke="currentColor"
+              strokeWidth="1.8"
+              markerEnd="url(#discover-arrow)"
+              className={cn(
+                'text-slate-200 transition-opacity duration-500 ease-out',
+                hoverActive && hoverFocus.dimmedEdgeIds.has(edge.id) ? 'opacity-0' : hoverFocus.dimmedEdgeIds.has(edge.id) ? 'opacity-20' : 'opacity-90',
+              )}
+            />
+          ))}
+        </svg>
+
+        {positioned.map((node) => (
+          <DiscoverBubble
+            key={node.work.id}
+            {...node}
+            isSelected={selectedWorkId === node.work.id}
+            isHovered={hoveredWorkId === node.work.id}
+            isDimmed={hoverFocus.dimmedNodeIds.has(node.work.id)}
+            hoverActive={hoverActive}
+            labelSide={(() => {
+              if (node.isSource) {
+                return mode === 'citations'
+                  ? 'right'
+                  : mode === 'references'
+                    ? 'left'
+                    : 'below'
+              }
+
+              if (node.x <= CANVAS_SAFE_MARGIN + 18) return 'below-left'
+              if (node.x >= canvasSize.width - CANVAS_SAFE_MARGIN - NODE_SIZE - 18) return 'below-right'
+              return 'below'
+            })()}
+            onClick={() => setSelectedWork(node.work.id)}
+            onHover={(hovered) => handleBubbleHover(node.work.id, hovered)}
           />
         ))}
-      </svg>
-
-      {positioned.map((node) => (
-        <DiscoverBubble
-          key={node.work.id}
-          {...node}
-          isSelected={selectedWorkId === node.work.id}
-          isHovered={hoveredWorkId === node.work.id}
-          isDimmed={hoverFocus.dimmedNodeIds.has(node.work.id)}
-          hoverActive={hoverActive}
-          labelSide={(() => {
-            if (node.isSource) {
-              return mode === 'citations'
-                ? 'right'
-                : mode === 'references'
-                  ? 'left'
-                  : 'below'
-            }
-
-            if (node.x <= CANVAS_SAFE_MARGIN + 18) return 'below-left'
-            if (node.x >= canvasSize.width - CANVAS_SAFE_MARGIN - NODE_SIZE - 18) return 'below-right'
-            return 'below'
-          })()}
-          onClick={() => setSelectedWork(node.work.id)}
-          onHover={(hovered) => handleBubbleHover(node.work.id, hovered)}
+      </div>
+      {portalTransition && portalAnchorNode ? (
+        <div
+          className={cn(
+            'pointer-events-none absolute rounded-full border border-amber-300/90 bg-[radial-gradient(circle_at_center,rgba(255,255,255,1)_0%,rgba(254,243,199,0.96)_28%,rgba(251,191,36,0.92)_62%,rgba(245,158,11,0.82)_100%)] shadow-[0_0_0_14px_rgba(251,191,36,0.16),0_0_90px_rgba(251,191,36,0.34)] will-change-transform',
+            portalTransition.phase === 'entering' && 'animate-[discover-portal-overlay-enter_1100ms_cubic-bezier(0.14,0.72,0.18,1)_both]',
+            portalTransition.phase === 'holding' && 'animate-[discover-portal-hold-overlay_1800ms_ease-in-out_infinite]',
+            portalTransition.phase === 'revealing' && 'animate-[discover-portal-overlay-reveal_2300ms_cubic-bezier(0.16,0.78,0.18,1)_both]',
+          )}
+          style={{
+            left: portalAnchorNode.x,
+            top: portalAnchorNode.y,
+            width: NODE_SIZE,
+            height: NODE_SIZE,
+            transformOrigin: '50% 50%',
+            ...portalOverlayStyle,
+          }}
         />
-      ))}
+      ) : null}
+      <style jsx>{`
+        @keyframes discover-portal-overlay-enter {
+          0% {
+            transform: scale(1);
+            opacity: 0;
+            filter: saturate(0.96) brightness(1);
+            box-shadow: 0 0 0 0 rgba(251, 191, 36, 0), 0 0 0 rgba(251, 191, 36, 0);
+          }
+          24% {
+            transform: scale(${Math.max(1.8, portalScale * 0.12)});
+            opacity: 0.18;
+            filter: saturate(0.98) brightness(1.02);
+            box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.08), 0 0 24px rgba(251, 191, 36, 0.12);
+          }
+          68% {
+            transform: scale(${portalScale * 0.78});
+            opacity: 0.78;
+            filter: saturate(1.04) brightness(1.06);
+            box-shadow: 0 0 0 10px rgba(251, 191, 36, 0.14), 0 0 72px rgba(251, 191, 36, 0.26);
+          }
+          100% {
+            transform: scale(${portalScale});
+            opacity: 1;
+            filter: saturate(1.06) brightness(1.08);
+            box-shadow: 0 0 0 14px rgba(251, 191, 36, 0.16), 0 0 90px rgba(251, 191, 36, 0.34);
+          }
+        }
+
+        @keyframes discover-portal-hold-overlay {
+          0% {
+            transform: scale(${portalScale});
+            filter: saturate(1) brightness(1);
+            box-shadow: 0 0 0 14px rgba(251, 191, 36, 0.16), 0 0 90px rgba(251, 191, 36, 0.3);
+          }
+          50% {
+            transform: scale(${portalScale});
+            filter: saturate(1.08) brightness(1.08);
+            box-shadow: 0 0 0 18px rgba(251, 191, 36, 0.22), 0 0 120px rgba(251, 191, 36, 0.42);
+          }
+          100% {
+            transform: scale(${portalScale});
+            filter: saturate(1) brightness(1);
+            box-shadow: 0 0 0 14px rgba(251, 191, 36, 0.16), 0 0 90px rgba(251, 191, 36, 0.3);
+          }
+        }
+
+        @keyframes discover-portal-overlay-reveal {
+          0% {
+            transform: scale(${portalScale});
+            opacity: 1;
+            filter: saturate(1.06) brightness(1.08);
+            box-shadow: 0 0 0 14px rgba(251, 191, 36, 0.16), 0 0 90px rgba(251, 191, 36, 0.34);
+          }
+          52% {
+            transform: scale(${Math.max(1.4, portalScale * 0.22)});
+            opacity: 0.34;
+            filter: saturate(1.02) brightness(1.02);
+            box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.08), 0 0 30px rgba(251, 191, 36, 0.14);
+          }
+          100% {
+            transform: scale(0.92);
+            opacity: 0;
+            filter: saturate(1) brightness(1);
+            box-shadow: 0 0 0 0 rgba(251, 191, 36, 0), 0 0 0 rgba(251, 191, 36, 0);
+          }
+        }
+      `}</style>
     </div>
   )
 }

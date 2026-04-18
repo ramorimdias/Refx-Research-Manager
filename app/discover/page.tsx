@@ -1,8 +1,9 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { ReactFlowProvider } from 'reactflow'
-import { Loader2, Rocket, Telescope, Trash2 } from 'lucide-react'
+import { Rocket, Telescope, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DiscoverEmptyState } from '@/components/refx/discover/discover-empty-state'
 import { DiscoverTimeline } from '@/components/refx/discover/discover-timeline'
@@ -23,6 +24,7 @@ const HOME_JOURNEY_PREVIEW_STEP_LIMIT = 5
 
 function DiscoverPageContent() {
   const t = useT()
+  const searchParams = useSearchParams()
   const sourceWork = useDiscoverStore((state) => state.sourceWork)
   const activeJourney = useDiscoverStore((state) => state.activeJourney)
   const activeStepIndex = useDiscoverStore((state) => state.activeStepIndex)
@@ -33,6 +35,7 @@ function DiscoverPageContent() {
   const error = useDiscoverStore((state) => state.error)
   const {
     resetDiscoverSession,
+    loadSeedDocument,
     openStep,
     saveCurrentJourney,
     deleteSavedJourney,
@@ -44,6 +47,7 @@ function DiscoverPageContent() {
   const [saveFeedbackVisible, setSaveFeedbackVisible] = useState(false)
   const [journeyPendingDeleteId, setJourneyPendingDeleteId] = useState<string | null>(null)
   const saveFeedbackTimeoutRef = useRef<number | null>(null)
+  const lastOpenedDocumentIdRef = useRef<string | null>(null)
 
   const currentStep = activeStepIndex >= 0 ? activeJourney?.steps[activeStepIndex] ?? null : null
   const starredItems = useMemo(() => {
@@ -172,6 +176,17 @@ function DiscoverPageContent() {
   useEffect(() => {
     setJourneyName(activeJourney?.name ?? '')
   }, [activeJourney?.id, activeJourney?.name])
+
+  useEffect(() => {
+    const documentId = searchParams.get('documentId')
+    if (!documentId) return
+    if (lastOpenedDocumentIdRef.current === documentId) return
+
+    lastOpenedDocumentIdRef.current = documentId
+    resetDiscoverSession()
+    setViewMode('seed')
+    void loadSeedDocument(documentId)
+  }, [loadSeedDocument, resetDiscoverSession, searchParams])
 
   const handleSaveJourney = () => {
     const fallbackLabel = sourceWork?.firstAuthorLabel
@@ -359,16 +374,6 @@ function DiscoverPageContent() {
           </div>
         </Card>
 
-        {isLoading ? (
-          <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/55 backdrop-blur-sm">
-            <div className="rounded-2xl border bg-card px-5 py-4 shadow-lg">
-              <div className="flex items-center gap-3 text-sm font-medium text-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{t('discoverPage.loading')}</span>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
     )
   }
@@ -405,30 +410,12 @@ function DiscoverPageContent() {
           <div className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
         ) : null}
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_360px]">
-          <Card className="rounded-[28px] p-4">
-            <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{t('discoverPage.currentStep')}</div>
-              <div className="text-lg font-semibold leading-tight">{t('discoverPage.seedReadyTitle')}</div>
-              <div className="text-sm text-muted-foreground">{t('discoverPage.seedReadyDescription')}</div>
-            </div>
-          </Card>
-          <Card className="flex min-h-[360px] items-center justify-center rounded-[28px] border-dashed p-6 text-center text-sm text-muted-foreground">
-            {t('discoverPage.seedPreviewMapPlaceholder')}
-          </Card>
-          <DiscoverRightPane work={sourceWork} />
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+          <div className="w-full max-w-xl">
+            <DiscoverRightPane work={sourceWork} />
+          </div>
         </div>
 
-        {isLoading ? (
-          <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/55 backdrop-blur-sm">
-            <div className="rounded-2xl border bg-card px-5 py-4 shadow-lg">
-              <div className="flex items-center gap-3 text-sm font-medium text-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{t('discoverPage.loading')}</span>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
     )
   }
@@ -493,6 +480,7 @@ function DiscoverPageContent() {
             selectedWorkId={selectedWorkId}
             hoveredWorkId={hoveredWorkId}
             mode={activeStepIndex === -1 ? 'starred' : currentStep?.mode}
+            isLoading={isLoading}
             starredLinks={activeStepIndex === -1 ? starredLinks : []}
           />
         </div>
@@ -503,17 +491,6 @@ function DiscoverPageContent() {
           currentMode={currentStep?.mode ?? null}
         />
       </div>
-
-      {isLoading ? (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-background/55 backdrop-blur-sm">
-          <div className="rounded-2xl border bg-card px-5 py-4 shadow-lg">
-            <div className="flex items-center gap-3 text-sm font-medium text-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t('discoverPage.loading')}</span>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }

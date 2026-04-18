@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, ExternalLink, Star, Telescope } from 'lucide-react'
+import { ChevronDown, ChevronUp, ExternalLink, Loader2, Star, Telescope } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DiscoverFilters } from '@/components/refx/discover/discover-filters'
@@ -58,16 +58,12 @@ export function DiscoverRightPane({
   const href = work.url ?? (work.doi ? `https://doi.org/${work.doi}` : null)
   const referencesKey = getDiscoverStepCacheKey(work, 'references')
   const citationsKey = getDiscoverStepCacheKey(work, 'citations')
+  const hasReferencesCached = cachedSteps.has(referencesKey)
+  const hasCitationsCached = cachedSteps.has(citationsKey)
   const referencesCount = cachedSteps.get(referencesKey)?.length ?? work.referencedWorksCount
   const citationsCount = cachedSteps.get(citationsKey)?.length ?? work.citedByCount
-  const referencesLabel = referencesCount == null
-    ? t('discoverPage.referencesLoading')
-    : t('discoverPage.references', { count: referencesCount })
-  const citationsLabel = citationsCount == null
-    ? t('discoverPage.citationsLoading')
-    : t('discoverPage.citations', { count: citationsCount })
-  const noReferences = referencesCount === 0
-  const noCitations = citationsCount === 0
+  const noReferences = (hasReferencesCached || work.referencedWorksCount != null) && referencesCount === 0
+  const noCitations = (hasCitationsCached || work.citedByCount != null) && citationsCount === 0
   const willBranchJourney = Boolean(
     activeJourney
     && activeStepIndex >= 0
@@ -89,6 +85,14 @@ export function DiscoverRightPane({
     }
 
     continueAdvance(mode)
+  }
+
+  const renderCountContent = (count: number | null | undefined) => {
+    if (count == null) {
+      return <Loader2 className="inline-flex h-3.5 w-3.5 animate-spin align-[-0.125em]" />
+    }
+
+    return <span>{count}</span>
   }
 
   return (
@@ -168,6 +172,9 @@ export function DiscoverRightPane({
         </div>
 
         <div className="flex flex-col gap-2">
+          <div className="text-sm font-semibold text-amber-600">
+            {t(activeJourney ? 'discoverPage.chooseWhereToDiscover' : 'discoverPage.chooseWhereToStart')}
+          </div>
           {pendingAdvanceMode ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3">
               <div className="text-sm font-medium text-amber-900">
@@ -207,7 +214,14 @@ export function DiscoverRightPane({
               <span>
                 {noReferences
                   ? t('discoverPage.noReferencesFound')
-                  : t('discoverPage.discoverReferences', { count: referencesCount ?? '...' })}
+                  : (
+                    <>
+                      <span>{t('discoverPage.discoverReferencesLabel')}</span>
+                      <span>{' ('}</span>
+                      {renderCountContent(referencesCount)}
+                      <span>{')'}</span>
+                    </>
+                  )}
               </span>
             </Button>
           ) : null}
@@ -222,7 +236,14 @@ export function DiscoverRightPane({
               <span>
                 {noCitations
                   ? t('discoverPage.noCitationsFound')
-                  : t('discoverPage.discoverCitations', { count: citationsCount ?? '...' })}
+                  : (
+                    <>
+                      <span>{t('discoverPage.discoverCitationsLabel')}</span>
+                      <span>{' ('}</span>
+                      {renderCountContent(citationsCount)}
+                      <span>{')'}</span>
+                    </>
+                  )}
               </span>
             </Button>
           ) : null}

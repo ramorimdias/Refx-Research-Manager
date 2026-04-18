@@ -71,13 +71,19 @@ type OpenAlexAuthor = {
   }
 }
 
-type OpenAlexWork = {
+export type OpenAlexWork = {
+  id?: string
   title?: string
   publication_year?: number
   authorships?: OpenAlexAuthor[]
   doi?: string
   abstract_inverted_index?: Record<string, number[]>
   cited_by_count?: number
+  primary_location?: {
+    source?: {
+      display_name?: string
+    }
+  }
   keywords?: Array<{ display_name?: string; score?: number }>
   topics?: Array<{ display_name?: string; score?: number }>
   concepts?: Array<{ display_name?: string; score?: number }>
@@ -327,7 +333,7 @@ async function fetchSemanticScholarByQuery(
   return result?.data?.slice(0, 4) ?? []
 }
 
-async function fetchOpenAlexByDoi(doi: string): Promise<OpenAlexWork | null> {
+export async function fetchOpenAlexByDoi(doi: string): Promise<OpenAlexWork | null> {
   const rawDoi = doi.replace(/^doi:\s*/i, '').trim()
   const doiVariants = [
     rawDoi,
@@ -349,7 +355,7 @@ async function fetchOpenAlexByDoi(doi: string): Promise<OpenAlexWork | null> {
   return null
 }
 
-async function fetchOpenAlexByQuery(title: string, author?: string): Promise<OpenAlexWork[]> {
+export async function fetchOpenAlexByQuery(title: string, author?: string): Promise<OpenAlexWork[]> {
   const cleanTitle = title.trim()
   if (!cleanTitle) return []
 

@@ -52,6 +52,10 @@ type SemanticScholarReferenceEntry = {
 
 const stepCache = new Map<string, DiscoverWork[]>()
 
+export function clearDiscoverStepCache() {
+  stepCache.clear()
+}
+
 function reconstructOpenAlexAbstract(index?: Record<string, number[]>) {
   if (!index) return null
   const positionedWords: string[] = []
@@ -152,7 +156,10 @@ async function fetchJson<T>(url: string, signal?: AbortSignal, headers?: Headers
   )
 }
 
-async function fetchOpenAlexPrimaryWork(sourceWork: Pick<DiscoverWork, 'doi' | 'openAlexId'>, signal?: AbortSignal) {
+async function fetchOpenAlexPrimaryWork(
+  sourceWork: Pick<DiscoverWork, 'doi' | 'openAlexId' | 'title' | 'authors'>,
+  signal?: AbortSignal,
+) {
   if (sourceWork.openAlexId) {
     const id = normalizeOpenAlexId(sourceWork.openAlexId)
     if (!id) return null
@@ -163,14 +170,41 @@ async function fetchOpenAlexPrimaryWork(sourceWork: Pick<DiscoverWork, 'doi' | '
   }
 
   const doi = normalizeDoi(sourceWork.doi)
-  if (!doi) return null
+  if (doi) {
+    const filter = encodeURIComponent(`doi:https://doi.org/${doi}`)
+    const response = await fetchJson<OpenAlexWorksResponse>(
+      `https://api.openalex.org/works?filter=${filter}&per-page=1&select=id,title,doi,publication_year,authorships,cited_by_count,referenced_works,cited_by_api_url,abstract_inverted_index,primary_location`,
+      signal,
+    )
+    if (response?.results?.[0]) return response.results[0]
+  }
 
-  const filter = encodeURIComponent(`doi:https://doi.org/${doi}`)
-  const response = await fetchJson<OpenAlexWorksResponse>(
-    `https://api.openalex.org/works?filter=${filter}&per-page=1&select=id,title,doi,publication_year,authorships,cited_by_count,referenced_works,cited_by_api_url,abstract_inverted_index,primary_location`,
+  const title = sourceWork.title?.trim()
+  if (!title) return null
+
+  const authorNeedle = sourceWork.authors?.[0]?.trim().toLowerCase() ?? ''
+  const graphSelect = 'id,title,doi,publication_year,authorships,cited_by_count,referenced_works,cited_by_api_url,abstract_inverted_index,primary_location'
+  const matchesAuthor = (work: OpenAlexWorkWithGraph) => (
+    !authorNeedle
+      || (work.authorships ?? []).some((entry) => entry.author?.display_name?.toLowerCase().includes(authorNeedle))
+  )
+
+  const titleFilter = encodeURIComponent(`title.search:${title}`)
+  const titleResponse = await fetchJson<OpenAlexWorksResponse>(
+    `https://api.openalex.org/works?filter=${titleFilter}&per-page=8&select=${graphSelect}`,
     signal,
   )
-  return response?.results?.[0] ?? null
+  const titleMatches = (titleResponse?.results ?? []).filter(matchesAuthor)
+  if (titleMatches[0]) return titleMatches[0]
+  if ((titleResponse?.results ?? [])[0]) return titleResponse?.results?.[0] ?? null
+
+  const searchQuery = encodeURIComponent([title, sourceWork.authors?.[0]?.trim()].filter(Boolean).join(' '))
+  const searchResponse = await fetchJson<OpenAlexWorksResponse>(
+    `https://api.openalex.org/works?search=${searchQuery}&per-page=8&select=${graphSelect}`,
+    signal,
+  )
+  const searchMatches = (searchResponse?.results ?? []).filter(matchesAuthor)
+  return searchMatches[0] ?? searchResponse?.results?.[0] ?? null
 }
 
 async function fetchOpenAlexWorksByIds(ids: string[], signal?: AbortSignal) {
@@ -399,7 +433,12 @@ export async function resolveSourceWork(document: Document): Promise<DiscoverWor
       abstract: seeded.abstract ?? document.abstract,
     } as Document)
 
-    const openAlex = await fetchOpenAlexPrimaryWork({ doi: base.doi ?? null, openAlexId: null }).catch(() => null)
+    const openAlex = await fetchOpenAlexPrimaryWork({
+      doi: base.doi ?? null,
+      openAlexId: null,
+      title: base.title,
+      authors: base.authors,
+    }).catch(() => null)
     if (openAlex) {
       return {
         ...base,
@@ -424,23 +463,30 @@ export async function fetchDiscoverStep(
   allDocuments: Document[],
   allRelations: DocumentRelation[],
   settings: { semanticScholarApiKey?: string },
+  signal?: AbortSignal,
+  forceRefresh = false,
 ): Promise<DiscoverWork[]> {
   const cacheKey = `${sourceWork.openAlexId ?? normalizeDoi(sourceWork.doi) ?? normalizeTitle(sourceWork.title)}:${mode}`
-  const cached = stepCache.get(cacheKey)
-  if (cached) return cached
+  const cached = forceRefresh ? null : stepCache.get(cacheKey)
+  if (!forceRefresh) {
+    if (cached && cached.length > 0) return cached
+    if (cached && cached.length === 0) {
+      stepCache.delete(cacheKey)
+    }
+  }
 
   const sourceDocumentId = sourceWork.libraryDocumentId ?? matchInLibrary(sourceWork, allDocuments)?.id ?? ''
   let items: DiscoverWork[] = []
 
   try {
-    items = await fetchOpenAlexStep(sourceWork, mode)
+    items = await fetchOpenAlexStep(sourceWork, mode, signal)
   } catch (error) {
     console.warn(`OpenAlex discover ${mode} failed:`, error)
   }
 
   if (items.length < 5) {
     try {
-      const semanticItems = await fetchSemanticScholarStep(sourceWork, mode, settings.semanticScholarApiKey)
+      const semanticItems = await fetchSemanticScholarStep(sourceWork, mode, settings.semanticScholarApiKey, signal)
       items = dedupeWorks([...items, ...semanticItems])
     } catch (error) {
       console.warn(`Semantic Scholar discover ${mode} fallback failed:`, error)
@@ -449,7 +495,9 @@ export async function fetchDiscoverStep(
 
   const merged = await mergeLocalRelations(sourceDocumentId, annotateLibraryMatches(items, allDocuments), allDocuments, allRelations)
   const deduped = dedupeWorks(merged)
-  stepCache.set(cacheKey, deduped)
+  if (deduped.length > 0) {
+    stepCache.set(cacheKey, deduped)
+  }
   return deduped
 }
 

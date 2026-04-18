@@ -3,12 +3,15 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
-import { BookMarked, BookOpen, Copy, Edit, ExternalLink, FileText, FolderOpen, MessageSquare, Trash2 } from 'lucide-react'
+import { BookMarked, BookOpen, Copy, Edit, ExternalLink, FileText, FolderOpen, MessageSquare, Telescope, Trash2 } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
@@ -16,6 +19,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import {
@@ -31,7 +37,10 @@ import {
 import * as repo from '@/lib/repositories/local-db'
 import type { Document } from '@/lib/types'
 import { useDocumentActions } from '@/lib/stores/document-store'
+import { useDocumentStore } from '@/lib/stores/document-store'
 import { useT } from '@/lib/localization'
+import { findReusableReference, seedReferenceFromDocument } from '@/lib/services/work-reference-service'
+import { toast } from 'sonner'
 
 interface DocumentActionsProps {
   document: Document
@@ -51,7 +60,9 @@ function formatCitation(document: Document) {
 }
 
 function useDocumentActionState(document: Document) {
+  const t = useT()
   const { deleteDocument } = useDocumentActions()
+  const documents = useDocumentStore((state) => state.documents)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
@@ -82,6 +93,51 @@ function useDocumentActionState(document: Document) {
     }
   }
 
+  const myWorkDocuments = documents
+    .filter((entry) => entry.documentType === 'my_work')
+    .sort((left, right) => left.title.localeCompare(right.title))
+
+  const handleAddToMyWork = async (workDocumentId: string) => {
+    const targetWork = myWorkDocuments.find((entry) => entry.id === workDocumentId)
+    if (!targetWork) return
+
+    const existingReferences = await repo.listWorkReferences(workDocumentId)
+    const alreadyExists = existingReferences.some((entry) => (
+      entry.matchedDocumentId === document.id || entry.reference.documentId === document.id
+    ))
+    if (alreadyExists) {
+      toast.message(t('documentActions.alreadyInMyWork'), {
+        description: t('documentActions.alreadyInMyWorkDescription', {
+          documentTitle: document.title,
+          workTitle: targetWork.title,
+        }),
+      })
+      return
+    }
+
+    const allReferences = await repo.listReferences()
+    const referenceDraft = seedReferenceFromDocument(document)
+    const reusable = findReusableReference(allReferences, referenceDraft)
+    const sharedReference = reusable
+      ? await repo.updateReference(reusable.id, referenceDraft) ?? reusable
+      : await repo.createReference(referenceDraft)
+
+    await repo.createWorkReference({
+      workDocumentId,
+      referenceId: sharedReference.id,
+      matchedDocumentId: document.id,
+      matchMethod: referenceDraft.doi ? 'doi_exact' : 'title_exact',
+      matchConfidence: 0.99,
+    })
+
+    toast.success(t('documentActions.addedToMyWork'), {
+      description: t('documentActions.addedToMyWorkDescription', {
+        documentTitle: document.title,
+        workTitle: targetWork.title,
+      }),
+    })
+  }
+
   return {
     isDeleteDialogOpen,
     setIsDeleteDialogOpen,
@@ -90,6 +146,8 @@ function useDocumentActionState(document: Document) {
     handleOpenDoi,
     handleOpenFileLocation,
     handleDeleteDocument,
+    myWorkDocuments,
+    handleAddToMyWork,
   }
 }
 
@@ -133,6 +191,8 @@ function DocumentActionMenuItems({
   onOpenDoi,
   onOpenFileLocation,
   onRemove,
+  myWorkDocuments,
+  onAddToMyWork,
 }: {
   document: Document
   variant: 'dropdown' | 'context'
@@ -140,10 +200,15 @@ function DocumentActionMenuItems({
   onOpenDoi: () => void
   onOpenFileLocation: () => void
   onRemove: () => void
+  myWorkDocuments: Document[]
+  onAddToMyWork: (workDocumentId: string) => void
 }) {
   const t = useT()
   const Item = variant === 'dropdown' ? DropdownMenuItem : ContextMenuItem
   const Separator = variant === 'dropdown' ? DropdownMenuSeparator : ContextMenuSeparator
+  const Sub = variant === 'dropdown' ? DropdownMenuSub : ContextMenuSub
+  const SubTrigger = variant === 'dropdown' ? DropdownMenuSubTrigger : ContextMenuSubTrigger
+  const SubContent = variant === 'dropdown' ? DropdownMenuSubContent : ContextMenuSubContent
   const openHref = document.documentType === 'my_work'
     ? `/documents?id=${document.id}`
     : document.documentType === 'physical_book'
@@ -155,10 +220,10 @@ function DocumentActionMenuItems({
       ? FileText
       : BookOpen
   const openLabel = document.documentType === 'physical_book'
-    ? 'Open Notes'
+    ? t('documentActions.openNotes')
     : document.documentType === 'my_work'
-      ? 'Open Details'
-      : 'Open in Reader'
+      ? t('documentActions.openDetails')
+      : t('documentActions.openReader')
 
   return (
     <>
@@ -175,38 +240,67 @@ function DocumentActionMenuItems({
         </Link>
       </Item>
       <Item asChild>
-        <Link href={`/comments?id=${document.id}`}>
-          <MessageSquare className="mr-2 h-4 w-4" />
-          Open Comments
+        <Link href={`/discover?documentId=${document.id}`}>
+          <Telescope className="mr-2 h-4 w-4" />
+          {t('documentActions.openInDiscovery')}
         </Link>
       </Item>
+      <Item asChild>
+        <Link href={`/comments?id=${document.id}`}>
+          <MessageSquare className="mr-2 h-4 w-4" />
+          {t('documentActions.openComments')}
+        </Link>
+      </Item>
+      {document.documentType !== 'my_work' ? (
+        <Sub>
+          <SubTrigger>
+            <span className="mr-2 text-xs font-semibold tracking-tight text-muted-foreground">
+              [ ]
+            </span>
+            {t('documentActions.addToMyWork')}
+          </SubTrigger>
+          <SubContent className="min-w-[260px] max-h-[280px] overflow-y-auto">
+            {myWorkDocuments.length > 0 ? myWorkDocuments.map((work) => (
+              <Item key={work.id} onSelect={() => void onAddToMyWork(work.id)}>
+                <FileText className="mr-2 h-4 w-4" />
+                {work.title}
+              </Item>
+            )) : (
+              <Item disabled>
+                <FileText className="mr-2 h-4 w-4" />
+                {t('documentActions.noMyWorks')}
+              </Item>
+            )}
+          </SubContent>
+        </Sub>
+      ) : null}
       {document.filePath && (
         <Item onClick={onOpenFileLocation}>
           <FolderOpen className="mr-2 h-4 w-4" />
-          Open File Location
+          {t('documentActions.openFileLocation')}
         </Item>
       )}
       {document.doi && (
         <Item onClick={onOpenDoi}>
           <ExternalLink className="mr-2 h-4 w-4" />
-          Open DOI
+          {t('documentActions.openDoi')}
         </Item>
       )}
       <Separator />
       <Item onClick={onCopyCitation}>
         <Copy className="mr-2 h-4 w-4" />
-        Copy Citation
+        {t('documentActions.copyCitation')}
       </Item>
       <Separator />
       {variant === 'dropdown' ? (
         <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={onRemove}>
           <Trash2 className="mr-2 h-4 w-4" />
-          Remove from Library
+          {t('documentActions.removeFromLibrary')}
         </DropdownMenuItem>
       ) : (
         <ContextMenuItem variant="destructive" onClick={onRemove}>
           <Trash2 className="mr-2 h-4 w-4" />
-          Remove from Library
+          {t('documentActions.removeFromLibrary')}
         </ContextMenuItem>
       )}
     </>
@@ -228,6 +322,8 @@ export function DocumentActions({ document, trigger }: DocumentActionsProps) {
             onOpenDoi={actions.handleOpenDoi}
             onOpenFileLocation={() => void actions.handleOpenFileLocation()}
             onRemove={() => actions.setIsDeleteDialogOpen(true)}
+            myWorkDocuments={actions.myWorkDocuments}
+            onAddToMyWork={(workDocumentId) => void actions.handleAddToMyWork(workDocumentId)}
           />
         </DropdownMenuContent>
       </DropdownMenu>
@@ -258,6 +354,8 @@ export function DocumentContextMenu({ document, children }: DocumentContextMenuP
             onOpenDoi={actions.handleOpenDoi}
             onOpenFileLocation={() => void actions.handleOpenFileLocation()}
             onRemove={() => actions.setIsDeleteDialogOpen(true)}
+            myWorkDocuments={actions.myWorkDocuments}
+            onAddToMyWork={(workDocumentId) => void actions.handleAddToMyWork(workDocumentId)}
           />
         </ContextMenuContent>
       </ContextMenu>

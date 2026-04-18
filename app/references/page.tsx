@@ -119,6 +119,14 @@ function buildDocumentResumeHref(document: Document) {
     : `/documents?id=${document.id}`
 }
 
+function buildDocumentEditHref(document: Document) {
+  if (document.documentType === 'physical_book') {
+    return `/books/notes?id=${document.id}`
+  }
+
+  return `/documents?id=${document.id}&edit=1`
+}
+
 export default function ReferencesPage() {
   const router = useRouter()
   const t = useT()
@@ -334,10 +342,6 @@ export default function ReferencesPage() {
     setPreferredMatchDocumentId(null)
     setEditingWorkReferenceId(null)
   }
-
-  const isEditableFreeformReference = (workReference: repo.DbWorkReference, matchedDocument: Document | null) => (
-    !matchedDocument && !workReference.reference.documentId
-  )
 
   const openEditFreeformReference = (workReference: repo.DbWorkReference) => {
     setEditingWorkReferenceId(workReference.id)
@@ -929,11 +933,10 @@ export default function ReferencesPage() {
             ) : (
               <div className="space-y-3">
                 {displayedWorkReferences.map((workReference, index) => {
-                  const matchedDocument = workReference.matchedDocumentId
-                    ? documentById.get(workReference.matchedDocumentId) ?? null
+                  const linkedDocumentId = workReference.matchedDocumentId ?? workReference.reference.documentId ?? null
+                  const linkedDocument = linkedDocumentId
+                    ? documentById.get(linkedDocumentId) ?? null
                     : null
-                  const canEditFreeformReference = isEditableFreeformReference(workReference, matchedDocument)
-
                   return (
                     <div
                       key={workReference.id}
@@ -951,12 +954,12 @@ export default function ReferencesPage() {
                         void handleDropWorkReference(workReference.id)
                       }}
                       onClick={() => {
-                        if (!matchedDocument) return
-                        router.push(buildDocumentResumeHref(matchedDocument))
+                        if (!linkedDocument) return
+                        router.push(buildDocumentResumeHref(linkedDocument))
                       }}
                       className={cn(
                         'h-[78px] overflow-hidden rounded-2xl border bg-card px-4 py-2 transition',
-                        matchedDocument && 'cursor-pointer hover:border-primary/40 hover:bg-accent/30',
+                        linkedDocument && 'cursor-pointer hover:border-primary/40 hover:bg-accent/30',
                         draggingWorkReferenceId === workReference.id && 'opacity-60',
                       )}
                     >
@@ -984,7 +987,7 @@ export default function ReferencesPage() {
                                     {t('referencesPage.manualReferenceBadge')}
                                   </span>
                                 ) : null}
-                                {matchedDocument ? (
+                                {linkedDocument ? (
                                   <span className="shrink-0 inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] text-sky-700">
                                     {t('referencesPage.existsInLibraries')}
                                   </span>
@@ -1018,20 +1021,22 @@ export default function ReferencesPage() {
                                   <Copy className="h-4 w-4" />
                                 )}
                               </Button>
-                              {canEditFreeformReference ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="icon"
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    openEditFreeformReference(workReference)
-                                  }}
-                                  aria-label={t('referencesPage.editReference')}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                              ) : null}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  if (linkedDocument) {
+                                    router.push(buildDocumentEditHref(linkedDocument))
+                                    return
+                                  }
+                                  openEditFreeformReference(workReference)
+                                }}
+                                aria-label={t('referencesPage.editReference')}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
                               <Button
                                 type="button"
                                 variant="ghost"

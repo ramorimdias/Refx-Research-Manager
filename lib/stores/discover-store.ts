@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { useDocumentStore } from '@/lib/stores/document-store'
 import { useRelationStore } from '@/lib/stores/relation-store'
 import {
+  clearDiscoverStepCache,
   enrichWorkMetadata,
   fetchDiscoverStep,
   getDiscoverStepCacheKey,
@@ -20,6 +21,22 @@ import type {
 
 const JOURNEYS_STORAGE_KEY = 'refx.discover.journeys.v1'
 const WORK_TAGS_STORAGE_KEY = 'refx.discover.work-tags.v1'
+let activePrefetchController: AbortController | null = null
+let portalTransitionNonce = 0
+
+type DiscoverPortalPhase = 'entering' | 'holding' | 'revealing'
+
+type DiscoverPortalTransition = {
+  key: number
+  anchorWorkId: string
+  phase: DiscoverPortalPhase
+}
+
+function cancelActivePrefetch() {
+  if (!activePrefetchController) return
+  activePrefetchController.abort()
+  activePrefetchController = null
+}
 
 function cloneJourney(journey: DiscoverJourney): DiscoverJourney {
   return {
@@ -152,6 +169,8 @@ interface DiscoverStoreState {
   hoveredWorkId: string | null
   activeJourney: DiscoverJourney | null
   activeStepIndex: number
+  lastAnimatedStepId: string | null
+  portalTransition: DiscoverPortalTransition | null
   cachedSteps: Map<string, DiscoverWork[]>
   cachedWorkMetadata: Map<string, DiscoverWork>
   workTags: Record<string, DiscoverExternalTag[]>
@@ -166,6 +185,8 @@ interface DiscoverStoreState {
   startJourneyFromSource: (sourceWork: DiscoverWork, mode: DiscoverMode) => Promise<void>
   advanceJourneyFromSelected: (mode: DiscoverMode) => Promise<void>
   openStep: (stepIndex: number) => void
+  setPortalTransitionPhase: (phase: DiscoverPortalPhase) => void
+  finishPortalTransition: () => void
   setYearFilterForCurrentStep: (min: number | null, max: number | null) => void
   clearCurrentStepFilters: () => void
   toggleExternalTag: (workId: string, tag: DiscoverExternalTag) => void
@@ -186,24 +207,35 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
   hoveredWorkId: null,
   activeJourney: null,
   activeStepIndex: 0,
+  lastAnimatedStepId: null,
+  portalTransition: null,
   cachedSteps: new Map(),
   cachedWorkMetadata: new Map(),
   workTags: initialTags,
   savedJourneys: initialJourneys.map((journey) => hydrateJourneyTags(journey, initialTags)),
   isLoading: false,
   error: null,
-  resetDiscoverSession: () => set({
-    seedDocumentId: null,
-    sourceWork: null,
-    selectedWorkId: null,
-    hoveredWorkId: null,
-    activeJourney: null,
-    activeStepIndex: 0,
-    cachedWorkMetadata: new Map(),
-    isLoading: false,
-    error: null,
-  }),
+  resetDiscoverSession: () => {
+    cancelActivePrefetch()
+    clearDiscoverStepCache()
+    set({
+      seedDocumentId: null,
+      sourceWork: null,
+      selectedWorkId: null,
+      hoveredWorkId: null,
+      activeJourney: null,
+      activeStepIndex: 0,
+      lastAnimatedStepId: null,
+      portalTransition: null,
+      cachedSteps: new Map(),
+      cachedWorkMetadata: new Map(),
+      isLoading: false,
+      error: null,
+    })
+  },
   loadSeedDocument: async (documentId) => {
+    cancelActivePrefetch()
+    clearDiscoverStepCache()
     set({ isLoading: true, error: null })
     try {
       const document = useDocumentStore.getState().documents.find((entry) => entry.id === documentId) ?? null
@@ -217,8 +249,13 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
         seedDocumentId: documentId,
         sourceWork,
         selectedWorkId: sourceWork?.id ?? null,
+        hoveredWorkId: null,
         activeJourney: null,
         activeStepIndex: 0,
+        lastAnimatedStepId: null,
+        portalTransition: null,
+        cachedSteps: new Map(),
+        cachedWorkMetadata: new Map(),
         isLoading: false,
       })
     } catch (error) {
@@ -238,6 +275,16 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
     const work = collectKnownWorks(state.sourceWork, state.activeJourney).find((entry) => entry.id === targetId) ?? null
     if (!work) return
 
+    const referencesKey = getDiscoverStepCacheKey(work, 'references')
+    const citationsKey = getDiscoverStepCacheKey(work, 'citations')
+    const hasReferencesCached = get().cachedSteps.has(referencesKey)
+    const hasCitationsCached = get().cachedSteps.has(citationsKey)
+    if (hasReferencesCached && hasCitationsCached) return
+
+    cancelActivePrefetch()
+    const controller = new AbortController()
+    activePrefetchController = controller
+
     try {
       const documents = useDocumentStore.getState().documents
       const relations = useRelationStore.getState().relations
@@ -252,17 +299,25 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
             return { mode, items: cached }
           }
 
-          const items = (await fetchDiscoverStep(work, mode, documents, relations, settings))
+          const items = (await fetchDiscoverStep(work, mode, documents, relations, settings, controller.signal, true))
             .map((item) => applyTagState(item, get().workTags))
-          nextCachedSteps.set(cacheKey, items)
+          if (items.length > 0) {
+            nextCachedSteps.set(cacheKey, items)
+          }
           return { mode, items }
         }),
       )
 
+      if (controller.signal.aborted) return
+
       const patch: Partial<DiscoverWork> & { id: string } = {
         id: work.id,
-        referencedWorksCount: referencesResult.items.length,
-        citedByCount: citationsResult.items.length,
+        referencedWorksCount: referencesResult.items.length > 0
+          ? referencesResult.items.length
+          : work.referencedWorksCount,
+        citedByCount: citationsResult.items.length > 0
+          ? citationsResult.items.length
+          : work.citedByCount,
       }
       const latestState = get()
       const nextCachedMetadata = new Map(latestState.cachedWorkMetadata)
@@ -288,18 +343,31 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
           : latestState.savedJourneys,
       })
     } catch (error) {
+      if (controller.signal.aborted) return
       console.warn('Could not prefetch discover steps:', error)
+    } finally {
+      if (activePrefetchController === controller) {
+        activePrefetchController = null
+      }
     }
   },
   startJourneyFromSource: async (sourceWork, mode) => {
-    set({ isLoading: true, error: null })
+    cancelActivePrefetch()
+    set({
+      isLoading: true,
+      error: null,
+      portalTransition: {
+        key: ++portalTransitionNonce,
+        anchorWorkId: sourceWork.id,
+        phase: 'entering',
+      },
+    })
     try {
       const documents = useDocumentStore.getState().documents
       const relations = useRelationStore.getState().relations
       const settings = await loadDiscoverySettings()
       const cacheKey = getDiscoverStepCacheKey(sourceWork, mode)
-      const cached = get().cachedSteps.get(cacheKey)
-      const items = (cached ?? await fetchDiscoverStep(sourceWork, mode, documents, relations, settings))
+      const items = (await fetchDiscoverStep(sourceWork, mode, documents, relations, settings, undefined, true))
         .map((item) => applyJourneyStarState(applyTagState(item, get().workTags), get().activeJourney))
 
       const nextCachedSteps = new Map(get().cachedSteps)
@@ -324,18 +392,22 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
         sourceWork: applyJourneyStarState(applyTagState(sourceWork, get().workTags), get().activeJourney),
         activeJourney: nextJourney,
         activeStepIndex: 0,
+        lastAnimatedStepId: nextJourney.steps[0]?.id ?? null,
         selectedWorkId: sourceWork.id,
+        hoveredWorkId: null,
         cachedSteps: nextCachedSteps,
         isLoading: false,
       })
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Could not start the discovery journey.',
+        portalTransition: null,
         isLoading: false,
       })
     }
   },
   advanceJourneyFromSelected: async (mode) => {
+    cancelActivePrefetch()
     const state = get()
     const currentJourney = state.activeJourney
     if (!currentJourney) return
@@ -349,35 +421,47 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
 
     if (!selectedWork) return
 
-    set({ isLoading: true, error: null })
+    set({
+      isLoading: true,
+      error: null,
+      portalTransition: {
+        key: ++portalTransitionNonce,
+        anchorWorkId: selectedWork.id,
+        phase: 'entering',
+      },
+    })
     try {
       const documents = useDocumentStore.getState().documents
       const relations = useRelationStore.getState().relations
       const settings = await loadDiscoverySettings()
-      const cacheKey = getDiscoverStepCacheKey(selectedWork, mode)
-      const cached = get().cachedSteps.get(cacheKey)
-      const items = (cached ?? await fetchDiscoverStep(selectedWork, mode, documents, relations, settings))
-        .map((item) => applyJourneyStarState(applyTagState(item, get().workTags), currentJourney))
-
-      const nextCachedSteps = new Map(get().cachedSteps)
-      nextCachedSteps.set(cacheKey, items)
       const nextJourney = cloneJourney(currentJourney)
       if (state.activeStepIndex >= 0 && state.activeStepIndex < nextJourney.steps.length - 1) {
         nextJourney.steps = nextJourney.steps.slice(0, state.activeStepIndex + 1)
       }
+      const cacheKey = getDiscoverStepCacheKey(selectedWork, mode)
       const existingStepIndex = nextJourney.steps.findIndex((step) => step.cacheKey === cacheKey)
 
       if (existingStepIndex >= 0) {
+        const nextCachedSteps = new Map(get().cachedSteps)
         set({
           activeJourney: nextJourney,
           activeStepIndex: existingStepIndex,
+          lastAnimatedStepId: get().lastAnimatedStepId,
           cachedSteps: nextCachedSteps,
           selectedWorkId: selectedWork.id,
+          hoveredWorkId: null,
           savedJourneys: syncSavedJourneysWithActiveJourney(get().savedJourneys, nextJourney),
           isLoading: false,
+          portalTransition: null,
         })
         return
       }
+
+      const items = (await fetchDiscoverStep(selectedWork, mode, documents, relations, settings, undefined, true))
+        .map((item) => applyJourneyStarState(applyTagState(item, get().workTags), currentJourney))
+
+      const nextCachedSteps = new Map(get().cachedSteps)
+      nextCachedSteps.set(cacheKey, items)
 
       nextJourney.steps.push({
         id: crypto.randomUUID(),
@@ -393,19 +477,23 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
       set({
         activeJourney: nextJourney,
         activeStepIndex: nextJourney.steps.length - 1,
+        lastAnimatedStepId: nextJourney.steps.at(-1)?.id ?? null,
         cachedSteps: nextCachedSteps,
         selectedWorkId: selectedWork.id,
+        hoveredWorkId: null,
         savedJourneys: syncSavedJourneysWithActiveJourney(get().savedJourneys, nextJourney),
         isLoading: false,
       })
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Could not advance the discovery journey.',
+        portalTransition: null,
         isLoading: false,
       })
     }
   },
   openStep: (stepIndex) => {
+    cancelActivePrefetch()
     const journey = get().activeJourney
     if (!journey) {
       set({ activeStepIndex: stepIndex })
@@ -421,8 +509,21 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
     set({
       activeStepIndex: stepIndex,
       selectedWorkId: step?.sourceWork.id ?? get().selectedWorkId,
+      hoveredWorkId: null,
     })
   },
+  setPortalTransitionPhase: (phase) => {
+    const portalTransition = get().portalTransition
+    if (!portalTransition) return
+    if (portalTransition.phase === phase) return
+    set({
+      portalTransition: {
+        ...portalTransition,
+        phase,
+      },
+    })
+  },
+  finishPortalTransition: () => set({ portalTransition: null }),
   setYearFilterForCurrentStep: (min, max) => {
     const journey = get().activeJourney
     if (!journey || get().activeStepIndex < 0) return
@@ -506,13 +607,19 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
     })
   },
   loadSavedJourney: (journeyId) => {
+    cancelActivePrefetch()
     const journey = get().savedJourneys.find((entry) => entry.id === journeyId)
     if (!journey) return
+    const lastStepIndex = Math.max(0, journey.steps.length - 1)
+    const lastStep = journey.steps[lastStepIndex] ?? null
     set({
       activeJourney: cloneJourney(journey),
-      activeStepIndex: 0,
+      activeStepIndex: lastStepIndex,
+      lastAnimatedStepId: null,
+      portalTransition: null,
       sourceWork: journey.steps[0]?.sourceWork ?? null,
-      selectedWorkId: journey.steps[0]?.sourceWork.id ?? null,
+      selectedWorkId: lastStep?.sourceWork.id ?? journey.steps[0]?.sourceWork.id ?? null,
+      hoveredWorkId: null,
       seedDocumentId: journey.steps[0]?.sourceWork.libraryDocumentId ?? null,
     })
   },
@@ -566,6 +673,8 @@ export function useDiscoverActions() {
     startJourneyFromSource: useDiscoverStore((state) => state.startJourneyFromSource),
     advanceJourneyFromSelected: useDiscoverStore((state) => state.advanceJourneyFromSelected),
     openStep: useDiscoverStore((state) => state.openStep),
+    setPortalTransitionPhase: useDiscoverStore((state) => state.setPortalTransitionPhase),
+    finishPortalTransition: useDiscoverStore((state) => state.finishPortalTransition),
     setYearFilterForCurrentStep: useDiscoverStore((state) => state.setYearFilterForCurrentStep),
     clearCurrentStepFilters: useDiscoverStore((state) => state.clearCurrentStepFilters),
     toggleExternalTag: useDiscoverStore((state) => state.toggleExternalTag),
