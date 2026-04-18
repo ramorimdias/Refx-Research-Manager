@@ -306,7 +306,7 @@ export async function mergeLocalRelations(
   externalItems: DiscoverWork[],
   allDocuments: Document[],
   allRelations: DocumentRelation[],
-) {
+): Promise<DiscoverWork[]> {
   const externalByKey = new Map(externalItems.map((item) => [discoverKey(item), item]))
   const localItems: DiscoverWork[] = []
 
