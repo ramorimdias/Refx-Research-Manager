@@ -739,7 +739,7 @@ pub fn migrate_to_remote_vault(
             cache_limit_mb: None,
         },
     )?;
-    let pushed = push_remote_vault(app, None)?;
+    let pushed = push_remote_vault_sync(app, None)?;
     Ok(RemoteVaultActionResult {
         status: pushed.status,
         message: format!(
@@ -784,8 +784,7 @@ fn require_remote_writer(
     Ok((config, manifest))
 }
 
-#[tauri::command]
-pub fn push_remote_vault(
+fn push_remote_vault_sync(
     app: AppHandle,
     input: Option<PushRemoteVaultInput>,
 ) -> Result<RemoteVaultActionResult, AppError> {
@@ -845,7 +844,16 @@ pub fn push_remote_vault(
 }
 
 #[tauri::command]
-pub fn pull_remote_vault(app: AppHandle) -> Result<RemoteVaultActionResult, AppError> {
+pub async fn push_remote_vault(
+    app: AppHandle,
+    input: Option<PushRemoteVaultInput>,
+) -> Result<RemoteVaultActionResult, AppError> {
+    tauri::async_runtime::spawn_blocking(move || push_remote_vault_sync(app, input))
+        .await
+        .map_err(|error| AppError::Validation(format!("Remote vault push task failed: {error}")))?
+}
+
+fn pull_remote_vault_sync(app: AppHandle) -> Result<RemoteVaultActionResult, AppError> {
     let conn = open_db(&app)?;
     let Some(config) = read_remote_config(&conn)? else {
         return Err(AppError::Validation(
@@ -869,6 +877,13 @@ pub fn pull_remote_vault(app: AppHandle) -> Result<RemoteVaultActionResult, AppE
         copied_file_count: 0,
         copied_byte_count: 0,
     })
+}
+
+#[tauri::command]
+pub async fn pull_remote_vault(app: AppHandle) -> Result<RemoteVaultActionResult, AppError> {
+    tauri::async_runtime::spawn_blocking(move || pull_remote_vault_sync(app))
+        .await
+        .map_err(|error| AppError::Validation(format!("Remote vault pull task failed: {error}")))?
 }
 
 #[tauri::command]
@@ -1038,7 +1053,7 @@ pub fn create_remote_vault_backup(
     app: AppHandle,
     input: RemoteVaultBackupInput,
 ) -> Result<RemoteVaultBackupMetadata, AppError> {
-    push_remote_vault(app.clone(), None)?;
+    push_remote_vault_sync(app.clone(), None)?;
     let conn = open_db(&app)?;
     let Some(config) = read_remote_config(&conn)? else {
         return Err(AppError::Validation(

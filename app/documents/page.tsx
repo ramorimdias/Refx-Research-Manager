@@ -157,7 +157,7 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
         const bytes = await readFile(resolvedPath ?? document.filePath)
         const task = pdfjs.getDocument({
           data: new Uint8Array(bytes),
-          disableWorker: true,
+          disableWorker: false,
           useWorkerFetch: false,
           isEvalSupported: false,
           stopAtErrors: false,
@@ -585,6 +585,7 @@ function RealDocumentDetailPage({
   const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false)
   const [metadataCandidates, setMetadataCandidates] = useState<DocumentMetadataCandidate[]>([])
   const [metadataDialogError, setMetadataDialogError] = useState('')
+  const [metadataDoiSearchFailed, setMetadataDoiSearchFailed] = useState(false)
   const [selectedMetadataCandidateId, setSelectedMetadataCandidateId] = useState('')
   const [isApplyingMetadataCandidate, setIsApplyingMetadataCandidate] = useState(false)
   const [metadataSearchField, setMetadataSearchField] = useState<'title' | 'doi' | 'title_author'>('title_author')
@@ -654,6 +655,7 @@ function RealDocumentDetailPage({
     setMetadataSearchField('title_author')
     setMetadataSearchValue(document.title || '')
     setMetadataSearchAuthorValue(document.authors[0] ?? '')
+    setMetadataDoiSearchFailed(false)
     setBibtexInput('')
     setBibtexExpanded(false)
     setBookCoverPhoneSession(null)
@@ -1227,26 +1229,34 @@ function RealDocumentDetailPage({
     }
   }
 
-  const runMetadataCandidateSearch = async () => {
+  const runMetadataCandidateSearch = async (override?: {
+    field?: 'title' | 'doi' | 'title_author'
+    value?: string
+    authorValue?: string
+  }) => {
     if (!document) return
+    const searchField = override?.field ?? metadataSearchField
+    const searchValue = override?.value ?? metadataSearchValue
+    const authorSearchValue = override?.authorValue ?? metadataSearchAuthorValue
     setIsFetchingOnlineMetadata(true)
     setMetadataDialogError('')
+    setMetadataDoiSearchFailed(false)
     setMetadataCandidates([])
     setSelectedMetadataCandidateId('')
     try {
       const settings = await loadOnlineMetadataEnrichmentSettings(isDesktopApp)
-      const trimmedSearchValue = metadataSearchValue.trim()
-      const trimmedAuthorSearchValue = metadataSearchAuthorValue.trim()
+      const trimmedSearchValue = searchValue.trim()
+      const trimmedAuthorSearchValue = authorSearchValue.trim()
       const candidates = await findDocumentMetadataCandidates(
         buildDocumentMetadataSeed({
           authors: JSON.stringify(
-            metadataSearchField === 'title_author'
+            searchField === 'title_author'
               ? (trimmedAuthorSearchValue ? [trimmedAuthorSearchValue] : [])
               : document.authors,
           ),
           citationKey: document.citationKey,
-          doi: metadataSearchField === 'doi' ? (trimmedSearchValue || document.doi) : undefined,
-          title: metadataSearchField === 'doi'
+          doi: searchField === 'doi' ? (trimmedSearchValue || doi.trim() || document.doi) : undefined,
+          title: searchField === 'doi'
             ? ''
             : (trimmedSearchValue || document.title),
           year: document.year,
@@ -1258,6 +1268,7 @@ function RealDocumentDetailPage({
       setSelectedMetadataCandidateId(candidates[0]?.id ?? '')
       if (candidates.length === 0) {
         setMetadataDialogError('No metadata candidates were found for this document.')
+        setMetadataDoiSearchFailed(searchField === 'doi')
       }
     } catch (error) {
       setMetadataDialogError(error instanceof Error ? error.message : 'Could not fetch metadata candidates.')
@@ -1270,17 +1281,24 @@ function RealDocumentDetailPage({
     if (!document) return
     const hasDoi = doi.trim().length > 0
     const nextMode = hasDoi ? 'doi' : 'title_author'
+    const nextSearchValue = hasDoi ? doi.trim() : title.trim()
+    const nextAuthorValue = authors.split(',').map((entry) => entry.trim()).filter(Boolean)[0] ?? ''
     setMetadataSearchField(nextMode)
-    setMetadataSearchValue(hasDoi ? doi.trim() : title.trim())
-    setMetadataSearchAuthorValue(authors.split(',').map((entry) => entry.trim()).filter(Boolean)[0] ?? '')
+    setMetadataSearchValue(nextSearchValue)
+    setMetadataSearchAuthorValue(nextAuthorValue)
     setMetadataDialogError('')
+    setMetadataDoiSearchFailed(false)
     setMetadataCandidates([])
     setSelectedMetadataCandidateId('')
     setIsMetadataDialogOpen(true)
     metadataAutoOpenHandledRef.current = document.id
-    metadataAutoSearchPendingRef.current = document.id
+    metadataAutoSearchPendingRef.current = null
     window.setTimeout(() => {
-      void runMetadataCandidateSearch()
+      void runMetadataCandidateSearch({
+        field: nextMode,
+        value: nextSearchValue,
+        authorValue: nextAuthorValue,
+      })
     }, 0)
   }
 
@@ -1812,7 +1830,18 @@ function RealDocumentDetailPage({
 
                   <div>
                     <Label htmlFor="doi">DOI</Label>
-                    <Input id="doi" className="mt-1.5" value={doi} onChange={(event) => setDoi(event.target.value)} />
+                    <Input
+                      id="doi"
+                      className={cn(
+                        'mt-1.5',
+                        metadataDoiSearchFailed && 'border-destructive text-destructive focus-visible:ring-destructive/30',
+                      )}
+                      value={doi}
+                      onChange={(event) => {
+                        setDoi(event.target.value)
+                        setMetadataDoiSearchFailed(false)
+                      }}
+                    />
                   </div>
 
                   <div>
@@ -2310,13 +2339,13 @@ function RealDocumentDetailPage({
       </div>
 
       <Dialog open={isMetadataDialogOpen} onOpenChange={setIsMetadataDialogOpen}>
-        <DialogContent className="max-h-[78vh] max-w-5xl overflow-hidden">
+        <DialogContent className="right-4 left-auto top-1/2 max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none translate-x-0 overflow-hidden rounded-[28px]">
           <DialogHeader>
             <DialogTitle>Find Metadata Online</DialogTitle>
             <DialogDescription>Search and apply metadata candidates from your selected providers.</DialogDescription>
           </DialogHeader>
 
-          <div className="h-[58vh] min-h-0 overflow-y-auto pr-1">
+          <div className="h-[calc(100vh-13rem)] min-h-[360px] overflow-y-auto pr-1">
             <div className="space-y-4">
               {documentMetadataWriteLockMessage ? (
                 <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -2334,6 +2363,7 @@ function RealDocumentDetailPage({
                         setMetadataSearchField(nextField)
                         setMetadataSearchValue(nextField === 'doi' ? doi.trim() : title.trim())
                         setMetadataSearchAuthorValue(authors.split(',').map((entry) => entry.trim()).filter(Boolean)[0] ?? '')
+                        setMetadataDoiSearchFailed(false)
                       }}
                     >
                       <SelectTrigger>
@@ -2351,8 +2381,18 @@ function RealDocumentDetailPage({
                     <div className="space-y-2">
                       <Label>{metadataSearchField === 'doi' ? 'DOI query' : 'Title query'}</Label>
                       <Input
+                        className={cn(
+                          metadataSearchField === 'doi'
+                          && metadataDoiSearchFailed
+                          && 'border-destructive text-destructive focus-visible:ring-destructive/30',
+                        )}
                         value={metadataSearchValue}
-                        onChange={(event) => setMetadataSearchValue(event.target.value)}
+                        onChange={(event) => {
+                          setMetadataSearchValue(event.target.value)
+                          if (metadataSearchField === 'doi') {
+                            setMetadataDoiSearchFailed(false)
+                          }
+                        }}
                         placeholder={metadataSearchField === 'doi' ? '10.xxxx/...' : 'Document title'}
                       />
                     </div>

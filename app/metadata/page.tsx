@@ -95,6 +95,7 @@ export default function MetadataWorkspacePage() {
   const [isFetchingCandidates, setIsFetchingCandidates] = useState(false)
   const [isApplyingCandidate, setIsApplyingCandidate] = useState(false)
   const [candidateError, setCandidateError] = useState('')
+  const [doiSearchFailed, setDoiSearchFailed] = useState(false)
   const [metadataCandidates, setMetadataCandidates] = useState<DocumentMetadataCandidate[]>([])
 
   useEffect(() => {
@@ -136,6 +137,7 @@ export default function MetadataWorkspacePage() {
       setAbstract('')
       setMetadataCandidates([])
       setCandidateError('')
+      setDoiSearchFailed(false)
       return
     }
 
@@ -149,6 +151,7 @@ export default function MetadataWorkspacePage() {
     setAbstract(currentDocument.abstract ?? '')
     setMetadataCandidates([])
     setCandidateError('')
+    setDoiSearchFailed(false)
   }, [currentDocument])
 
   const savePayload = useMemo(
@@ -180,16 +183,18 @@ export default function MetadataWorkspacePage() {
     return false
   }, [currentDocument, savePayload])
 
-  const runDoiCandidateSearch = async (document: Document) => {
-    const trimmedDoi = (document.doi ?? '').trim()
+  const runDoiCandidateSearch = async (document: Document, doiOverride?: string) => {
+    const trimmedDoi = (doiOverride ?? doi ?? document.doi ?? '').trim()
     if (!trimmedDoi) {
       setMetadataCandidates([])
       setCandidateError('This document has no DOI to search.')
+      setDoiSearchFailed(false)
       return
     }
 
     setIsFetchingCandidates(true)
     setCandidateError('')
+    setDoiSearchFailed(false)
     setMetadataCandidates([])
     try {
       const settings = await loadOnlineMetadataEnrichmentSettings(isDesktopApp)
@@ -207,6 +212,7 @@ export default function MetadataWorkspacePage() {
       setMetadataCandidates(candidates)
       if (candidates.length === 0) {
         setCandidateError('No DOI results were found for this document.')
+        setDoiSearchFailed(true)
       }
     } catch (error) {
       setCandidateError(error instanceof Error ? error.message : 'Could not fetch metadata candidates.')
@@ -217,7 +223,7 @@ export default function MetadataWorkspacePage() {
 
   useEffect(() => {
     if (mode !== 'fetch_possible' || !currentDocument) return
-    void runDoiCandidateSearch(currentDocument)
+    void runDoiCandidateSearch(currentDocument, currentDocument.doi)
   }, [currentDocument, isDesktopApp, mode])
 
   const handleSave = async () => {
@@ -418,7 +424,18 @@ export default function MetadataWorkspacePage() {
 
                 <div>
                   <Label htmlFor="metadata-doi">{t('metadataFields.doi')}</Label>
-                  <Input id="metadata-doi" className="mt-1.5" value={doi} onChange={(event) => setDoi(event.target.value)} />
+                  <Input
+                    id="metadata-doi"
+                    className={cn(
+                      'mt-1.5',
+                      doiSearchFailed && 'border-destructive text-destructive focus-visible:ring-destructive/30',
+                    )}
+                    value={doi}
+                    onChange={(event) => {
+                      setDoi(event.target.value)
+                      setDoiSearchFailed(false)
+                    }}
+                  />
                 </div>
 
                 <div>
@@ -470,7 +487,7 @@ export default function MetadataWorkspacePage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => void runDoiCandidateSearch(currentDocument)}
+                      onClick={() => void runDoiCandidateSearch(currentDocument, doi)}
                       disabled={isFetchingCandidates}
                     >
                       <Globe className="mr-2 h-4 w-4" />

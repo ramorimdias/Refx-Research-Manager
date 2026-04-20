@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import Script from 'next/script'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AppShell } from '@/components/refx/app-shell'
 import { AppProvider } from '@/components/refx/app-provider'
@@ -118,7 +119,9 @@ export default function RootLayout({
             className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-amber-50"
           />
         </div>
-        <script dangerouslySetInnerHTML={{ __html: BOOT_MONITOR_SCRIPT }} />
+        <Script id="refx-boot-monitor" strategy="beforeInteractive">
+          {BOOT_MONITOR_SCRIPT}
+        </Script>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

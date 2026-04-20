@@ -1,7 +1,6 @@
 'use client'
 
 import { readFile } from '@tauri-apps/plugin-fs'
-import { isTauri } from '@/lib/tauri/client'
 import type { Document } from '@/lib/types'
 import { splitIntoSentenceLikeSegments } from '@/lib/utils/sentence-segmentation'
 
@@ -55,6 +54,7 @@ type PdfJsModule = {
 }
 
 let pdfJsPromise: Promise<PdfJsModule> | null = null
+const BROWSER_PDFJS_MODULE_PATH = '/pdfjs/pdf.js'
 const BROWSER_PDFJS_WORKER_PATH = '/pdfjs/pdf.worker.js'
 
 function resolvePdfJsCandidate(importedModule: unknown) {
@@ -357,31 +357,18 @@ function findMatchesInWordList(words: PdfWord[], query: string, maxResults = 100
 export async function loadPdfJsModule() {
   if (!pdfJsPromise) {
     pdfJsPromise = (async () => {
-      let candidate: PdfJsModule | null = null
-      let packageImportError: unknown = null
-
-      try {
-        candidate = resolvePdfJsCandidate(await import('pdfjs-dist/legacy/build/pdf.mjs'))
-      } catch (error) {
-        packageImportError = error
+      if (typeof window === 'undefined') {
+        throw new Error('PDF.js can only be initialized in a browser context.')
       }
 
-      if (!candidate && typeof window !== 'undefined' && !isTauri()) {
-        try {
-          const browserImport = new Function('return import("/pdfjs/pdf.js")') as () => Promise<unknown>
-          candidate = resolvePdfJsCandidate(await browserImport())
-        } catch (error) {
-          if (packageImportError) {
-            console.warn('Falling back to public PDF.js asset after bundled import failed:', packageImportError)
-          }
-          throw error
-        }
-      }
+      const browserImport = new Function(
+        'specifier',
+        'return import(specifier)',
+      ) as (specifier: string) => Promise<unknown>
+      const candidate = resolvePdfJsCandidate(await browserImport(BROWSER_PDFJS_MODULE_PATH))
 
       if (!candidate || typeof candidate !== 'object') {
-        throw packageImportError instanceof Error
-          ? packageImportError
-          : new Error('PDF.js module could not be initialized.')
+        throw new Error('PDF.js module could not be initialized.')
       }
 
       const pdfjs = candidate as PdfJsModule
@@ -392,9 +379,7 @@ export async function loadPdfJsModule() {
         throw new Error('PDF.js worker options are unavailable in this build.')
       }
 
-      if (typeof window !== 'undefined' && !pdfjs.GlobalWorkerOptions.workerSrc) {
-        pdfjs.GlobalWorkerOptions.workerSrc = BROWSER_PDFJS_WORKER_PATH
-      }
+      pdfjs.GlobalWorkerOptions.workerSrc = BROWSER_PDFJS_WORKER_PATH
 
       return pdfjs
     })().catch((error) => {
@@ -417,7 +402,7 @@ async function extractPdfPages(filePath: string) {
     const bytes = await readFile(filePath)
     const loadingTask = pdfjs.getDocument({
       data: new Uint8Array(bytes),
-      disableWorker: true,
+      disableWorker: false,
       useWorkerFetch: false,
       isEvalSupported: false,
       stopAtErrors: false,

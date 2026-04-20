@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import type { CheckedState } from '@radix-ui/react-checkbox'
-import { BookMarked, ChevronDown, ChevronUp, FileText, MessageSquare, MoreHorizontal, Settings2, Star } from 'lucide-react'
+import { CheckCheck, ChevronDown, ChevronUp, CircleHelp, MessageSquare, MoreHorizontal, Search, Settings2, Star, TriangleAlert } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -40,7 +40,7 @@ interface DocumentTableProps {
   ephemeralFlagsById?: Record<string, DocumentEphemeralUiFlags>
 }
 
-type ColumnKey = 'favorite' | 'title' | 'authors' | 'tags' | 'year' | 'status' | 'metadata' | 'comments' | 'rating'
+type ColumnKey = 'favorite' | 'title' | 'authors' | 'tags' | 'year' | 'status' | 'comments' | 'rating'
 
 type ColumnDefinition = {
   key: ColumnKey
@@ -56,13 +56,12 @@ const TABLE_ORDER_KEY = 'refx-library-table-order'
 const TABLE_CONFIG_EVENT = 'refx-library-table-config-changed'
 const SELECTION_IGNORE_SELECTOR = 'a, button, input, textarea, select, [role="checkbox"], [data-selection-ignore="true"]'
 const COLUMN_DEFINITIONS: ColumnDefinition[] = [
-  { key: 'favorite', label: 'favorite', defaultWidth: 56, minWidth: 48, hideable: true },
+  { key: 'favorite', label: 'icons', defaultWidth: 78, minWidth: 68, hideable: true },
   { key: 'title', label: 'title', defaultWidth: 360, minWidth: 220 },
   { key: 'authors', label: 'authors', defaultWidth: 220, minWidth: 140, hideable: true },
   { key: 'tags', label: 'tags', defaultWidth: 170, minWidth: 140, hideable: true },
   { key: 'year', label: 'year', defaultWidth: 80, minWidth: 70, hideable: true },
   { key: 'status', label: 'status', defaultWidth: 150, minWidth: 120, hideable: true },
-  { key: 'metadata', label: 'metadata', defaultWidth: 160, minWidth: 130, hideable: true },
   { key: 'comments', label: 'comments', defaultWidth: 170, minWidth: 150, hideable: true },
   { key: 'rating', label: 'rating', defaultWidth: 140, minWidth: 110, hideable: true },
 ]
@@ -103,7 +102,7 @@ function loadStoredColumnVisibility() {
   try {
     const storedVisibility = window.localStorage.getItem(TABLE_VISIBILITY_KEY)
     if (!storedVisibility) return DEFAULT_VISIBILITY
-    const parsed = JSON.parse(storedVisibility) as Partial<Record<ColumnKey, boolean>>
+    const parsed = JSON.parse(storedVisibility) as Partial<Record<string, boolean>>
     return { ...DEFAULT_VISIBILITY, ...parsed }
   } catch {
     return DEFAULT_VISIBILITY
@@ -116,13 +115,43 @@ function loadStoredColumnOrder() {
   try {
     const storedOrder = window.localStorage.getItem(TABLE_ORDER_KEY)
     if (!storedOrder) return DEFAULT_ORDER
-    const parsed = JSON.parse(storedOrder) as ColumnKey[]
+    const parsed = JSON.parse(storedOrder) as string[]
     const allowedKeys = new Set(DEFAULT_ORDER)
-    const nextOrder = parsed.filter((key) => allowedKeys.has(key))
+    const nextOrder = parsed.filter((key): key is ColumnKey => allowedKeys.has(key as ColumnKey))
     const missing = DEFAULT_ORDER.filter((key) => !nextOrder.includes(key))
     return nextOrder.length > 0 ? [...nextOrder, ...missing] : DEFAULT_ORDER
   } catch {
     return DEFAULT_ORDER
+  }
+}
+
+function getMetadataIconState(document: Document) {
+  const state = getTableMetadataState(document)
+  if (state.label === 'Complete') {
+    return {
+      label: 'Complete',
+      Icon: CheckCheck,
+      className: 'border-emerald-200 bg-emerald-100 text-black shadow-[0_0_0_2px_rgba(16,185,129,0.12)]',
+    }
+  }
+  if (state.label === 'Missing DOI') {
+    return {
+      label: 'Missing DOI',
+      Icon: TriangleAlert,
+      className: 'border-amber-200 bg-amber-100 text-black shadow-[0_0_0_2px_rgba(245,158,11,0.12)]',
+    }
+  }
+  if (state.label === 'Fetch Possible') {
+    return {
+      label: 'Fetch Possible',
+      Icon: Search,
+      className: 'border-sky-200 bg-sky-100 text-black shadow-[0_0_0_2px_rgba(14,165,233,0.12)] hover:bg-sky-200',
+    }
+  }
+  return {
+    label: 'Missing',
+    Icon: CircleHelp,
+    className: 'border-red-200 bg-red-100 text-black shadow-[0_0_0_2px_rgba(239,68,68,0.12)]',
   }
 }
 
@@ -447,6 +476,52 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
         ? `/books/notes?id=${document.id}`
         : `/reader/view?id=${document.id}`
 
+  const getMetadataIconLabel = (label: string) => {
+    if (label === 'Complete') return t('common.complete')
+    if (label === 'Missing DOI') return t('libraries.missingDoi')
+    if (label === 'Fetch Possible') return t('documentTable.fetchPossible')
+    return t('common.missing')
+  }
+
+  const renderMetadataIconBadge = (doc: Document) => {
+    const metadataState = getMetadataIconState(doc)
+    const Icon = metadataState.Icon
+    const label = getMetadataIconLabel(metadataState.label)
+    const badge = (
+      <span
+        className={cn(
+          'flex h-5 w-5 items-center justify-center rounded-full border',
+          metadataState.className,
+        )}
+        title={label}
+        aria-label={label}
+      >
+        <Icon className="h-3 w-3 stroke-[2.5]" />
+      </span>
+    )
+
+    if (metadataState.label === 'Complete') {
+      return badge
+    }
+
+    const href = metadataState.label === 'Fetch Possible'
+      ? `/documents?id=${doc.id}&metadata=doi&autoSearchMetadata=1`
+      : `/documents?id=${doc.id}`
+
+    return (
+      <Link
+        href={href}
+        className="rounded-full transition-transform hover:scale-110"
+        data-selection-ignore="true"
+        title={label}
+        aria-label={label}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {badge}
+      </Link>
+    )
+  }
+
   const renderResizeHandle = (key: ColumnKey) => (
     <div
       role="presentation"
@@ -460,25 +535,29 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
       case 'favorite':
         return (
           <TableCell key={column.key}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => toggleFavorite(doc.id)}
-              className={cn(
-                'rounded-full transition-colors',
-                doc.favorite ? 'text-amber-400' : 'text-muted-foreground/30 hover:text-amber-400',
-              )}
-            >
-              <Star className="h-4 w-4" fill={doc.favorite ? 'currentColor' : 'none'} />
-            </Button>
+            <div className="flex items-center justify-center gap-1.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => toggleFavorite(doc.id)}
+                className={cn(
+                  'h-5 w-5 rounded-full p-0 transition-colors',
+                  doc.favorite ? 'bg-amber-100 text-amber-500 hover:bg-amber-100 hover:text-amber-500' : 'text-muted-foreground/30 hover:bg-amber-50 hover:text-amber-400',
+                )}
+                title={t('documentTable.favorite')}
+                aria-label={t('documentTable.favorite')}
+              >
+                <Star className="h-3.5 w-3.5" fill={doc.favorite ? 'currentColor' : 'none'} />
+              </Button>
+              {renderMetadataIconBadge(doc)}
+            </div>
           </TableCell>
         )
       case 'title':
         return (
           <TableCell key={column.key}>
             <Link href={getOpenHref(doc)} className="group/link flex items-start gap-2">
-              {doc.documentType === 'physical_book' ? <BookMarked className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" /> : <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
               <div className="min-w-0">
                 <div className="flex items-start gap-2">
                   <span className="block min-w-0 truncate font-medium text-foreground transition-colors group-hover/link:text-primary">
@@ -556,37 +635,6 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-          </TableCell>
-        )
-      case 'metadata':
-        return (
-          <TableCell key={column.key}>
-            {(() => {
-              const metadataState = getTableMetadataState(doc)
-              const isFetchPossible = metadataState.label === 'Fetch Possible'
-              return (
-                isFetchPossible ? (
-                  <Link
-                    href={`/documents?id=${doc.id}&metadata=doi&autoSearchMetadata=1`}
-                    className="inline-flex"
-                    data-selection-ignore="true"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <Badge className={cn('border-0 cursor-pointer transition-opacity hover:opacity-85', metadataState.className)}>
-                      {t('documentTable.fetchPossible')}
-                    </Badge>
-                  </Link>
-                ) : (
-                  <Badge className={cn('border-0', metadataState.className)}>
-                    {metadataState.label === 'Complete'
-                      ? t('common.complete')
-                      : metadataState.label === 'Missing DOI'
-                        ? t('libraries.missingDoi')
-                        : t('common.missing')}
-                  </Badge>
-                )
-              )
-            })()}
           </TableCell>
         )
       case 'comments':

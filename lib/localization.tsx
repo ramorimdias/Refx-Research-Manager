@@ -418,6 +418,7 @@ const translations = {
     },
     documentTable: {
       favorite: 'Favorite',
+      icons: 'Icons',
       title: 'Title',
       authors: 'Authors',
       tags: 'Tags',
@@ -1309,6 +1310,7 @@ const translations = {
     },
     documentTable: {
       favorite: 'Favorito',
+      icons: 'Ícones',
       title: 'Título',
       authors: 'Autores',
       tags: 'Tags',
@@ -2203,6 +2205,7 @@ const translations = {
     },
     documentTable: {
       favorite: 'Favori',
+      icons: 'Icônes',
       title: 'Titre',
       authors: 'Auteurs',
       tags: 'Tags',
