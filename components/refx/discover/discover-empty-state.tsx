@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Search, Telescope } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { useDocumentStore } from '@/lib/stores/document-store'
@@ -13,7 +14,11 @@ import { cn } from '@/lib/utils'
 
 const ALL_LIBRARIES_ID = '__all_libraries__'
 
-export function DiscoverEmptyState() {
+type DiscoverEmptyStateProps = {
+  onBack?: () => void
+}
+
+export function DiscoverEmptyState({ onBack }: DiscoverEmptyStateProps) {
   const t = useT()
   const documents = useDocumentStore((state) => state.documents)
   const libraries = useLibraryStore((state) => state.libraries)
@@ -70,7 +75,14 @@ export function DiscoverEmptyState() {
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden p-4 md:p-6">
-      <Card className="min-h-0 flex-1 border-dashed p-4 md:p-6">
+      <Card className="relative min-h-0 flex-1 border-dashed p-4 md:p-6">
+        {onBack ? (
+          <div className="absolute left-4 top-4 z-10 md:left-6 md:top-6">
+            <Button variant="outline" className="rounded-full bg-card/90 backdrop-blur" onClick={onBack}>
+              {t('discoverPage.backToHome')}
+            </Button>
+          </div>
+        ) : null}
         <div className="flex h-full min-h-0 flex-col items-center gap-5 text-center">
           <div className="relative flex h-24 w-24 items-center justify-center">
             <div className="discover-seed-icon-glow absolute rounded-full" />

@@ -24,11 +24,26 @@ import { useRuntimeState } from '@/lib/stores/runtime-store'
 import { useT } from '@/lib/localization'
 
 function formatNoteReference(note: repo.DbNote) {
-  const noteLabel = note.commentNumber ? `Note ${note.commentNumber}` : note.title || 'Note'
+  const noteLabel = formatNoteTitle(note)
   const pageLabel = note.pageNumber ? ` (p. ${note.pageNumber})` : ''
   const location = getNoteLocationLabel(note.locationHint)
   const locationLabel = location ? ` - ${location}` : ''
   return `${noteLabel}${pageLabel}${locationLabel}`
+}
+
+function formatNoteTitle(note: repo.DbNote) {
+  return note.commentNumber ? `Note ${note.commentNumber}` : note.title || 'Note'
+}
+
+function formatCompactNoteTimestamp(value: string | Date) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const year = String(date.getFullYear()).slice(-2)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${day}/${month}/${year} ${hours}:${minutes}`
 }
 
 function escapeHtml(value: string) {
@@ -81,12 +96,20 @@ function CommentsTourDemo() {
             </CardHeader>
             <CardContent className="space-y-3">
               {[
-                { title: 'Note 1 (p. 2)', text: 'Capture the key argument from the introduction.' },
-                { title: 'Note 2 (p. 4)', text: 'Highlight where methods and evidence are introduced.' },
+                { title: 'Note 1', page: 2, updatedAt: new Date('2026-04-21T10:20:00'), text: 'Capture the key argument from the introduction.' },
+                { title: 'Note 2', page: 4, updatedAt: new Date('2026-04-21T10:35:00'), text: 'Highlight where methods and evidence are introduced.' },
               ].map((note) => (
                 <div key={note.title} className="rounded-lg border p-3">
-                  <div className="text-sm font-medium">{note.title}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">{note.text}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-semibold">{note.title}</span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {formatCompactNoteTimestamp(note.updatedAt)}
+                      </span>
+                    </div>
+                    <Badge variant="outline">p. {note.page}</Badge>
+                  </div>
+                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{note.text}</div>
                   <div className="mt-3 flex justify-end">
                     <Button variant="outline" size="sm">Insert</Button>
                   </div>
@@ -463,9 +486,23 @@ function RealCommentsPage() {
   const insertNoteIntoComment = (note: repo.DbNote) => {
     editorRef.current?.focus()
 
-    const reference = escapeHtml(formatNoteReference(note))
+    const title = escapeHtml(formatNoteTitle(note))
+    const timestamp = escapeHtml(formatCompactNoteTimestamp(note.updatedAt))
+    const pageLabel = note.pageNumber ? `p. ${note.pageNumber}` : ''
+    const location = getNoteLocationLabel(note.locationHint)
+    const meta = [pageLabel, location].filter(Boolean).map(escapeHtml).join(' · ')
     const snippet = escapeHtml(note.content.trim() || 'No note text yet.').replaceAll('\n', '<br>')
-    const block = `<p><strong>${reference}</strong>: ${snippet}</p>`
+    const block = [
+      `<article data-refx-note-embed="true" data-note-id="${escapeHtml(note.id)}" contenteditable="false" style="margin: 0 0 12px; border: 1px solid color-mix(in oklab, currentColor 16%, transparent); border-radius: 12px; padding: 10px 12px; background: color-mix(in oklab, currentColor 4%, transparent);">`,
+      '<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px;">',
+      `<strong style="font-size: 0.92em;">${title}</strong>`,
+      `<span style="font-size: 0.75em; opacity: 0.68;">${timestamp}</span>`,
+      '</div>',
+      meta ? `<div style="font-size: 0.75em; opacity: 0.68; margin-bottom: 6px;">${meta}</div>` : '',
+      `<div style="font-size: 0.88em; line-height: 1.45; opacity: 0.86;">${snippet}</div>`,
+      '</article>',
+      '<p><br></p>',
+    ].join('')
 
     window.document.execCommand('insertHTML', false, block)
     syncDraftFromEditor()
@@ -582,14 +619,18 @@ function RealCommentsPage() {
                         className="w-full text-left"
                         onClick={() => setSelectedNoteId(note.id)}
                       >
-                        <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-medium">{formatNoteReference(note)}</div>
-                            <div className="line-clamp-3 text-xs text-muted-foreground">{note.content || 'No note text yet.'}</div>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="truncate text-sm font-semibold">{formatNoteTitle(note)}</span>
+                              <span className="shrink-0 text-[11px] text-muted-foreground">
+                                {formatCompactNoteTimestamp(note.updatedAt)}
+                              </span>
+                            </div>
+                            <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{note.content || 'No note text yet.'}</div>
                           </div>
                           {note.pageNumber ? <Badge variant="outline">p. {note.pageNumber}</Badge> : null}
                         </div>
-                        <div className="mt-2 text-xs text-muted-foreground">{new Date(note.updatedAt).toLocaleString()}</div>
                       </button>
                       <div className="mt-3 flex justify-end">
                         <Button variant="outline" size="sm" onClick={() => insertNoteIntoComment(note)}>
@@ -633,7 +674,12 @@ function RealCommentsPage() {
 
               {selectedNote ? (
                 <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-                  <div className="font-medium">{formatNoteReference(selectedNote)}</div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate font-semibold">{formatNoteTitle(selectedNote)}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatCompactNoteTimestamp(selectedNote.updatedAt)}
+                    </span>
+                  </div>
                   <div className="mt-1 text-muted-foreground">{selectedNote.content || 'No note text yet.'}</div>
                 </div>
               ) : null}

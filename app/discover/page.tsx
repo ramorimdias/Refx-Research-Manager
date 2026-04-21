@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { ReactFlowProvider } from 'reactflow'
-import { Rocket, Star, Telescope, Trash2 } from 'lucide-react'
+import { Orbit, Pencil, Rocket, Star, Telescope, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DiscoverEmptyState } from '@/components/refx/discover/discover-empty-state'
 import { DiscoverTimeline } from '@/components/refx/discover/discover-timeline'
@@ -22,6 +22,60 @@ import { cn } from '@/lib/utils'
 type DiscoverViewMode = 'home' | 'seed' | 'workspace'
 const CURRENT_UNSAVED_JOURNEY_ID = '__current_unsaved_journey__'
 const HOME_JOURNEY_PREVIEW_STEP_LIMIT = 5
+
+function formatUnsavedJourneyTimestamp() {
+  const date = new Date()
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const year = String(date.getFullYear()).slice(-2)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${day}/${month}/${year} ${hours}:${minutes}`
+}
+
+function SeedDiscoveryLoading() {
+  const t = useT()
+
+  return (
+    <div className="flex min-h-[360px] w-full flex-col items-center justify-center rounded-3xl border bg-card/90 p-8 text-center shadow-sm">
+      <div className="relative flex h-40 w-40 items-center justify-center">
+        <div className="absolute inset-5 rounded-full border border-dashed border-primary/25" />
+        <div className="absolute inset-0 rounded-full bg-primary/5 blur-2xl" />
+        <div className="relative z-10 flex h-20 w-20 items-center justify-center rounded-full border bg-background text-primary shadow-sm">
+          <Orbit className="h-10 w-10 animate-spin [animation-duration:3.8s]" />
+        </div>
+        <div className="discover-seed-rocket-orbit absolute inset-0">
+          <div className="absolute left-1/2 top-0 -translate-x-1/2">
+            <div className="flex h-11 w-11 items-center justify-center rounded-full border bg-card text-amber-500 shadow-lg">
+              <Rocket className="h-5 w-5 rotate-[50deg]" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="mt-5 space-y-1">
+        <div className="text-base font-semibold text-foreground">{t('discoverPage.loadingFirstStep')}</div>
+        <div className="text-sm text-muted-foreground">{t('discoverPage.loadingFirstStepDescription')}</div>
+      </div>
+      <style jsx>{`
+        .discover-seed-rocket-orbit {
+          animation: discover-seed-rocket-orbit 2.6s linear infinite;
+          transform-origin: center;
+          will-change: transform;
+        }
+
+        @keyframes discover-seed-rocket-orbit {
+          from {
+            transform: rotate(0deg);
+          }
+
+          to {
+            transform: rotate(360deg);
+          }
+        }
+      `}</style>
+    </div>
+  )
+}
 
 function DiscoverPageContent() {
   const t = useT()
@@ -44,10 +98,10 @@ function DiscoverPageContent() {
     setSelectedWork,
   } = useDiscoverActions()
   const [journeyName, setJourneyName] = useState('')
+  const [isEditingJourneyName, setIsEditingJourneyName] = useState(false)
   const [viewMode, setViewMode] = useState<DiscoverViewMode>('home')
-  const [saveFeedbackVisible, setSaveFeedbackVisible] = useState(false)
   const [journeyPendingDeleteId, setJourneyPendingDeleteId] = useState<string | null>(null)
-  const saveFeedbackTimeoutRef = useRef<number | null>(null)
+  const skipJourneyNameBlurRef = useRef(false)
   const lastOpenedDocumentIdRef = useRef<string | null>(null)
 
   const currentStep = activeStepIndex >= 0 ? activeJourney?.steps[activeStepIndex] ?? null : null
@@ -112,6 +166,10 @@ function DiscoverPageContent() {
     : 0
   const showFilterHint = Boolean(currentStep && currentStep.items.length > 50)
   const isSavedJourney = Boolean(activeJourney && savedJourneys.some((journey) => journey.id === activeJourney.id))
+  const normalizedJourneyName = journeyName.trim()
+  const activeJourneyName = activeJourney?.name.trim() ?? ''
+  const isJourneyNameDirty = Boolean(activeJourney && normalizedJourneyName !== activeJourneyName)
+  const visibleJourneyName = activeJourney?.name || t('discoverPage.defaultJourneyName')
   const homeJourneyEntries = useMemo(() => {
     const saved = [...savedJourneys].sort((left, right) => (
       new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
@@ -170,15 +228,8 @@ function DiscoverPageContent() {
       : <span>{t('discoverPage.currentStep')}</span>
 
   useEffect(() => {
-    return () => {
-      if (saveFeedbackTimeoutRef.current != null) {
-        window.clearTimeout(saveFeedbackTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  useEffect(() => {
     setJourneyName(activeJourney?.name ?? '')
+    setIsEditingJourneyName(false)
   }, [activeJourney?.id, activeJourney?.name])
 
   useEffect(() => {
@@ -193,23 +244,43 @@ function DiscoverPageContent() {
   }, [loadSeedDocument, resetDiscoverSession, searchParams])
 
   const handleSaveJourney = () => {
+    if (!activeJourney) return
     const fallbackLabel = sourceWork?.firstAuthorLabel
       ?? activeJourney?.steps[0]?.sourceWork.firstAuthorLabel
       ?? t('discoverPage.defaultJourneyName')
-    const savedName = journeyName || `${fallbackLabel} journey`
+    const savedName = normalizedJourneyName || `${fallbackLabel} journey`
     saveCurrentJourney(savedName)
-    setSaveFeedbackVisible(true)
-    if (saveFeedbackTimeoutRef.current != null) {
-      window.clearTimeout(saveFeedbackTimeoutRef.current)
-    }
-    saveFeedbackTimeoutRef.current = window.setTimeout(() => {
-      setSaveFeedbackVisible(false)
-    }, 1800)
+    setJourneyName(savedName)
+    setIsEditingJourneyName(false)
     toast.success(t('discoverPage.saveJourney'), {
       description: isSavedJourney
         ? t('discoverPage.journeyUpdatedDescription', { name: savedName })
         : t('discoverPage.journeySavedDescription', { name: savedName }),
     })
+  }
+
+  const handleStartNewJourney = () => {
+    if (activeJourney && !isSavedJourney) {
+      saveCurrentJourney(`Unsaved ${formatUnsavedJourneyTimestamp()} journey`)
+    }
+
+    resetDiscoverSession()
+    setJourneyName('')
+    setViewMode('seed')
+  }
+
+  const handleCommitJourneyName = () => {
+    if (skipJourneyNameBlurRef.current) {
+      skipJourneyNameBlurRef.current = false
+      return
+    }
+
+    if (isJourneyNameDirty || !isSavedJourney) {
+      handleSaveJourney()
+      return
+    }
+
+    setIsEditingJourneyName(false)
   }
 
   const handleDeleteJourney = (journeyId: string) => {
@@ -235,32 +306,23 @@ function DiscoverPageContent() {
           </div>
         </div>
 
-        <Card className="min-h-0 flex-1 p-4">
-          <div className="flex h-full min-h-0 flex-col gap-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                  <Rocket className="h-6 w-6" />
-                </div>
-                <div>
-                  <div className="text-lg font-semibold">{t('discoverPage.savedJourneys')}</div>
-                  <div className="text-sm text-muted-foreground">{t('discoverPage.savedJourneysDescription')}</div>
-                </div>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-4 rounded-2xl border border-border bg-card px-4 py-3 text-left transition hover:border-primary/40 hover:bg-accent/30"
+          onClick={handleStartNewJourney}
+        >
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                <Rocket className="h-6 w-6" />
               </div>
-              <Button
-                variant="outline"
-                className="rounded-full"
-                onClick={() => {
-                  resetDiscoverSession()
-                  setJourneyName('')
-                  setViewMode('seed')
-                }}
-              >
-                {t('discoverPage.startNewJourney')}
-              </Button>
+              <div className="min-w-0">
+                <div className="text-lg font-semibold">{t('discoverPage.startNewJourney')}</div>
+                <div className="text-sm text-muted-foreground">{t('discoverPage.emptyDescription')}</div>
+              </div>
             </div>
+        </button>
 
-            <div className="min-h-0 space-y-3 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               {homeJourneyEntries.length > 0 ? homeJourneyEntries.map(({ id, journey, isUnsavedCurrent }) => {
                 const isPendingDelete = journeyPendingDeleteId === id
                 const isActiveEntry = activeJourney?.id === journey.id || (isUnsavedCurrent && activeJourney && !isSavedJourney)
@@ -387,16 +449,14 @@ function DiscoverPageContent() {
                   {t('discoverPage.noSavedJourneys')}
                 </div>
               )}
-            </div>
-          </div>
-        </Card>
+        </div>
 
       </div>
     )
   }
 
   if (viewMode === 'seed' && !sourceWork) {
-    return <DiscoverEmptyState />
+    return <DiscoverEmptyState onBack={() => setViewMode('home')} />
   }
 
   if (viewMode === 'seed' && sourceWork && !activeJourney) {
@@ -435,7 +495,7 @@ function DiscoverPageContent() {
 
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           <div className="w-full max-w-xl">
-            <DiscoverRightPane work={sourceWork} />
+            {isLoading ? <SeedDiscoveryLoading /> : <DiscoverRightPane work={sourceWork} />}
           </div>
         </div>
 
@@ -449,39 +509,45 @@ function DiscoverPageContent() {
 
   return (
       <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-            <Telescope className="h-6 w-6" />
-          </div>
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight">{t('discoverPage.title')}</h1>
-            <p className="text-sm text-muted-foreground">{t('discoverPage.subtitle')}</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" className="rounded-full" onClick={() => setViewMode('home')}>
-            {t('discoverPage.backToHome')}
-          </Button>
-          <Input
-            value={journeyName}
-            onChange={(event) => setJourneyName(event.target.value)}
-            placeholder={isSavedJourney ? activeJourney?.name ?? t('discoverPage.saveJourneyPlaceholder') : t('discoverPage.saveJourneyPlaceholder')}
-            className="w-56"
-          />
-          <Button
-            onClick={handleSaveJourney}
-            className={cn(
-              'transition-all',
-              saveFeedbackVisible && 'bg-emerald-600 text-white hover:bg-emerald-600',
+      <div className="flex items-start justify-between gap-3">
+        <Button variant="outline" className="rounded-full" onClick={() => setViewMode('home')}>
+          {t('discoverPage.backToHome')}
+        </Button>
+        <div className="ml-auto flex min-w-0 items-center justify-end text-right">
+          <div className="min-w-0 space-y-1">
+            {isEditingJourneyName ? (
+              <Input
+                autoFocus
+                value={journeyName}
+                onChange={(event) => setJourneyName(event.target.value)}
+                onBlur={handleCommitJourneyName}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    handleCommitJourneyName()
+                  }
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    skipJourneyNameBlurRef.current = true
+                    setJourneyName(activeJourney?.name ?? '')
+                    setIsEditingJourneyName(false)
+                  }
+                }}
+                placeholder={t('discoverPage.saveJourneyPlaceholder')}
+                className="h-9 w-[min(28rem,70vw)] text-right text-lg font-semibold"
+              />
+            ) : (
+              <button
+                type="button"
+                className="group flex min-w-0 items-center justify-end gap-2 text-right"
+                onClick={() => setIsEditingJourneyName(true)}
+                title={t('discoverPage.saveName')}
+              >
+                <h1 className="truncate text-2xl font-semibold tracking-tight">{visibleJourneyName}</h1>
+                <Pencil className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
+              </button>
             )}
-          >
-            {saveFeedbackVisible
-              ? t('discoverPage.saved')
-              : isSavedJourney
-                ? t('discoverPage.changeName')
-                : t('discoverPage.saveJourney')}
-          </Button>
+          </div>
         </div>
       </div>
 

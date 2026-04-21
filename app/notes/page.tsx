@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ChevronDown, Clock3, FileText, Search, StickyNote } from 'lucide-react'
+import { ChevronDown, FileText, Search, SlidersHorizontal, StickyNote } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
@@ -20,10 +23,23 @@ import { useT } from '@/lib/localization'
 import { useDocumentStore } from '@/lib/stores/document-store'
 import { useLibraryStore } from '@/lib/stores/library-store'
 import { useRuntimeState } from '@/lib/stores/runtime-store'
+import type { Document, ReadingStage } from '@/lib/types'
 
-type SortMode = 'timestamp' | 'page'
+type SortMode = 'recent_notes' | 'last_opened'
+type ReadingStageFilter = 'all' | ReadingStage
 
 type AppNote = repo.DbNote
+
+function formatCompactNoteTimestamp(value: string | Date) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const day = String(date.getDate()).padStart(2, '0')
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const year = String(date.getFullYear()).slice(-2)
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${day}/${month}/${year} ${hours}:${minutes}`
+}
 
 function getNoteDocumentHref(note: AppNote, document?: { id: string; documentType: string } | null) {
   if (!document) return null
@@ -39,6 +55,21 @@ function getNoteDocumentHref(note: AppNote, document?: { id: string; documentTyp
   return `/reader/view?id=${document.id}${note.pageNumber ? `&page=${note.pageNumber}` : ''}`
 }
 
+function formatDocumentAuthorsYear(document?: Document | null) {
+  if (!document) return ''
+  const authors = document.authors.length > 0
+    ? document.authors.slice(0, 2).join(', ')
+    : ''
+  const authorLabel = document.authors.length > 2 ? `${authors} et al.` : authors
+  return [authorLabel, document.year ? String(document.year) : ''].filter(Boolean).join(', ')
+}
+
+function readingStageLabelKey(stage: ReadingStage) {
+  if (stage === 'reading') return 'common.reading'
+  if (stage === 'finished') return 'common.finished'
+  return 'common.unread'
+}
+
 export default function NotesPage() {
   const t = useT()
   const { notes, loadNotes, isDesktopApp } = useRuntimeState()
@@ -47,9 +78,12 @@ export default function NotesPage() {
   const activeLibraryId = useLibraryStore((state) => state.activeLibraryId)
   const [query, setQuery] = useState('')
   const [selectedLibraryId, setSelectedLibraryId] = useState<string>('all')
-  const [sortMode, setSortMode] = useState<SortMode>('timestamp')
+  const [selectedReadingStage, setSelectedReadingStage] = useState<ReadingStageFilter>('all')
+  const [sortMode, setSortMode] = useState<SortMode>('recent_notes')
+  const [sortNotesByPage, setSortNotesByPage] = useState(false)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  const [draftTitle, setDraftTitle] = useState('')
   const [draftContent, setDraftContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
 
@@ -76,12 +110,15 @@ export default function NotesPage() {
       if (selectedLibraryId !== 'all' && (!document || document.libraryId !== selectedLibraryId)) {
         return false
       }
+      if (selectedReadingStage !== 'all' && (!document || document.readingStage !== selectedReadingStage)) {
+        return false
+      }
 
       if (!normalizedQuery) return true
 
       return `${note.title} ${note.content} ${document?.title ?? ''}`.toLowerCase().includes(normalizedQuery)
     })
-  }, [documentsById, notes, query, selectedLibraryId])
+  }, [documentsById, notes, query, selectedLibraryId, selectedReadingStage])
 
   const groupedNotes = useMemo(() => {
     const groups = new Map<
@@ -89,6 +126,7 @@ export default function NotesPage() {
       {
         key: string
         label: string
+        document?: Document
         notes: AppNote[]
       }
     >()
@@ -96,24 +134,23 @@ export default function NotesPage() {
     for (const note of filteredNotes) {
       const document = note.documentId ? documentsById.get(note.documentId) : undefined
       const key = note.documentId ?? 'unlinked'
-        const label = document?.title ?? t('notesPage.unlinkedNotes')
+      const label = document?.title ?? t('notesPage.unlinkedNotes')
       const existing = groups.get(key)
 
       if (existing) {
         existing.notes.push(note)
       } else {
-        groups.set(key, { key, label, notes: [note] })
+        groups.set(key, { key, label, document, notes: [note] })
       }
     }
 
     const ordered = Array.from(groups.values()).map((group) => ({
       ...group,
       notes: [...group.notes].sort((left, right) => {
-        if (sortMode === 'page') {
+        if (sortNotesByPage) {
           const pageDifference = (left.pageNumber ?? Number.MAX_SAFE_INTEGER) - (right.pageNumber ?? Number.MAX_SAFE_INTEGER)
           if (pageDifference !== 0) return pageDifference
         }
-
         return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
       }),
     }))
@@ -123,14 +160,15 @@ export default function NotesPage() {
       const rightLead = right.notes[0]
       if (!leftLead || !rightLead) return left.label.localeCompare(right.label)
 
-      if (sortMode === 'page') {
-        const pageDifference = (leftLead.pageNumber ?? Number.MAX_SAFE_INTEGER) - (rightLead.pageNumber ?? Number.MAX_SAFE_INTEGER)
-        if (pageDifference !== 0) return pageDifference
+      if (sortMode === 'last_opened') {
+        const leftOpened = left.document?.lastOpenedAt?.getTime() ?? 0
+        const rightOpened = right.document?.lastOpenedAt?.getTime() ?? 0
+        if (leftOpened !== rightOpened) return rightOpened - leftOpened
       }
 
       return new Date(rightLead.updatedAt).getTime() - new Date(leftLead.updatedAt).getTime()
     })
-  }, [documentsById, filteredNotes, sortMode, t])
+  }, [documentsById, filteredNotes, sortMode, sortNotesByPage, t])
 
   const flatVisibleNotes = useMemo(
     () => groupedNotes.flatMap((group) => group.notes),
@@ -159,8 +197,9 @@ export default function NotesPage() {
   )
 
   useEffect(() => {
+    setDraftTitle(selectedNote?.title ?? '')
     setDraftContent(selectedNote?.content ?? '')
-  }, [selectedNote?.id, selectedNote?.content])
+  }, [selectedNote?.id, selectedNote?.title, selectedNote?.content])
 
   const handleSave = async () => {
     if (!selectedNote || !isDesktopApp) return
@@ -168,7 +207,7 @@ export default function NotesPage() {
     setIsSaving(true)
     try {
       await repo.updateNote(selectedNote.id, {
-        title: selectedNote.title.trim() || t('notesPage.untitledNote'),
+        title: draftTitle.trim() || t('notesPage.untitledNote'),
         content: draftContent,
         pageNumber: selectedNote.pageNumber,
       })
@@ -180,14 +219,14 @@ export default function NotesPage() {
 
   useEffect(() => {
     if (!selectedNote || !isDesktopApp) return
-    if (draftContent === selectedNote.content) return
+    if (draftTitle === selectedNote.title && draftContent === selectedNote.content) return
 
     const timeoutId = window.setTimeout(() => {
       void handleSave()
     }, 500)
 
     return () => window.clearTimeout(timeoutId)
-  }, [draftContent, isDesktopApp, selectedNote])
+  }, [draftTitle, draftContent, isDesktopApp, selectedNote])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 p-4 md:p-6">
@@ -204,39 +243,83 @@ export default function NotesPage() {
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[384px_minmax(0,1fr)]">
         <Card className="flex min-h-0 flex-col" data-tour-id="notes-list">
           <CardHeader>
-            <CardTitle className="text-lg">{t('notesPage.title')}</CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-lg">{t('notesPage.title')}</CardTitle>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="icon" className="shrink-0" title={t('notesPage.filters')}>
+                    <SlidersHorizontal className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-80 space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">{t('notesPage.documentStatus')}</p>
+                    <Select value={selectedReadingStage} onValueChange={(value) => setSelectedReadingStage(value as ReadingStageFilter)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">{t('searchPage.anyStage')}</SelectItem>
+                        <SelectItem value="unread">{t(readingStageLabelKey('unread'))}</SelectItem>
+                        <SelectItem value="reading">{t(readingStageLabelKey('reading'))}</SelectItem>
+                        <SelectItem value="finished">{t(readingStageLabelKey('finished'))}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">{t('notesPage.documentSort')}</p>
+                    <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="recent_notes">{t('notesPage.sortRecentNotes')}</SelectItem>
+                        <SelectItem value="last_opened">{t('notesPage.sortOpenedDocuments')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <label className="flex items-start gap-2 rounded-lg border border-border/70 px-3 py-2 text-sm text-muted-foreground">
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={sortNotesByPage}
+                      onCheckedChange={(checked) => setSortNotesByPage(Boolean(checked))}
+                    />
+                    <span>
+                      <span className="block font-medium text-foreground">{t('notesPage.sortNotesByPage')}</span>
+                      <span className="block text-xs">{t('notesPage.sortNotesByPageHelp')}</span>
+                    </span>
+                  </label>
+                </PopoverContent>
+              </Popover>
+            </div>
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-          <div className="relative">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input className="pl-8" placeholder={t('notesPage.searchNotes')} value={query} onChange={(event) => setQuery(event.target.value)} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={selectedLibraryId} onValueChange={setSelectedLibraryId}>
-              <SelectTrigger>
-                <SelectValue placeholder={t('notesPage.allLibraries')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t('notesPage.allLibraries')}</SelectItem>
-                {libraries.map((library) => (
-                  <SelectItem key={library.id} value={library.id}>
-                    {library.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="timestamp">{t('notesPage.sortTimestamp')}</SelectItem>
-                <SelectItem value="page">{t('notesPage.sortPage')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="flex gap-2">
+              <Select value={selectedLibraryId} onValueChange={setSelectedLibraryId}>
+                <SelectTrigger className="w-[150px] shrink-0">
+                  <SelectValue placeholder={t('notesPage.allLibraries')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('notesPage.allLibraries')}</SelectItem>
+                  {libraries.map((library) => (
+                    <SelectItem key={library.id} value={library.id}>
+                      {library.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="relative min-w-0 flex-1">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  className="pl-8"
+                  placeholder={t('notesPage.searchNotes')}
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+            </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {groupedNotes.map((group) => (
@@ -249,7 +332,12 @@ export default function NotesPage() {
               <CollapsibleTrigger className="flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1 text-left">
                 <div className="flex min-w-0 items-center gap-2">
                   <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${(openGroups[group.key] ?? false) ? 'rotate-180' : ''}`} />
-                  <h3 className="truncate text-sm font-semibold">{group.label}</h3>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold">{group.label}</h3>
+                    {(openGroups[group.key] ?? false) && formatDocumentAuthorsYear(group.document) ? (
+                      <p className="truncate text-xs text-muted-foreground">{formatDocumentAuthorsYear(group.document)}</p>
+                    ) : null}
+                  </div>
                 </div>
                 <Badge variant="secondary">{group.notes.length}</Badge>
               </CollapsibleTrigger>
@@ -271,31 +359,32 @@ export default function NotesPage() {
                           className="w-full text-left"
                           onClick={() => setSelectedNoteId(note.id)}
                         >
-                          <div className="flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <div className="truncate text-sm font-medium">{note.title || t('notesPage.untitledNote')}</div>
-                              <div className="line-clamp-2 text-xs text-muted-foreground">{note.content || t('notesPage.noContent')}</div>
+                              <div className="flex min-w-0 items-center gap-2">
+                                <span className="truncate text-sm font-semibold text-foreground">
+                                  {note.title || t('notesPage.untitledNote')}
+                                </span>
+                                <span className="shrink-0 text-[11px] text-muted-foreground">
+                                  {formatCompactNoteTimestamp(note.updatedAt)}
+                                </span>
+                              </div>
+                              <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                                {note.content || t('notesPage.noContent')}
+                              </div>
                             </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              {noteHref ? (
-                                <Link
-                                  href={noteHref}
-                                  className="inline-flex items-center rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/10"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  {t('notesPage.seeInDocument')}
-                                  {note.pageNumber ? ` p.${note.pageNumber}` : ''}
-                                </Link>
-                              ) : null}
-                            </div>
+                            {noteHref ? (
+                              <Link
+                                href={noteHref}
+                                className="shrink-0 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/10"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {t('notesPage.seeInDocument')}
+                                {note.pageNumber ? ` p.${note.pageNumber}` : ''}
+                              </Link>
+                            ) : null}
                           </div>
                         </button>
-                        <div className="mt-2 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <Clock3 className="h-3.5 w-3.5" />
-                            {new Date(note.updatedAt).toLocaleString()}
-                          </div>
-                        </div>
                       </div>
                     )
                   })()
@@ -319,9 +408,12 @@ export default function NotesPage() {
           <div className="flex h-full flex-col space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <div className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground">
-                  <span className="block truncate">{selectedNote.title || t('notesPage.untitledNote')}</span>
-                </div>
+                <Input
+                  className="h-auto rounded-xl border-border/70 bg-muted/40 px-3 py-2 text-base font-semibold text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:border-primary/40 focus-visible:bg-background focus-visible:ring-primary/15"
+                  value={draftTitle}
+                  placeholder={t('notesPage.untitledNote')}
+                  onChange={(event) => setDraftTitle(event.target.value)}
+                />
                 <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   {selectedDocument ? (
                     <>
