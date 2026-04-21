@@ -3,10 +3,11 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { ArrowLeft, Bold, BookMarked, FileText, Italic, List, Save, Underline } from 'lucide-react'
+import { ArrowLeft, Bold, BookMarked, FileText, Italic, List, MessageSquareText, Save, Search, SquareArrowOutUpRight, Underline } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -16,8 +17,11 @@ import {
 } from '@/components/ui/select'
 import * as repo from '@/lib/repositories/local-db'
 import { getNoteLocationLabel } from '@/lib/services/document-note-anchor-service'
+import { openDetachedReaderWindow } from '@/lib/services/reader-window-service'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
+import { useLibraryStore } from '@/lib/stores/library-store'
 import { useRuntimeState } from '@/lib/stores/runtime-store'
+import { useT } from '@/lib/localization'
 
 function formatNoteReference(note: repo.DbNote) {
   const noteLabel = note.commentNumber ? `Note ${note.commentNumber}` : note.title || 'Note'
@@ -114,13 +118,20 @@ function CommentsTourDemo() {
 }
 
 function RealCommentsPage() {
+  const t = useT()
   const params = useSearchParams()
   const id = params.get('id') ?? ''
+  const returnTo = params.get('returnTo')
   const documents = useDocumentStore((state) => state.documents)
+  const libraries = useLibraryStore((state) => state.libraries)
+  const activeLibraryId = useLibraryStore((state) => state.activeLibraryId)
   const { notes, loadNotes, refreshData, isDesktopApp } = useRuntimeState()
   const { setActiveDocument } = useDocumentActions()
   const editorRef = useRef<HTMLDivElement | null>(null)
   const currentDocument = useMemo(() => documents.find((entry) => entry.id === id) ?? null, [documents, id])
+  const [commentSearch, setCommentSearch] = useState('')
+  const [newCommentLibraryId, setNewCommentLibraryId] = useState<string>('all')
+  const [newCommentSearch, setNewCommentSearch] = useState('')
   const [draft, setDraft] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
@@ -150,6 +161,11 @@ function RealCommentsPage() {
   }, [loadNotes])
 
   useEffect(() => {
+    if (!activeLibraryId) return
+    setNewCommentLibraryId(activeLibraryId)
+  }, [activeLibraryId])
+
+  useEffect(() => {
     if (!currentDocument) return
     setActiveDocument(currentDocument.id)
     const nextDraft = currentDocument.commentaryText ?? ''
@@ -169,6 +185,219 @@ function RealCommentsPage() {
       setSelectedNoteId(documentNotes[0]?.id ?? null)
     }
   }, [documentNotes, selectedNoteId])
+
+  const documentsWithComments = useMemo(() => {
+    const normalized = commentSearch.trim().toLowerCase()
+
+    return documents
+      .filter((document) => htmlToPlainText(document.commentaryText ?? '').length > 0)
+      .filter((document) => {
+        if (!normalized) return true
+        return [
+          document.title,
+          document.authors.join(' '),
+          document.year ? String(document.year) : '',
+          htmlToPlainText(document.commentaryText ?? ''),
+        ].join(' ').toLowerCase().includes(normalized)
+      })
+      .sort((left, right) => (
+        (right.commentaryUpdatedAt?.getTime() ?? 0) - (left.commentaryUpdatedAt?.getTime() ?? 0)
+      ))
+  }, [commentSearch, documents])
+
+  const documentsForNewComment = useMemo(() => {
+    const normalized = newCommentSearch.trim().toLowerCase()
+
+    return documents
+      .filter((document) => newCommentLibraryId === 'all' || document.libraryId === newCommentLibraryId)
+      .filter((document) => document.documentType !== 'my_work')
+      .filter((document) => {
+        if (!normalized) return true
+        const library = libraries.find((item) => item.id === document.libraryId)
+        return [
+          document.title,
+          document.authors.join(' '),
+          document.year ? String(document.year) : '',
+          document.doi ?? '',
+          library?.name ?? '',
+        ].join(' ').toLowerCase().includes(normalized)
+      })
+      .sort((left, right) => left.title.localeCompare(right.title))
+  }, [documents, libraries, newCommentLibraryId, newCommentSearch])
+
+  const noteCountByDocumentId = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const note of notes) {
+      if (!note.documentId) continue
+      counts.set(note.documentId, (counts.get(note.documentId) ?? 0) + 1)
+    }
+    return counts
+  }, [notes])
+
+  const libraryById = useMemo(
+    () => new Map(libraries.map((library) => [library.id, library])),
+    [libraries],
+  )
+
+  if (!id) {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-4 p-4 md:p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <MessageSquareText className="h-6 w-6" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight">{t('commentsPage.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('commentsPage.subtitle')}</p>
+          </div>
+        </div>
+
+        <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <Card className="flex min-h-0 flex-col">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-3 text-lg">
+                <span>{t('commentsPage.myComments')}</span>
+                <Badge variant="secondary">{documentsWithComments.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={commentSearch}
+                  onChange={(event) => setCommentSearch(event.target.value)}
+                  placeholder={t('commentsPage.searchComments')}
+                  className="pl-9"
+                />
+              </div>
+
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+                {documentsWithComments.map((document) => {
+                  const library = libraryById.get(document.libraryId)
+                  const preview = htmlToPlainText(document.commentaryText ?? '')
+
+                  return (
+                    <Link key={document.id} href={`/comments?id=${document.id}&returnTo=comments`} className="block">
+                      <div className="rounded-2xl border bg-card px-4 py-3 transition hover:border-primary/40 hover:bg-accent/30">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="line-clamp-2 text-sm font-medium">{document.title}</div>
+                            <div className="mt-1 truncate text-xs text-muted-foreground">
+                              {document.authors.join(', ') || t('searchPage.unknownAuthor')}
+                              {document.year ? ` - ${document.year}` : ''}
+                            </div>
+                          </div>
+                          {library ? (
+                            <span
+                              className="flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[11px] font-medium"
+                              style={{
+                                borderColor: `${library.color}66`,
+                                backgroundColor: `${library.color}18`,
+                                color: library.color,
+                              }}
+                            >
+                              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: library.color }} />
+                              {library.name}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                          {preview || t('commentsPage.noCommentPreview')}
+                        </div>
+                        {document.commentaryUpdatedAt ? (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            {t('notesPage.updated', { value: document.commentaryUpdatedAt.toLocaleString() })}
+                          </div>
+                        ) : null}
+                      </div>
+                    </Link>
+                  )
+                })}
+
+                {documentsWithComments.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+                    {t('commentsPage.noComments')}
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="flex min-h-0 flex-col">
+            <CardHeader>
+              <CardTitle className="text-lg">{t('commentsPage.startNewComment')}</CardTitle>
+            </CardHeader>
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+              <Select value={newCommentLibraryId} onValueChange={setNewCommentLibraryId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t('notesPage.allLibraries')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('notesPage.allLibraries')}</SelectItem>
+                  {libraries.map((library) => (
+                    <SelectItem key={library.id} value={library.id}>
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: library.color }} />
+                        {library.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={newCommentSearch}
+                  onChange={(event) => setNewCommentSearch(event.target.value)}
+                  placeholder={t('commentsPage.searchDocuments')}
+                  className="pl-9"
+                />
+              </div>
+
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+                {documentsForNewComment.map((document) => {
+                  const library = libraryById.get(document.libraryId)
+                  const noteCount = noteCountByDocumentId.get(document.id) ?? 0
+
+                  return (
+                    <Link key={document.id} href={`/comments?id=${document.id}&returnTo=comments`} className="block">
+                      <div className="rounded-2xl border bg-card px-4 py-3 transition hover:border-primary/40 hover:bg-accent/30">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="line-clamp-2 text-sm font-medium">{document.title}</div>
+                            <div className="mt-1 truncate text-xs text-muted-foreground">
+                              {document.authors.join(', ') || t('searchPage.unknownAuthor')}
+                              {document.year ? ` - ${document.year}` : ''}
+                            </div>
+                          </div>
+                          <Badge variant={noteCount > 0 ? 'secondary' : 'outline'} className="shrink-0">
+                            {t('commentsPage.notesCount', { count: noteCount })}
+                          </Badge>
+                        </div>
+                        {library ? (
+                          <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: library.color }} />
+                            {library.name}
+                          </div>
+                        ) : null}
+                      </div>
+                    </Link>
+                  )
+                })}
+
+                {documentsForNewComment.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    {t('commentsPage.noDocuments')}
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
 
   if (!currentDocument) {
     return <div className="p-6">Document not found.</div>
@@ -257,11 +486,22 @@ function RealCommentsPage() {
     }
   }
 
+  const handleOpenDocumentFromComment = async () => {
+    if (currentDocument.documentType !== 'pdf') return
+
+    await openDetachedReaderWindow({
+      documentId: currentDocument.id,
+      title: currentDocument.title,
+      page: currentDocument.lastReadPage || undefined,
+    })
+  }
+
   const openHref = currentDocument.documentType === 'my_work'
     ? `/documents?id=${currentDocument.id}`
     : currentDocument.documentType === 'physical_book'
       ? `/books/notes?id=${currentDocument.id}`
       : `/reader/view?id=${currentDocument.id}`
+  const backHref = returnTo === 'comments' ? '/comments' : '/libraries'
   const plainTextLength = htmlToPlainText(draft).length
 
   return (
@@ -270,9 +510,9 @@ function RealCommentsPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Button asChild variant="outline" size="sm">
-              <Link href="/libraries">
+              <Link href={backHref}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Back to Library
+                Back
               </Link>
             </Button>
             <div>
@@ -285,15 +525,20 @@ function RealCommentsPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button asChild variant="outline">
-              <Link href={openHref}>
-                {currentDocument.documentType === 'physical_book'
-                  ? 'Open Notes'
-                  : currentDocument.documentType === 'my_work'
-                    ? 'Open Details'
-                    : 'Open Reader'}
-              </Link>
-            </Button>
+            {currentDocument.documentType === 'pdf' ? (
+              <Button variant="outline" onClick={() => void handleOpenDocumentFromComment()}>
+                <SquareArrowOutUpRight className="mr-2 h-4 w-4" />
+                Open Reader
+              </Button>
+            ) : (
+              <Button asChild variant="outline">
+                <Link href={openHref}>
+                  {currentDocument.documentType === 'physical_book'
+                    ? 'Open Notes'
+                    : 'Open Details'}
+                </Link>
+              </Button>
+            )}
             <Button onClick={() => void handleSave()} disabled={!hasPendingChanges || isSaving || !isDesktopApp}>
               <Save className="mr-2 h-4 w-4" />
               {isSaving ? 'Saving...' : 'Save Comment'}

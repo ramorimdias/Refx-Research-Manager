@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ChevronDown, Clock3, FileText, Search } from 'lucide-react'
+import { ChevronDown, Clock3, FileText, Search, StickyNote } from 'lucide-react'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -189,9 +190,23 @@ export default function NotesPage() {
   }, [draftContent, isDesktopApp, selectedNote])
 
   return (
-    <div className="flex h-full">
-      <div className="flex w-96 flex-col border-r" data-tour-id="notes-list">
-        <div className="space-y-3 border-b p-4">
+    <div className="flex h-full min-h-0 flex-col gap-4 p-4 md:p-6">
+      <div className="flex items-center gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <StickyNote className="h-6 w-6" />
+        </div>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">{t('notesPage.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('notesPage.subtitle')}</p>
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[384px_minmax(0,1fr)]">
+        <Card className="flex min-h-0 flex-col" data-tour-id="notes-list">
+          <CardHeader>
+            <CardTitle className="text-lg">{t('notesPage.title')}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input className="pl-8" placeholder={t('notesPage.searchNotes')} value={query} onChange={(event) => setQuery(event.target.value)} />
@@ -222,9 +237,8 @@ export default function NotesPage() {
               </SelectContent>
             </Select>
           </div>
-        </div>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {groupedNotes.map((group) => (
             <Collapsible
               key={group.key}
@@ -249,7 +263,7 @@ export default function NotesPage() {
                       <div
                         key={note.id}
                         className={`rounded-lg border p-3 transition ${
-                          selectedNoteId === note.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/40'
+                          selectedNoteId === note.id ? 'border-primary/40 bg-primary/5' : 'hover:border-primary/40 hover:bg-accent/30'
                         }`}
                       >
                         <button
@@ -296,9 +310,11 @@ export default function NotesPage() {
             </div>
           )}
         </div>
-      </div>
+          </CardContent>
+        </Card>
 
-      <div className="flex min-w-0 flex-1 flex-col p-4" data-tour-id="notes-editor">
+      <Card className="flex min-w-0 flex-col" data-tour-id="notes-editor">
+        <CardContent className="min-h-0 flex-1 p-4">
         {selectedNote ? (
           <div className="flex h-full flex-col space-y-4">
             <div className="flex items-start justify-between gap-4">
@@ -338,6 +354,8 @@ export default function NotesPage() {
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground">{t('notesPage.selectNote')}</div>
         )}
+        </CardContent>
+      </Card>
       </div>
     </div>
   )

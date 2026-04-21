@@ -224,18 +224,23 @@ function DiscoverPageContent() {
 
   if (viewMode === 'home') {
     return (
-      <div className="relative mx-auto flex h-full max-w-6xl min-h-0 flex-col gap-6 overflow-hidden p-6">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{t('discoverPage.title')}</h1>
-          <p className="text-sm text-muted-foreground">{t('discoverPage.subtitle')}</p>
+      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <Telescope className="h-6 w-6" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight">{t('discoverPage.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('discoverPage.subtitle')}</p>
+          </div>
         </div>
 
-        <Card className="min-h-0 flex-1 rounded-[32px] border bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.96)_100%)] p-6 shadow-sm dark:border-slate-800 dark:bg-[linear-gradient(180deg,rgba(15,23,42,0.96)_0%,rgba(2,6,23,0.94)_100%)]">
-          <div className="flex h-full min-h-0 flex-col gap-5">
+        <Card className="min-h-0 flex-1 p-4">
+          <div className="flex h-full min-h-0 flex-col gap-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <Telescope className="h-6 w-6" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <Rocket className="h-6 w-6" />
                 </div>
                 <div>
                   <div className="text-lg font-semibold">{t('discoverPage.savedJourneys')}</div>
@@ -243,6 +248,8 @@ function DiscoverPageContent() {
                 </div>
               </div>
               <Button
+                variant="outline"
+                className="rounded-full"
                 onClick={() => {
                   resetDiscoverSession()
                   setJourneyName('')
@@ -263,10 +270,10 @@ function DiscoverPageContent() {
                   <div
                     key={id}
                     className={cn(
-                      'rounded-[28px] border px-5 py-4 transition',
+                      'rounded-2xl border px-4 py-3 transition',
                       isActiveEntry
-                        ? 'border-primary/30 bg-primary/5 shadow-sm dark:border-primary/40 dark:bg-primary/10'
-                        : 'border-border bg-background/90 hover:border-primary/30 hover:bg-primary/5 dark:bg-slate-950/70 dark:hover:bg-primary/10',
+                        ? 'border-primary/40 bg-primary/5 shadow-sm'
+                        : 'border-border bg-card hover:border-primary/40 hover:bg-accent/30',
                     )}
                   >
                     <div className="flex items-start justify-between gap-4">
@@ -283,14 +290,6 @@ function DiscoverPageContent() {
                         className="min-w-0 flex-1 text-left"
                       >
                         <div className="flex items-center gap-2">
-                          <div className={cn(
-                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
-                            isUnsavedCurrent
-                              ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-400/10 dark:text-amber-200'
-                              : 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-400/10 dark:text-sky-200',
-                          )}>
-                            {isUnsavedCurrent ? <Telescope className="h-4 w-4" /> : <Rocket className="h-4 w-4" />}
-                          </div>
                           <div className="font-medium">{journey.name}</div>
                           {isUnsavedCurrent ? (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-400/15 dark:text-amber-200">
@@ -384,7 +383,7 @@ function DiscoverPageContent() {
                   </div>
                 )
               }) : (
-                <div className="rounded-[28px] border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                <div className="rounded-2xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
                   {t('discoverPage.noSavedJourneys')}
                 </div>
               )}
@@ -402,18 +401,24 @@ function DiscoverPageContent() {
 
   if (viewMode === 'seed' && sourceWork && !activeJourney) {
     return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-6">
+      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{t('discoverPage.title')}</h1>
-            <p className="text-sm text-muted-foreground">{t('discoverPage.seedPreviewDescription')}</p>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Telescope className="h-6 w-6" />
+            </div>
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-tight">{t('discoverPage.title')}</h1>
+              <p className="text-sm text-muted-foreground">{t('discoverPage.seedPreviewDescription')}</p>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setViewMode('home')}>
+            <Button variant="outline" className="rounded-full" onClick={() => setViewMode('home')}>
               {t('discoverPage.backToHome')}
             </Button>
             <Button
               variant="outline"
+              className="rounded-full"
               onClick={() => {
                 resetDiscoverSession()
                 setViewMode('seed')
@@ -443,14 +448,19 @@ function DiscoverPageContent() {
   }
 
   return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-6">
+      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t('discoverPage.title')}</h1>
-          <p className="text-sm text-muted-foreground">{t('discoverPage.subtitle')}</p>
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <Telescope className="h-6 w-6" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight">{t('discoverPage.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('discoverPage.subtitle')}</p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => setViewMode('home')}>
+          <Button variant="outline" className="rounded-full" onClick={() => setViewMode('home')}>
             {t('discoverPage.backToHome')}
           </Button>
           <Input

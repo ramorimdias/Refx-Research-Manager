@@ -25,14 +25,14 @@ export function DiscoverTimeline({
   }, [activeStepIndex])
 
   return (
-    <div ref={containerRef} className="flex items-center gap-3 overflow-auto rounded-2xl border bg-background/90 px-4 py-3">
+    <div ref={containerRef} className="flex items-center gap-3 overflow-auto rounded-xl border bg-card px-4 py-3">
       <button
         type="button"
         onClick={() => onOpenStep(-1)}
         data-discover-timeline-step={-1}
         className={cn(
           'relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition',
-          activeStepIndex === -1 ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-muted-foreground hover:border-primary/40',
+          activeStepIndex === -1 ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:bg-accent/30',
         )}
       >
         <Star className="h-4 w-4" />
@@ -52,7 +52,7 @@ export function DiscoverTimeline({
               data-discover-timeline-step={index}
               className={cn(
                 'relative flex h-10 min-w-10 shrink-0 items-center justify-center rounded-full border px-3 text-sm font-semibold transition',
-                activeStepIndex === index ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background text-muted-foreground hover:border-primary/40',
+                activeStepIndex === index ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:bg-accent/30',
               )}
             >
               {index + 1}

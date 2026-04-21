@@ -49,7 +49,7 @@ export function DiscoverRightPane({
 
   if (!work) {
     return (
-      <div className="flex h-full items-center justify-center rounded-[28px] border bg-card/95 p-4 text-sm text-muted-foreground">
+      <div className="flex h-full items-center justify-center rounded-xl border bg-card p-4 text-sm text-muted-foreground">
         {t('discoverPage.selectWork')}
       </div>
     )
@@ -96,7 +96,7 @@ export function DiscoverRightPane({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-[28px] border bg-card/95">
+    <div className="flex h-full min-h-0 flex-col rounded-xl border bg-card">
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -151,7 +151,7 @@ export function DiscoverRightPane({
           </div>
         ) : null}
 
-        <div className="rounded-2xl border bg-background/80">
+        <div className="rounded-2xl border bg-muted/40">
           <button
             type="button"
             onClick={() => setIsAbstractOpen((current) => !current)}
@@ -176,8 +176,8 @@ export function DiscoverRightPane({
             {t(activeJourney ? 'discoverPage.chooseWhereToDiscover' : 'discoverPage.chooseWhereToStart')}
           </div>
           {pendingAdvanceMode ? (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3 dark:border-amber-500/30 dark:bg-amber-400/10">
-              <div className="text-sm font-medium text-amber-900 dark:text-amber-100">
+            <div className="rounded-2xl border border-amber-300/50 bg-amber-400/10 p-3">
+              <div className="text-sm font-medium text-amber-800 dark:text-amber-200">
                 {t('discoverPage.branchWarning')}
               </div>
               <div className="mt-3 flex gap-2">

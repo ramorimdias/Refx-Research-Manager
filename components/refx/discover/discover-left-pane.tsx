@@ -43,7 +43,7 @@ export function DiscoverLeftPane({
   }, [hoveredWorkId])
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-[28px] border bg-card/95 p-4">
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-hidden rounded-xl border bg-card p-4">
       <div className="space-y-1">
         <div className="text-lg font-semibold leading-tight">{label}</div>
         <div className="text-sm text-muted-foreground">{formatDiscoverFilterSummary(filters, locale)}</div>
@@ -52,7 +52,7 @@ export function DiscoverLeftPane({
         <button
           type="button"
           onClick={onFilterHintClick}
-          className="rounded-2xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-left text-sm text-amber-900 transition hover:border-amber-300 hover:bg-amber-50 dark:border-amber-500/30 dark:bg-amber-400/10 dark:text-amber-100 dark:hover:border-amber-400/40 dark:hover:bg-amber-400/15"
+          className="rounded-2xl border border-amber-300/50 bg-amber-400/10 px-3 py-2 text-left text-sm text-amber-800 transition hover:border-amber-400/60 hover:bg-amber-400/15 dark:text-amber-200"
         >
           {t('discoverPage.largeStepHint')}
         </button>

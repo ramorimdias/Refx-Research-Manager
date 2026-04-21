@@ -544,7 +544,7 @@ export function DiscoverMap({
   }
 
   return (
-    <div ref={containerRef} className="relative h-full min-h-[620px] overflow-hidden rounded-[28px] border bg-card/95 dark:border-slate-800 dark:bg-slate-950/95">
+    <div ref={containerRef} className="relative h-full min-h-[620px] overflow-hidden rounded-xl border bg-card">
       <div
         className={cn(
           'absolute inset-0 transform-gpu will-change-transform',

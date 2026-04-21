@@ -17,7 +17,7 @@ export function DiscoverFilters({
   const t = useT()
 
   return (
-    <div className="rounded-2xl border bg-background/90 p-3">
+    <div className="rounded-2xl border bg-muted/40 p-3">
       <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
         {t('discoverPage.filters')}
       </div>

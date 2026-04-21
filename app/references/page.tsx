@@ -7,6 +7,7 @@ import {
   BookOpen,
   Check,
   Copy,
+  FileInput,
   GripVertical,
   Loader2,
   Pencil,
@@ -50,6 +51,7 @@ import {
   parseAuthorsInput,
   seedReferenceFromDocument,
 } from '@/lib/services/work-reference-service'
+import { parseBibtexReferences, type ImportedReferenceDraft } from '@/lib/services/bibtex-reference-import-service'
 import { useLocale, useT } from '@/lib/localization'
 import { cn } from '@/lib/utils'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
@@ -73,6 +75,7 @@ type ReferenceFormState = {
 }
 
 type BibliographySortMode = 'user' | 'title' | 'author' | 'year'
+type ReferenceImportProvider = ImportedReferenceDraft['sourceProvider']
 
 const DEFAULT_REFERENCE_FORM: ReferenceFormState = {
   type: 'article',
@@ -95,6 +98,12 @@ const CITATION_STYLES: Array<{ value: CitationStyle; label: string }> = [
   { value: 'apa', label: 'APA' },
   { value: 'mla', label: 'MLA' },
   { value: 'chicago', label: 'Chicago' },
+]
+
+const REFERENCE_IMPORT_PROVIDERS: Array<{ value: ReferenceImportProvider; label: string }> = [
+  { value: 'mendeley', label: 'Mendeley' },
+  { value: 'endnote', label: 'EndNote' },
+  { value: 'paperpile', label: 'Paperpile' },
 ]
 
 function isManualReferenceType(type: ReferenceType) {
@@ -157,6 +166,10 @@ export default function ReferencesPage() {
   const [isUpdatingWorkMetadata, setIsUpdatingWorkMetadata] = useState(false)
   const [isEditingSelectedWork, setIsEditingSelectedWork] = useState(false)
   const [isAddingReference, setIsAddingReference] = useState(false)
+  const [isImportingReferences, setIsImportingReferences] = useState(false)
+  const [referenceImportProvider, setReferenceImportProvider] = useState<ReferenceImportProvider>('mendeley')
+  const [referenceImportBibtex, setReferenceImportBibtex] = useState('')
+  const [isSubmittingReferenceImport, setIsSubmittingReferenceImport] = useState(false)
   const [referenceForm, setReferenceForm] = useState<ReferenceFormState>(DEFAULT_REFERENCE_FORM)
   const [editingWorkReferenceId, setEditingWorkReferenceId] = useState<string | null>(null)
   const [preferredMatchDocumentId, setPreferredMatchDocumentId] = useState<string | null>(null)
@@ -165,6 +178,7 @@ export default function ReferencesPage() {
   const [isSubmittingReference, setIsSubmittingReference] = useState(false)
   const [isRecheckingMatches, setIsRecheckingMatches] = useState(false)
   const [draggingWorkReferenceId, setDraggingWorkReferenceId] = useState<string | null>(null)
+  const [dragOverWorkReferenceId, setDragOverWorkReferenceId] = useState<string | null>(null)
   const [bibliographySort, setBibliographySort] = useState<BibliographySortMode>('user')
   const [showReferenceNumbers, setShowReferenceNumbers] = useState(true)
   const [copiedWorkReferenceId, setCopiedWorkReferenceId] = useState<string | null>(null)
@@ -254,6 +268,7 @@ export default function ReferencesPage() {
 
   useEffect(() => {
     setDraggingWorkReferenceId(null)
+    setDragOverWorkReferenceId(null)
   }, [bibliographySort])
 
   const selectedWork = useMemo(
@@ -283,6 +298,11 @@ export default function ReferencesPage() {
             doi: referenceForm.doi,
           }),
     [documents, referenceForm.authors, referenceForm.doi, referenceForm.title, referenceForm.type, referenceForm.year],
+  )
+
+  const importPreviewReferences = useMemo(
+    () => parseBibtexReferences(referenceImportBibtex, referenceImportProvider),
+    [referenceImportBibtex, referenceImportProvider],
   )
 
   const existingWorkDocumentIds = useMemo(
@@ -595,6 +615,41 @@ export default function ReferencesPage() {
     }
   }
 
+  const resetReferenceImportDialog = () => {
+    setReferenceImportProvider('mendeley')
+    setReferenceImportBibtex('')
+  }
+
+  const handleImportReferences = async () => {
+    if (!selectedWork) {
+      setStatusMessage(t('referencesPage.selectWorkBeforeAddingReferences'))
+      return
+    }
+
+    if (importPreviewReferences.length === 0) {
+      setStatusMessage(t('referencesPage.noImportableReferences'))
+      return
+    }
+
+    setIsSubmittingReferenceImport(true)
+    setStatusMessage(null)
+    try {
+      let importedCount = 0
+      for (const reference of importPreviewReferences) {
+        await saveReferenceToSelectedWork(reference, matchReferenceToDocument(documents, reference))
+        importedCount += 1
+      }
+
+      setIsImportingReferences(false)
+      resetReferenceImportDialog()
+      setStatusMessage(t('referencesPage.importedReferences', { count: importedCount }))
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : t('referencesPage.couldNotImportReferences'))
+    } finally {
+      setIsSubmittingReferenceImport(false)
+    }
+  }
+
   const handleCopyReference = async (reference: repo.DbReference) => {
     try {
       await navigator.clipboard.writeText(formatReference(reference, selectedStyle))
@@ -657,7 +712,12 @@ export default function ReferencesPage() {
   }
 
   const handleDropWorkReference = async (targetId: string) => {
-    if (!selectedWork || !draggingWorkReferenceId || draggingWorkReferenceId === targetId) return
+    if (!selectedWork || !draggingWorkReferenceId) return
+    if (draggingWorkReferenceId === targetId) {
+      setDraggingWorkReferenceId(null)
+      setDragOverWorkReferenceId(null)
+      return
+    }
 
     const current = [...workReferences]
     const fromIndex = current.findIndex((item) => item.id === draggingWorkReferenceId)
@@ -668,6 +728,7 @@ export default function ReferencesPage() {
     current.splice(toIndex, 0, moved)
     setWorkReferences(current)
     setDraggingWorkReferenceId(null)
+    setDragOverWorkReferenceId(null)
 
     try {
       const reordered = await repo.reorderWorkReferences(
@@ -681,6 +742,22 @@ export default function ReferencesPage() {
       setWorkReferences(restored)
     }
   }
+
+  const finishReferenceReorder = () => {
+    const targetId = dragOverWorkReferenceId
+    if (targetId) {
+      void handleDropWorkReference(targetId)
+      return
+    }
+    setDraggingWorkReferenceId(null)
+    setDragOverWorkReferenceId(null)
+  }
+
+  useEffect(() => {
+    if (!draggingWorkReferenceId) return
+    window.addEventListener('mouseup', finishReferenceReorder)
+    return () => window.removeEventListener('mouseup', finishReferenceReorder)
+  }, [draggingWorkReferenceId, dragOverWorkReferenceId])
 
   const pendingDeleteWorkReference = useMemo(
     () => workReferences.find((entry) => entry.id === pendingDeleteWorkReferenceId) ?? null,
@@ -723,37 +800,24 @@ export default function ReferencesPage() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={selectedStyle} onValueChange={(value) => setSelectedStyle(value as CitationStyle)}>
-            <SelectTrigger className="w-[150px]" data-tour-id="references-style">
-              <SelectValue placeholder={t('referencesPage.citationStyle')} />
-            </SelectTrigger>
-            <SelectContent>
-              {CITATION_STYLES.map((style) => (
-                <SelectItem key={style.value} value={style.value}>
-                  {style.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button type="button" variant="outline" onClick={() => setIsAddingWork(true)} data-tour-id="references-add-work">
-            <Plus className="h-4 w-4" />
-            {t('referencesPage.addWork')}
-          </Button>
-        </div>
       </div>
 
       <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
         <Card className="min-h-0" data-tour-id="references-work">
-          <CardHeader>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <CardTitle className="w-fit cursor-help">{t('referencesPage.works')}</CardTitle>
-              </TooltipTrigger>
-              <TooltipContent side="top" sideOffset={8}>
-                {t('referencesPage.worksHelp')}
-              </TooltipContent>
-            </Tooltip>
+          <CardHeader className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <CardTitle className="w-fit cursor-help">{t('referencesPage.works')}</CardTitle>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={8}>
+                  {t('referencesPage.worksHelp')}
+                </TooltipContent>
+              </Tooltip>
+              <Button type="button" variant="outline" size="icon" onClick={() => setIsAddingWork(true)} data-tour-id="references-add-work" aria-label={t('referencesPage.addWork')}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             <Select value={selectedWorkId} onValueChange={setSelectedWorkId}>
@@ -854,56 +918,108 @@ export default function ReferencesPage() {
                 </TooltipContent>
               </Tooltip>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={bibliographySort} onValueChange={(value) => setBibliographySort(value as BibliographySortMode)}>
-                <SelectTrigger className="w-[190px]">
-                  <SelectValue placeholder={t('referencesPage.sortBy')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">{t('referencesPage.sortUserDefined')}</SelectItem>
-                  <SelectItem value="title">{t('referencesPage.sortTitle')}</SelectItem>
-                  <SelectItem value="author">{t('referencesPage.sortAuthor')}</SelectItem>
-                  <SelectItem value="year">{t('referencesPage.sortReleaseDate')}</SelectItem>
-                </SelectContent>
-              </Select>
-              <label className="flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
-                <Checkbox
-                  checked={showReferenceNumbers}
-                  onCheckedChange={(checked) => setShowReferenceNumbers(Boolean(checked))}
-                />
-                <span>{t('referencesPage.showNumbers')}</span>
-              </label>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleCopyAllReferences()}
-                disabled={!selectedWork || workReferences.length === 0}
-                className={cn(copiedAllReferences && 'border-emerald-300 text-emerald-600')}
-                data-tour-id="references-copy-all"
-              >
-                {copiedAllReferences ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                {copiedAllReferences ? referenceUiCopy.copiedAllReferences : referenceUiCopy.copyAllReferences}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setIsAddingReference(true)}
-                disabled={!selectedWork}
-                data-tour-id="references-add-reference"
-              >
-                <Plus className="h-4 w-4" />
-                {t('referencesPage.addReference')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleRecheckMatches()}
-                disabled={!selectedWork || isRecheckingMatches}
-                data-tour-id="references-recheck"
-              >
-                {isRecheckingMatches ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                {t('referencesPage.recheckMatches')}
-              </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-background/80 p-1.5">
+                <Select value={selectedStyle} onValueChange={(value) => setSelectedStyle(value as CitationStyle)}>
+                  <SelectTrigger className="h-9 w-[120px] border-0 bg-transparent shadow-none" data-tour-id="references-style">
+                    <SelectValue placeholder={t('referencesPage.citationStyle')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CITATION_STYLES.map((style) => (
+                      <SelectItem key={style.value} value={style.value}>
+                        {style.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={bibliographySort} onValueChange={(value) => setBibliographySort(value as BibliographySortMode)}>
+                  <SelectTrigger className="h-9 w-[180px] border-0 bg-transparent shadow-none">
+                    <SelectValue placeholder={t('referencesPage.sortBy')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="user">{t('referencesPage.sortUserDefined')}</SelectItem>
+                    <SelectItem value="title">{t('referencesPage.sortTitle')}</SelectItem>
+                    <SelectItem value="author">{t('referencesPage.sortAuthor')}</SelectItem>
+                    <SelectItem value="year">{t('referencesPage.sortReleaseDate')}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <label className="flex h-9 items-center gap-2 rounded-xl px-2.5 text-sm text-muted-foreground hover:bg-muted">
+                  <Checkbox
+                    checked={showReferenceNumbers}
+                    onCheckedChange={(checked) => setShowReferenceNumbers(Boolean(checked))}
+                  />
+                  <span>{t('referencesPage.showNumbers')}</span>
+                </label>
+              </div>
+
+              <div className="flex items-center gap-1 rounded-2xl border bg-background/80 p-1.5">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsAddingReference(true)}
+                      disabled={!selectedWork}
+                      data-tour-id="references-add-reference"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('referencesPage.addReference')}</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setIsImportingReferences(true)}
+                      disabled={!selectedWork}
+                      data-tour-id="references-import-reference"
+                    >
+                      <FileInput className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('referencesPage.importReferencesFrom')}</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void handleCopyAllReferences()}
+                      disabled={!selectedWork || workReferences.length === 0}
+                      className={cn(copiedAllReferences && 'text-emerald-600')}
+                      data-tour-id="references-copy-all"
+                    >
+                      {copiedAllReferences ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {copiedAllReferences ? referenceUiCopy.copiedAllReferences : referenceUiCopy.copyAllReferences}
+                  </TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void handleRecheckMatches()}
+                      disabled={!selectedWork || isRecheckingMatches}
+                      data-tour-id="references-recheck"
+                    >
+                      {isRecheckingMatches ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('referencesPage.recheckMatches')}</TooltipContent>
+                </Tooltip>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
@@ -931,7 +1047,7 @@ export default function ReferencesPage() {
                 description={t('referencesPage.noReferencesYetDescription')}
               />
             ) : (
-              <div className="space-y-3">
+              <div className={cn('space-y-3', draggingWorkReferenceId && 'cursor-grabbing select-none')}>
                 {displayedWorkReferences.map((workReference, index) => {
                   const linkedDocumentId = workReference.matchedDocumentId ?? workReference.reference.documentId ?? null
                   const linkedDocument = linkedDocumentId
@@ -940,35 +1056,51 @@ export default function ReferencesPage() {
                   return (
                     <div
                       key={workReference.id}
-                      draggable={isUserDefinedBibliographyOrder}
-                      onDragStart={() => {
-                        if (!isUserDefinedBibliographyOrder) return
-                        setDraggingWorkReferenceId(workReference.id)
+                      onMouseEnter={() => {
+                        if (!draggingWorkReferenceId || draggingWorkReferenceId === workReference.id) return
+                        setDragOverWorkReferenceId(workReference.id)
                       }}
-                      onDragOver={(event) => {
-                        if (!isUserDefinedBibliographyOrder) return
+                      onMouseUp={(event) => {
+                        if (!draggingWorkReferenceId) return
                         event.preventDefault()
-                      }}
-                      onDrop={() => {
-                        if (!isUserDefinedBibliographyOrder) return
+                        event.stopPropagation()
+                        setDragOverWorkReferenceId(workReference.id)
                         void handleDropWorkReference(workReference.id)
                       }}
                       onClick={() => {
+                        if (draggingWorkReferenceId) return
                         if (!linkedDocument) return
                         router.push(buildDocumentResumeHref(linkedDocument))
                       }}
                       className={cn(
-                        'h-[78px] overflow-hidden rounded-2xl border bg-card px-4 py-2 transition',
+                        'relative h-[78px] overflow-hidden rounded-2xl border bg-card px-4 py-2 transition-all duration-150',
                         linkedDocument && 'cursor-pointer hover:border-primary/40 hover:bg-accent/30',
-                        draggingWorkReferenceId === workReference.id && 'opacity-60',
+                        draggingWorkReferenceId === workReference.id && 'scale-[0.985] border-primary/70 bg-primary/5 opacity-80 shadow-lg ring-2 ring-primary/25',
+                        dragOverWorkReferenceId === workReference.id && draggingWorkReferenceId !== workReference.id && 'translate-y-0.5 border-primary/70 bg-accent/50 shadow-md ring-2 ring-primary/20',
                       )}
                     >
+                      {dragOverWorkReferenceId === workReference.id && draggingWorkReferenceId !== workReference.id ? (
+                        <div className="absolute inset-x-4 top-0 h-1 rounded-full bg-primary shadow-[0_0_16px_hsl(var(--primary)/0.45)]" />
+                      ) : null}
                       <div className="flex h-full items-center gap-3">
                         <div
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            if (!isUserDefinedBibliographyOrder) return
+                            setDraggingWorkReferenceId(workReference.id)
+                            setDragOverWorkReferenceId(null)
+                          }}
+                          onClick={(event) => event.stopPropagation()}
                           className={cn(
-                            'flex h-full items-center text-muted-foreground',
-                            isUserDefinedBibliographyOrder ? 'cursor-grab' : 'cursor-default opacity-50',
+                            'flex h-full items-center rounded-lg px-1 text-muted-foreground transition hover:bg-muted',
+                            isUserDefinedBibliographyOrder
+                              ? draggingWorkReferenceId === workReference.id
+                                ? 'cursor-grabbing bg-primary/10 text-primary'
+                                : 'cursor-grab active:cursor-grabbing'
+                              : 'cursor-not-allowed opacity-50',
                           )}
+                          title={isUserDefinedBibliographyOrder ? t('referencesPage.dragToReorder') : t('referencesPage.switchToUserOrder')}
                         >
                           <GripVertical className="h-4 w-4" />
                         </div>
@@ -1126,6 +1258,95 @@ export default function ReferencesPage() {
             <Button type="button" variant="destructive" onClick={() => void handleDeleteSelectedWork()} disabled={isDeletingWork || !selectedWork}>
               {isDeletingWork ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
               {t('referencesPage.deleteWork')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isImportingReferences}
+        onOpenChange={(open) => {
+          setIsImportingReferences(open)
+          if (!open) resetReferenceImportDialog()
+        }}
+      >
+        <DialogContent className="w-[68vw] max-w-[920px] sm:max-w-[920px]">
+          <DialogHeader>
+            <DialogTitle>{t('referencesPage.importReferencesFrom')}</DialogTitle>
+            <DialogDescription>
+              {t('referencesPage.importReferencesDescription')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-5 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <div className="space-y-3">
+              <Label htmlFor="reference-import-provider">{t('referencesPage.referenceProvider')}</Label>
+              <Select value={referenceImportProvider} onValueChange={(value) => setReferenceImportProvider(value as ReferenceImportProvider)}>
+                <SelectTrigger id="reference-import-provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REFERENCE_IMPORT_PROVIDERS.map((provider) => (
+                    <SelectItem key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="rounded-2xl border bg-muted/50 p-3 text-sm text-muted-foreground">
+                {t(`referencesPage.importInstructions.${referenceImportProvider}`)}
+              </div>
+
+              <div className="rounded-2xl border bg-background p-3">
+                <div className="text-sm font-medium">
+                  {t('referencesPage.importPreview')}
+                </div>
+                <div className="mt-1 text-2xl font-semibold">
+                  {importPreviewReferences.length}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {t('referencesPage.importableReferences')}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label htmlFor="reference-import-bibtex">{t('referencesPage.pasteBibtex')}</Label>
+              <Textarea
+                id="reference-import-bibtex"
+                value={referenceImportBibtex}
+                onChange={(event) => setReferenceImportBibtex(event.target.value)}
+                placeholder="@article{smith2025,...}"
+                rows={14}
+                className="font-mono text-xs"
+              />
+              {importPreviewReferences.length > 0 ? (
+                <div className="max-h-40 space-y-2 overflow-y-auto rounded-2xl border bg-muted/30 p-2">
+                  {importPreviewReferences.slice(0, 6).map((reference, index) => (
+                    <div key={`${reference.citationKey ?? reference.title}-${index}`} className="rounded-xl bg-background px-3 py-2 text-sm">
+                      <div className="line-clamp-1 font-medium">{reference.title}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        {[reference.authors, reference.year, reference.doi].filter(Boolean).join(' - ')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsImportingReferences(false)}>
+              {t('referencesPage.cancel')}
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleImportReferences()}
+              disabled={isSubmittingReferenceImport || importPreviewReferences.length === 0}
+            >
+              {isSubmittingReferenceImport ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileInput className="h-4 w-4" />}
+              {t('referencesPage.importReferences')}
             </Button>
           </DialogFooter>
         </DialogContent>

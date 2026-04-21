@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useMemo } from 'react'
 import { ArrowRight, BookOpen, Clock, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EmptyState } from '@/components/refx/common'
 import { useDocumentStore } from '@/lib/stores/document-store'
 import type { Document } from '@/lib/types'
@@ -58,90 +58,94 @@ export default function ReaderIndexPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl p-6">
-      <div className="mb-8">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
+      <div className="shrink-0">
         <div className="flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <BookOpen className="h-6 w-6" />
           </div>
-          <div>
-            <h1 className="text-2xl font-semibold">{t('readerIndex.title')}</h1>
-            <p className="text-muted-foreground">{t('readerIndex.subtitle')}</p>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight">{t('readerIndex.title')}</h1>
+            <p className="text-sm text-muted-foreground">{t('readerIndex.subtitle')}</p>
           </div>
         </div>
       </div>
 
-      {continueReading.length > 0 && (
-        <div className="mb-8" data-tour-id="reader-continue">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <Clock className="h-5 w-5 text-primary" />
-            {t('readerIndex.continueReading')}
-          </h2>
-          <div className="space-y-5">
-            {continueReading.map((document) => (
-              <Link key={document.id} href={buildReaderHref(document)} className="block">
-                <Card className="transition-colors hover:border-primary/50">
-                  <CardContent className="flex items-center gap-4 p-3.5">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10">
-                      <FileText className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="truncate font-medium">{document.title}</h3>
-                      <p className="truncate text-sm text-muted-foreground">
-                        {document.authors.slice(0, 2).join(', ')}
-                        {document.authors.length > 2 && ' et al.'}
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-sm text-muted-foreground">
-                      {document.lastReadPage
-                        ? `${t('readerIndex.continueLabel')}, ${t('searchPage.page', { page: document.lastReadPage })}`
-                        : t('readerIndex.continueLabel')}
-                    </span>
-                    <ArrowRight className="h-5 w-5 text-muted-foreground" />
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {recentDocs.length > 0 && (
-        <div data-tour-id="reader-recent-opened">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-            <BookOpen className="h-5 w-5 text-primary" />
-            {t('readerIndex.recentlyOpened')}
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {recentDocs.map((document) => (
-              <Link key={document.id} href={buildReaderHref(document)}>
-                <Card className="h-full transition-colors hover:border-primary/50">
-                  <CardContent className="p-4">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(22rem,0.9fr)_minmax(28rem,1.35fr)]">
+        {continueReading.length > 0 && (
+          <Card className="flex min-h-0 flex-col" data-tour-id="reader-continue">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Clock className="h-5 w-5 text-primary" />
+                {t('readerIndex.continueReading')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="min-h-0 flex-1 space-y-3 overflow-y-auto">
+              {continueReading.map((document) => (
+                <Link key={document.id} href={buildReaderHref(document)} className="block">
+                  <div className="h-[78px] overflow-hidden rounded-2xl border bg-card px-4 py-2 transition hover:border-primary/40 hover:bg-accent/30">
+                    <div className="flex h-full items-center gap-3">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                         <FileText className="h-5 w-5 text-primary" />
                       </div>
-                      <div className="min-w-0">
-                        <h3 className="line-clamp-2 font-medium">{document.title}</h3>
-                        <p className="mt-1 truncate text-sm text-muted-foreground">
-                          {document.authors[0] || t('readerIndex.unknownAuthor')}
-                          {document.authors.length > 1 && ' et al.'}
-                          {document.year && ` (${document.year})`}
+                      <div className="min-w-0 flex-1">
+                        <h3 className="truncate font-medium transition-colors hover:text-primary">{document.title}</h3>
+                        <p className="truncate text-sm text-muted-foreground">
+                          {document.authors.slice(0, 2).join(', ')}
+                          {document.authors.length > 2 && ' et al.'}
                         </p>
-                        {document.lastReadPage ? (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {`${t('readerIndex.continueLabel')}, ${t('searchPage.page', { page: document.lastReadPage })}`}
-                          </p>
-                        ) : null}
                       </div>
+                      <span className="shrink-0 text-sm text-muted-foreground">
+                        {document.lastReadPage
+                          ? `${t('readerIndex.continueLabel')}, ${t('searchPage.page', { page: document.lastReadPage })}`
+                          : t('readerIndex.continueLabel')}
+                      </span>
+                      <ArrowRight className="h-5 w-5 shrink-0 text-muted-foreground" />
                     </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
+                  </div>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {recentDocs.length > 0 && (
+          <Card className="flex min-h-0 flex-col" data-tour-id="reader-recent-opened">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <BookOpen className="h-5 w-5 text-primary" />
+                {t('readerIndex.recentlyOpened')}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid min-h-0 flex-1 gap-3 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
+              {recentDocs.map((document) => (
+                <Link key={document.id} href={buildReaderHref(document)}>
+                  <div className="h-full min-h-[126px] rounded-2xl border bg-card p-4 transition hover:border-primary/40 hover:bg-accent/30">
+                    <div className="flex items-start gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                          <FileText className="h-5 w-5 text-primary" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="line-clamp-2 font-medium transition-colors hover:text-primary">{document.title}</h3>
+                          <p className="mt-1 truncate text-sm text-muted-foreground">
+                            {document.authors[0] || t('readerIndex.unknownAuthor')}
+                            {document.authors.length > 1 && ' et al.'}
+                            {document.year && ` (${document.year})`}
+                          </p>
+                          {document.lastReadPage ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {`${t('readerIndex.continueLabel')}, ${t('searchPage.page', { page: document.lastReadPage })}`}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                  </div>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </div>
   )
 }
