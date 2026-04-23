@@ -1,0 +1,29 @@
+{
+  "name": "refx-word-addin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host localhost --port 5174",
+    "build": "tsc --noEmit && vite build",
+    "build:production": "tsc --noEmit && vite build --mode production --base=/",
+    "manifests": "node scripts/generate-manifests.mjs",
+    "preview": "vite preview --host localhost --port 5174",
+    "icons": "powershell -ExecutionPolicy Bypass -File scripts/sync-refx-icons.ps1",
+    "certs:install": "office-addin-dev-certs install --days 365",
+    "certs:verify": "office-addin-dev-certs verify",
+    "trust:windows": "powershell -ExecutionPolicy Bypass -File scripts/trust-windows-catalog.ps1",
+    "debug:word": "npx --yes office-addin-debugging start manifest.xml desktop --app word --debug-method direct --no-live-reload",
+    "debug:word:stop": "npx --yes office-addin-debugging stop manifest.xml"
+  },
+  "dependencies": {
+    "@microsoft/office-js": "^1.1.110"
+  },
+  "devDependencies": {
+    "@types/office-js": "^1.0.500",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "office-addin-dev-certs": "^2.0.7",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  }
+}

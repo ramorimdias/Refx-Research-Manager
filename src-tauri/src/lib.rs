@@ -221,8 +221,11 @@ pub fn run() {
                 if let Err(e) = commands::setup_app_directories(&app_handle).await {
                     eprintln!("Failed to setup app directories: {}", e);
                 }
-                if let Err(e) = commands::initialize_database(app_handle) {
+                if let Err(e) = commands::initialize_database(app_handle.clone()) {
                     eprintln!("Failed to initialize database: {}", e);
+                }
+                if let Err(e) = commands::ensure_word_addin_bridge_server(&app_handle) {
+                    eprintln!("Failed to start Word add-in bridge: {}", e);
                 }
             });
             Ok(())

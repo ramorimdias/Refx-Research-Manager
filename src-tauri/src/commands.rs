@@ -7,6 +7,7 @@ use std::net::{TcpListener, TcpStream, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 use tauri::{AppHandle, Manager};
 use base64::Engine;
 use crate::backup;
@@ -501,7 +502,9 @@ static BOOK_COVER_UPLOAD_SESSIONS: OnceLock<Mutex<HashMap<String, BookCoverUploa
 static BACKUP_DOWNLOAD_SESSIONS: OnceLock<Mutex<HashMap<String, BackupDownloadSession>>> =
     OnceLock::new();
 static BOOK_COVER_UPLOAD_SERVER: OnceLock<()> = OnceLock::new();
+static WORD_ADDIN_BRIDGE_SERVER: OnceLock<()> = OnceLock::new();
 const BOOK_COVER_UPLOAD_PORT: u16 = 38473;
+const WORD_ADDIN_BRIDGE_PORT: u16 = 38474;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -842,11 +845,429 @@ fn write_http_response(
     body: &[u8],
 ) -> Result<(), AppError> {
     let header = format!(
-        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream.write_all(header.as_bytes())?;
     stream.write_all(body)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WordBridgeReference {
+    id: String,
+    source_type: String,
+    citation_key: Option<String>,
+    title: String,
+    authors: Vec<String>,
+    year: Option<i64>,
+    journal: Option<String>,
+    booktitle: Option<String>,
+    publisher: Option<String>,
+    volume: Option<String>,
+    issue: Option<String>,
+    pages: Option<String>,
+    doi: Option<String>,
+    url: Option<String>,
+    bibtex: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WordBridgeWork {
+    id: String,
+    title: String,
+    authors: Vec<String>,
+    year: Option<i64>,
+    reference_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WordBridgeHealth {
+    ok: bool,
+    app: &'static str,
+    version: &'static str,
+}
+
+fn split_author_string(value: &str) -> Vec<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    if let Ok(parsed) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return parsed
+            .into_iter()
+            .map(|author| author.trim().to_string())
+            .filter(|author| !author.is_empty())
+            .collect();
+    }
+
+    let delimiter = if trimmed.contains(" and ") {
+        " and "
+    } else if trimmed.contains(';') {
+        ";"
+    } else {
+        "\n"
+    };
+
+    trimmed
+        .split(delimiter)
+        .map(|author| author.trim().trim_matches(',').to_string())
+        .filter(|author| !author.is_empty())
+        .collect()
+}
+
+fn simple_url_decode(value: &str) -> String {
+    let mut output = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                output.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                let hex = &value[index + 1..index + 3];
+                if let Ok(decoded) = u8::from_str_radix(hex, 16) {
+                    output.push(decoded);
+                    index += 3;
+                } else {
+                    output.push(bytes[index]);
+                    index += 1;
+                }
+            }
+            byte => {
+                output.push(byte);
+                index += 1;
+            }
+        }
+    }
+
+    String::from_utf8_lossy(&output).into_owned()
+}
+
+fn query_param(path: &str, name: &str) -> Option<String> {
+    let query = path.split_once('?')?.1;
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        if simple_url_decode(key) == name {
+            return Some(simple_url_decode(value));
+        }
+    }
+    None
+}
+
+fn path_without_query(path: &str) -> &str {
+    path.split_once('?').map(|(base, _)| base).unwrap_or(path)
+}
+
+fn reference_to_word_bridge(reference: Reference) -> WordBridgeReference {
+    WordBridgeReference {
+        id: format!("ref:{}", reference.id),
+        source_type: "reference".into(),
+        citation_key: reference.citation_key,
+        title: reference.title,
+        authors: reference
+            .authors
+            .as_deref()
+            .map(split_author_string)
+            .unwrap_or_default(),
+        year: reference.year,
+        journal: reference.journal,
+        booktitle: reference.booktitle,
+        publisher: reference.publisher,
+        volume: reference.volume,
+        issue: reference.issue,
+        pages: reference.pages,
+        doi: reference.doi,
+        url: reference.url,
+        bibtex: reference.bibtex,
+    }
+}
+
+fn document_to_word_bridge_work(document: Document, reference_count: usize) -> WordBridgeWork {
+    WordBridgeWork {
+        id: document.id,
+        title: document.title,
+        authors: split_author_string(&document.authors),
+        year: document.year,
+        reference_count,
+    }
+}
+
+fn word_bridge_reference_matches(reference: &WordBridgeReference, query: &str) -> bool {
+    if query.trim().is_empty() {
+        return true;
+    }
+
+    let normalized = query.to_lowercase();
+    [
+        reference.id.as_str(),
+        reference.citation_key.as_deref().unwrap_or_default(),
+        reference.title.as_str(),
+        reference.journal.as_deref().unwrap_or_default(),
+        reference.booktitle.as_deref().unwrap_or_default(),
+        reference.publisher.as_deref().unwrap_or_default(),
+        reference.doi.as_deref().unwrap_or_default(),
+        reference.url.as_deref().unwrap_or_default(),
+    ]
+    .join(" ")
+    .to_lowercase()
+    .contains(&normalized)
+        || reference
+            .authors
+            .join(" ")
+            .to_lowercase()
+            .contains(&normalized)
+}
+
+fn word_bridge_work_matches(work: &WordBridgeWork, query: &str) -> bool {
+    if query.trim().is_empty() {
+        return true;
+    }
+
+    let normalized = query.to_lowercase();
+    [
+        work.id.as_str(),
+        work.title.as_str(),
+        work.year.map(|year| year.to_string()).as_deref().unwrap_or_default(),
+    ]
+    .join(" ")
+    .to_lowercase()
+    .contains(&normalized)
+        || work
+            .authors
+            .join(" ")
+            .to_lowercase()
+            .contains(&normalized)
+}
+
+fn word_bridge_list_works(app: &AppHandle) -> Result<Vec<WordBridgeWork>, AppError> {
+    let conn = open_db(app)?;
+    let mut works = Vec::new();
+
+    for document in list_all_documents(app.clone())?
+        .into_iter()
+        .filter(|document| document.document_type == "my_work")
+    {
+        let reference_count = conn.query_row(
+            "SELECT COUNT(*) FROM work_references WHERE work_document_id = ?1",
+            params![document.id],
+            |row| row.get::<_, i64>(0),
+        )? as usize;
+        works.push(document_to_word_bridge_work(document, reference_count));
+    }
+
+    works.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
+    Ok(works)
+}
+
+fn word_bridge_work_references(
+    app: &AppHandle,
+    work_document_id: &str,
+) -> Result<Vec<WordBridgeReference>, AppError> {
+    let conn = open_db(app)?;
+    Ok(list_work_references_for_document_id(&conn, work_document_id)?
+        .into_iter()
+        .map(|work_reference| reference_to_word_bridge(work_reference.reference))
+        .collect())
+}
+
+fn word_bridge_find_reference(
+    app: &AppHandle,
+    id: &str,
+) -> Result<Option<WordBridgeReference>, AppError> {
+    let conn = open_db(app)?;
+    let raw_id = id.strip_prefix("ref:").unwrap_or(id);
+    conn.query_row(
+        r#"
+        SELECT
+          id,
+          document_id,
+          type,
+          is_manual,
+          citation_key,
+          title,
+          authors,
+          year,
+          journal,
+          volume,
+          issue,
+          chapter,
+          pages,
+          publisher,
+          booktitle,
+          doi,
+          url,
+          abstract,
+          keywords,
+          bibtex,
+          created_at,
+          updated_at
+        FROM "references"
+        WHERE id = ?1
+        "#,
+        params![raw_id],
+        map_reference_row,
+    )
+    .optional()
+    .map(|reference| reference.map(reference_to_word_bridge))
+    .map_err(AppError::from)
+}
+
+fn write_json_response<T: Serialize>(
+    stream: &mut TcpStream,
+    status_line: &str,
+    value: &T,
+) -> Result<(), AppError> {
+    let body = serde_json::to_vec(value)
+        .map_err(|error| AppError::Validation(format!("Could not serialize bridge response: {error}")))?;
+    write_http_response(stream, status_line, "application/json; charset=utf-8", &body)
+}
+
+fn write_bridge_error(
+    stream: &mut TcpStream,
+    status_line: &str,
+    message: &str,
+) -> Result<(), AppError> {
+    write_json_response(
+        stream,
+        status_line,
+        &serde_json::json!({
+            "error": message,
+        }),
+    )
+}
+
+fn handle_word_addin_bridge_request(
+    app: &AppHandle,
+    stream: &mut TcpStream,
+    method: &str,
+    path: &str,
+) -> Result<(), AppError> {
+    if method == "OPTIONS" {
+        return write_http_response(stream, "204 No Content", "text/plain; charset=utf-8", b"");
+    }
+
+    if method != "GET" {
+        return write_bridge_error(stream, "405 Method Not Allowed", "Method not allowed.");
+    }
+
+    let base_path = path_without_query(path);
+
+    if base_path == "/health" {
+        return write_json_response(
+            stream,
+            "200 OK",
+            &WordBridgeHealth {
+                ok: true,
+                app: "Refx",
+                version: env!("CARGO_PKG_VERSION"),
+            },
+        );
+    }
+
+    if base_path == "/works" {
+        let query = query_param(path, "query").unwrap_or_default();
+        let results: Vec<_> = word_bridge_list_works(app)?
+            .into_iter()
+            .filter(|work| word_bridge_work_matches(work, &query))
+            .take(100)
+            .collect();
+        return write_json_response(stream, "200 OK", &results);
+    }
+
+    if let Some(suffix) = base_path.strip_prefix("/works/") {
+        if let Some((encoded_work_id, tail)) = suffix.split_once('/') {
+            if tail == "references" {
+                let work_id = simple_url_decode(encoded_work_id);
+                let query = query_param(path, "query").unwrap_or_default();
+                let results: Vec<_> = word_bridge_work_references(app, &work_id)?
+                    .into_iter()
+                    .filter(|reference| word_bridge_reference_matches(reference, &query))
+                    .take(200)
+                    .collect();
+                return write_json_response(stream, "200 OK", &results);
+            }
+        }
+    }
+
+    if base_path == "/references" {
+        return write_bridge_error(
+            stream,
+            "400 Bad Request",
+            "Select a My Work first and use /works/:id/references.",
+        );
+    }
+
+    if let Some(encoded_id) = base_path.strip_prefix("/references/") {
+        let requested_id = simple_url_decode(encoded_id);
+        let reference = word_bridge_find_reference(app, &requested_id)?;
+
+        return match reference {
+            Some(reference) => write_json_response(stream, "200 OK", &reference),
+            None => write_bridge_error(stream, "404 Not Found", "Reference not found."),
+        };
+    }
+
+    write_bridge_error(stream, "404 Not Found", "Not found.")
+}
+
+fn process_word_addin_bridge_connection(
+    app: &AppHandle,
+    mut stream: TcpStream,
+) -> Result<(), AppError> {
+    let mut buffer = [0_u8; 8192];
+    let bytes_read = stream.read(&mut buffer)?;
+    if bytes_read == 0 {
+        return Ok(());
+    }
+
+    let request = String::from_utf8_lossy(&buffer[..bytes_read]).into_owned();
+    let request_line = request
+        .lines()
+        .next()
+        .ok_or_else(|| AppError::Validation("Missing HTTP request line.".into()))?;
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .ok_or_else(|| AppError::Validation("Missing HTTP method.".into()))?;
+    let path = request_parts
+        .next()
+        .ok_or_else(|| AppError::Validation("Missing HTTP path.".into()))?;
+
+    handle_word_addin_bridge_request(app, &mut stream, method, path)
+}
+
+pub fn ensure_word_addin_bridge_server(app: &AppHandle) -> Result<(), AppError> {
+    if WORD_ADDIN_BRIDGE_SERVER.get().is_some() {
+        return Ok(());
+    }
+
+    let listener = TcpListener::bind(("127.0.0.1", WORD_ADDIN_BRIDGE_PORT))?;
+    let app_handle = app.clone();
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    if let Err(error) = process_word_addin_bridge_connection(&app_handle, stream) {
+                        eprintln!("Word add-in bridge request failed: {}", error);
+                    }
+                }
+                Err(error) => {
+                    eprintln!("Word add-in bridge connection failed: {}", error);
+                }
+            }
+        }
+    });
+
+    let _ = WORD_ADDIN_BRIDGE_SERVER.set(());
     Ok(())
 }
 
