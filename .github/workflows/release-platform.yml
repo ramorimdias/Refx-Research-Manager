@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       release_notes:
-        description: Optional release notes
+        description: Optional release notes. When empty, notes are generated from commits since the previous release tag.
         required: false
         default: ''
         type: string
@@ -16,6 +16,10 @@ on:
         description: Which desktop platforms to release
         required: true
         type: string
+    secrets:
+      COPILOT_TOKEN:
+        description: Optional PAT with Copilot Requests permission for AI-generated release note summaries.
+        required: false
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -29,7 +33,7 @@ jobs:
     outputs:
       tag_name: ${{ steps.meta.outputs.tag_name }}
       version: ${{ steps.meta.outputs.version }}
-      release_notes: ${{ steps.meta.outputs.release_notes }}
+      release_notes: ${{ steps.notes.outputs.release_notes }}
       build_windows: ${{ steps.meta.outputs.build_windows }}
       build_macos: ${{ steps.meta.outputs.build_macos }}
 
@@ -66,11 +70,6 @@ jobs:
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
-          {
-            echo "release_notes<<EOF"
-            echo "${{ inputs.release_notes }}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Validate semver
         shell: bash
@@ -91,6 +90,86 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Build release notes
+        id: notes
+        shell: bash
+        env:
+          INPUT_NOTES: ${{ inputs.release_notes }}
+          GH_TOKEN: ${{ secrets.COPILOT_TOKEN }}
+        run: |
+          TAG_NAME="${{ steps.meta.outputs.tag_name }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          PREVIOUS_TAG="$(git tag --list 'v*' --sort=-version:refname | grep -Fxv "$TAG_NAME" | head -n 1 || true)"
+
+          if [[ -n "$INPUT_NOTES" ]]; then
+            RELEASE_NOTES="$INPUT_NOTES"
+          else
+            if [[ -n "$PREVIOUS_TAG" ]]; then
+              RANGE="${PREVIOUS_TAG}..HEAD"
+              INTRO="Changes since ${PREVIOUS_TAG}:"
+            else
+              RANGE="HEAD"
+              INTRO="Changes included in this release:"
+            fi
+
+            mapfile -t COMMITS < <(git log --no-merges --pretty=format:'%s' "$RANGE")
+
+            if [[ ${#COMMITS[@]} -eq 0 ]]; then
+              RELEASE_NOTES="Refx v${VERSION}"
+            else
+              FALLBACK_NOTES=$'Refx v'"${VERSION}"$'\n\n'"${INTRO}"$'\n'
+              for subject in "${COMMITS[@]}"; do
+                [[ -z "$subject" ]] && continue
+                FALLBACK_NOTES+=$'- '"${subject}"$'\n'
+              done
+
+              RELEASE_NOTES="$FALLBACK_NOTES"
+
+              if [[ -n "$GH_TOKEN" ]]; then
+                PROMPT_FILE="$(mktemp)"
+                OUTPUT_FILE="$(mktemp)"
+
+                {
+                  echo "You are preparing GitHub release notes for a desktop app called Refx."
+                  echo "Rewrite the commit list into concise, user-facing markdown release notes."
+                  echo "Requirements:"
+                  echo "- Keep it short and clear."
+                  echo "- Focus on user-visible improvements, fixes, and workflow changes."
+                  echo "- Group related changes under 2 to 5 short section headings when helpful."
+                  echo "- Ignore internal-only framing, versioning, and noisy maintenance wording when possible."
+                  echo "- If the commits are ambiguous, summarize conservatively instead of inventing details."
+                  echo "- Return markdown only, no code fences."
+                  echo
+                  echo "Release version: v${VERSION}"
+                  if [[ -n "$PREVIOUS_TAG" ]]; then
+                    echo "Previous release tag: ${PREVIOUS_TAG}"
+                  fi
+                  echo
+                  echo "Commit subjects:"
+                  for subject in "${COMMITS[@]}"; do
+                    [[ -z "$subject" ]] && continue
+                    echo "- ${subject}"
+                  done
+                } > "$PROMPT_FILE"
+
+                if gh copilot -p "$(cat "$PROMPT_FILE")" > "$OUTPUT_FILE" 2>/dev/null; then
+                  AI_NOTES="$(sed '/^[[:space:]]*$/N;/^\n$/D' "$OUTPUT_FILE" | sed 's/[[:space:]]*$//')"
+                  if [[ -n "$AI_NOTES" ]]; then
+                    RELEASE_NOTES="$AI_NOTES"
+                  fi
+                fi
+
+                rm -f "$PROMPT_FILE" "$OUTPUT_FILE"
+              fi
+            fi
+          fi
+
+          {
+            echo "release_notes<<EOF"
+            printf '%s\n' "$RELEASE_NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Update versions
         if: steps.tag.outputs.exists != 'true'
