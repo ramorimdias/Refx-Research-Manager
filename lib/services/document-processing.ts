@@ -56,15 +56,6 @@ type PdfJsModule = {
 let pdfJsPromise: Promise<PdfJsModule> | null = null
 const BROWSER_PDFJS_WORKER_PATH = '/pdfjs/pdf.worker.js'
 
-function dynamicModuleImport(specifier: string) {
-  const browserImport = new Function(
-    'specifier',
-    'return import(specifier)',
-  ) as (specifier: string) => Promise<unknown>
-
-  return browserImport(specifier)
-}
-
 function resolvePdfJsCandidate(importedModule: unknown) {
   const candidate = (
     importedModule
@@ -93,27 +84,29 @@ function normalizeText(input: string) {
 }
 
 async function importPdfJsModuleCandidate() {
-  const candidates = [
-    'pdfjs-dist/legacy/build/pdf.mjs',
-    'pdfjs-dist/build/pdf.mjs',
-  ]
-
-  let lastError: unknown = null
-  for (const specifier of candidates) {
+  try {
+    const imported = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const candidate = resolvePdfJsCandidate(imported)
+    if (candidate) {
+      return candidate
+    }
+  } catch (error) {
     try {
-      const imported = await dynamicModuleImport(specifier)
+      const imported = await import('pdfjs-dist/build/pdf.mjs')
       const candidate = resolvePdfJsCandidate(imported)
       if (candidate) {
         return candidate
       }
-    } catch (error) {
-      lastError = error
+    } catch (fallbackError) {
+      throw fallbackError instanceof Error
+        ? fallbackError
+        : error instanceof Error
+          ? error
+          : new Error('PDF.js module could not be initialized from installed package builds.')
     }
   }
 
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('PDF.js module could not be initialized from installed package builds.')
+  throw new Error('PDF.js module could not be initialized from installed package builds.')
 }
 
 function buildPageLines(words: PdfWord[]) {
