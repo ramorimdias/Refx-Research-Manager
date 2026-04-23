@@ -27,7 +27,6 @@ import {
   extractPdfPageWords,
   extractSearchPreview,
   findPdfSearchOccurrences,
-  getPdfJsWasmUrl,
   loadPdfJsModule,
   type PdfWord,
   type SearchOccurrence,
@@ -45,6 +44,43 @@ type ReaderAreaHighlight = {
   pageNumber: number
   rect: { x: number; y: number; width: number; height: number }
   color: string
+}
+
+function isMacLikeWebKitEnvironment() {
+  if (typeof navigator === 'undefined') return false
+
+  const platform = (
+    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform
+    ?? navigator.platform
+    ?? ''
+  )
+  const userAgent = navigator.userAgent ?? ''
+  const normalizedPlatform = platform.toLowerCase()
+  const normalizedUserAgent = userAgent.toLowerCase()
+
+  const isApplePlatform = normalizedPlatform.includes('mac') || normalizedUserAgent.includes('mac os x')
+  const isWebKitEngine = normalizedUserAgent.includes('applewebkit')
+  return isApplePlatform && isWebKitEngine
+}
+
+function getAdvancedViewerFallbackMessage(error: unknown) {
+  const rawMessage = error instanceof Error && error.message.trim()
+    ? error.message.trim()
+    : 'Advanced PDF rendering is unavailable in this build.'
+
+  const normalizedMessage = rawMessage.toLowerCase()
+  const looksLikePdfJsCompatibilityIssue = [
+    'unexpected token',
+    'setting up fake worker failed',
+    'invalid \'workersrc\' type',
+    'module specifier',
+  ].some((fragment) => normalizedMessage.includes(fragment))
+
+  if (isMacLikeWebKitEnvironment() && looksLikePdfJsCompatibilityIssue) {
+    return 'Advanced PDF tools are not supported in this Mac WebKit environment yet. Showing a basic PDF preview instead.'
+  }
+
+  return `${rawMessage} Showing a basic PDF preview instead.`
 }
 
 type ReaderPrintMode = 'original' | 'highlights' | 'highlights-notes'
@@ -570,7 +606,6 @@ function RealReaderViewPage() {
           data: bytes,
           disableWorker: false,
           useWorkerFetch: false,
-          wasmUrl: getPdfJsWasmUrl(),
           isEvalSupported: false,
           stopAtErrors: false,
         })
@@ -598,9 +633,6 @@ function RealReaderViewPage() {
         setPage((current) => Math.min(Math.max(1, current), nextPdf.numPages))
       } catch (error) {
         console.error('Failed to load PDF for embedded viewer:', error)
-        const message = error instanceof Error && error.message.trim()
-          ? error.message
-          : 'Advanced PDF rendering is unavailable in this build.'
         settled = true
         window.clearTimeout(timeoutId)
         setPdfDocument(null)
@@ -610,7 +642,7 @@ function RealReaderViewPage() {
         setRenderedPageSizes({})
         setPageWords([])
         setHasViewerTimedOut(false)
-        setViewerError(`${message} Showing a basic PDF preview instead.`)
+        setViewerError(getAdvancedViewerFallbackMessage(error))
       } finally {
         if (!cancelled) {
           setIsPdfLoading(false)
@@ -1527,7 +1559,6 @@ function RealReaderViewPage() {
         data: new Uint8Array(bytes),
         disableWorker: false,
         useWorkerFetch: false,
-        wasmUrl: getPdfJsWasmUrl(),
         isEvalSupported: false,
         stopAtErrors: false,
       })
@@ -2327,6 +2358,11 @@ function RealReaderViewPage() {
           >
             <Type className="h-4 w-4" />
           </ReaderToolbarIconButton>
+          {viewerMode === 'native' ? (
+            <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-900">
+              Basic preview only
+            </Badge>
+          ) : null}
           <div className="ml-auto flex items-center gap-2">
             {activeFilePath && (
               <>
@@ -2857,7 +2893,7 @@ function RealReaderViewPage() {
                   />
                 </div>
                 <div className="px-1 text-xs text-muted-foreground">
-                  If the preview still appears blank here, use the external-open button in the toolbar while we keep the advanced viewer available.
+                  Highlights, notes, and precise text overlays are disabled in this fallback preview. Use the external-open button if this embedded preview still appears blank.
                 </div>
               </div>
             ) : (

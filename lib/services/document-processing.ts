@@ -56,7 +56,6 @@ type PdfJsModule = {
 let pdfJsPromise: Promise<PdfJsModule> | null = null
 const BROWSER_PDFJS_MODULE_PATH = '/pdfjs/pdf.mjs'
 const BROWSER_PDFJS_WORKER_PATH = '/pdfjs/pdf.worker.mjs'
-const BROWSER_PDFJS_WASM_PATH = '/pdfjs/wasm/'
 
 function browserModuleImport(specifier: string) {
   const browserImport = new Function(
@@ -396,13 +395,6 @@ export async function loadPdfJsModule() {
   return pdfJsPromise
 }
 
-export function getPdfJsWasmUrl() {
-  if (typeof window === 'undefined') {
-    return BROWSER_PDFJS_WASM_PATH
-  }
-  return new URL(BROWSER_PDFJS_WASM_PATH, window.location.origin).toString()
-}
-
 async function extractPdfPages(filePath: string) {
   const cached = pdfWordCache.get(filePath)
   if (cached) {
@@ -416,7 +408,6 @@ async function extractPdfPages(filePath: string) {
       data: new Uint8Array(bytes),
       disableWorker: false,
       useWorkerFetch: false,
-      wasmUrl: getPdfJsWasmUrl(),
       isEvalSupported: false,
       stopAtErrors: false,
     })

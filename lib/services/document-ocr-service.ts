@@ -3,7 +3,7 @@
 import { readFile } from '@tauri-apps/plugin-fs'
 import { createWorker, OEM, PSM, type Worker } from 'tesseract.js'
 import * as repo from '@/lib/repositories/local-db'
-import { getPdfJsWasmUrl, loadPdfJsModule } from '@/lib/services/document-processing'
+import { loadPdfJsModule } from '@/lib/services/document-processing'
 import {
   persistDocumentTextVariant,
   readPersistedDocumentText,
@@ -130,7 +130,6 @@ async function extractPdfOcrText(filePath: string) {
     data: new Uint8Array(bytes),
     disableWorker: false,
     useWorkerFetch: false,
-    wasmUrl: getPdfJsWasmUrl(),
     isEvalSupported: false,
     stopAtErrors: false,
   })

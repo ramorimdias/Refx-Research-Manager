@@ -65,7 +65,7 @@ import {
 import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
 import { scanDocumentForDoiReferences } from '@/lib/services/document-doi-reference-service'
 import { hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
-import { getPdfJsWasmUrl, loadPdfJsModule } from '@/lib/services/document-processing'
+import { loadPdfJsModule } from '@/lib/services/document-processing'
 import { convertFileSrc, isTauri, open as openFileDialog, readFile } from '@/lib/tauri/client'
 import type { Document as RefxDocument, ReadingStage } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -159,7 +159,6 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
           data: new Uint8Array(bytes),
           disableWorker: false,
           useWorkerFetch: false,
-          wasmUrl: getPdfJsWasmUrl(),
           isEvalSupported: false,
           stopAtErrors: false,
         })

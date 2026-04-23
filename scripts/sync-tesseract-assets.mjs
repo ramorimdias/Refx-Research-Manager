@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -49,7 +49,10 @@ function syncPdfJsAssets() {
   resetDirectory(publicPdfJsDir)
   copyFileSync(join(pdfJsDir, 'legacy', 'build', 'pdf.mjs'), join(publicPdfJsDir, 'pdf.mjs'))
   copyFileSync(join(pdfJsDir, 'legacy', 'build', 'pdf.worker.mjs'), join(publicPdfJsDir, 'pdf.worker.mjs'))
-  cpSync(join(pdfJsDir, 'wasm'), join(publicPdfJsDir, 'wasm'), { recursive: true })
+  const wasmDir = join(pdfJsDir, 'wasm')
+  if (existsSync(wasmDir)) {
+    cpSync(wasmDir, join(publicPdfJsDir, 'wasm'), { recursive: true })
+  }
 }
 
 resetDirectory(publicTesseractDir)
