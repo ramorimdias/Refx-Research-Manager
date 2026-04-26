@@ -844,9 +844,26 @@ fn write_http_response(
     content_type: &str,
     body: &[u8],
 ) -> Result<(), AppError> {
+    write_http_response_with_origin(stream, status_line, content_type, body, None)
+}
+
+fn write_http_response_with_origin(
+    stream: &mut TcpStream,
+    status_line: &str,
+    content_type: &str,
+    body: &[u8],
+    origin: Option<&str>,
+) -> Result<(), AppError> {
+    let cors_headers = if let Some(origin) = origin {
+        format!(
+            "Access-Control-Allow-Origin: {origin}\r\nVary: Origin\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\n"
+        )
+    } else {
+        String::new()
+    };
     let header = format!(
-        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n",
-        body.len()
+        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{cors_headers}Connection: close\r\n\r\n",
+        body.len(),
     );
     stream.write_all(header.as_bytes())?;
     stream.write_all(body)?;
@@ -964,6 +981,28 @@ fn query_param(path: &str, name: &str) -> Option<String> {
 
 fn path_without_query(path: &str) -> &str {
     path.split_once('?').map(|(base, _)| base).unwrap_or(path)
+}
+
+fn request_header_value(request: &str, header_name: &str) -> Option<String> {
+    let normalized_header_name = header_name.to_lowercase();
+    request
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .find_map(|(name, value)| {
+            if name.trim().to_lowercase() == normalized_header_name {
+                Some(value.trim().to_string())
+            } else {
+                None
+            }
+        })
+}
+
+fn is_allowed_word_bridge_origin(origin: &str) -> bool {
+    matches!(
+        origin,
+        "https://localhost:5174" | "http://localhost:5174" | "https://refx.667764.xyz"
+    )
 }
 
 fn reference_to_word_bridge(reference: Reference) -> WordBridgeReference {
@@ -1130,6 +1169,23 @@ fn write_json_response<T: Serialize>(
     write_http_response(stream, status_line, "application/json; charset=utf-8", &body)
 }
 
+fn write_json_response_with_origin<T: Serialize>(
+    stream: &mut TcpStream,
+    status_line: &str,
+    value: &T,
+    origin: Option<&str>,
+) -> Result<(), AppError> {
+    let body = serde_json::to_vec(value)
+        .map_err(|error| AppError::Validation(format!("Could not serialize bridge response: {error}")))?;
+    write_http_response_with_origin(
+        stream,
+        status_line,
+        "application/json; charset=utf-8",
+        &body,
+        origin,
+    )
+}
+
 fn write_bridge_error(
     stream: &mut TcpStream,
     status_line: &str,
@@ -1144,24 +1200,63 @@ fn write_bridge_error(
     )
 }
 
+fn write_bridge_error_with_origin(
+    stream: &mut TcpStream,
+    status_line: &str,
+    message: &str,
+    origin: Option<&str>,
+) -> Result<(), AppError> {
+    write_json_response_with_origin(
+        stream,
+        status_line,
+        &serde_json::json!({
+            "error": message,
+        }),
+        origin,
+    )
+}
+
 fn handle_word_addin_bridge_request(
     app: &AppHandle,
     stream: &mut TcpStream,
     method: &str,
     path: &str,
+    origin: Option<&str>,
 ) -> Result<(), AppError> {
+    if let Some(origin) = origin {
+        if !is_allowed_word_bridge_origin(origin) {
+            return write_bridge_error_with_origin(
+                stream,
+                "403 Forbidden",
+                "Origin not allowed.",
+                Some(origin),
+            );
+        }
+    }
+
     if method == "OPTIONS" {
-        return write_http_response(stream, "204 No Content", "text/plain; charset=utf-8", b"");
+        return write_http_response_with_origin(
+            stream,
+            "204 No Content",
+            "text/plain; charset=utf-8",
+            b"",
+            origin,
+        );
     }
 
     if method != "GET" {
-        return write_bridge_error(stream, "405 Method Not Allowed", "Method not allowed.");
+        return write_bridge_error_with_origin(
+            stream,
+            "405 Method Not Allowed",
+            "Method not allowed.",
+            origin,
+        );
     }
 
     let base_path = path_without_query(path);
 
-    if base_path == "/health" {
-        return write_json_response(
+    if base_path == "/health" || base_path == "/status" {
+        return write_json_response_with_origin(
             stream,
             "200 OK",
             &WordBridgeHealth {
@@ -1169,6 +1264,7 @@ fn handle_word_addin_bridge_request(
                 app: "Refx",
                 version: env!("CARGO_PKG_VERSION"),
             },
+            origin,
         );
     }
 
@@ -1179,7 +1275,7 @@ fn handle_word_addin_bridge_request(
             .filter(|work| word_bridge_work_matches(work, &query))
             .take(100)
             .collect();
-        return write_json_response(stream, "200 OK", &results);
+        return write_json_response_with_origin(stream, "200 OK", &results, origin);
     }
 
     if let Some(suffix) = base_path.strip_prefix("/works/") {
@@ -1192,16 +1288,17 @@ fn handle_word_addin_bridge_request(
                     .filter(|reference| word_bridge_reference_matches(reference, &query))
                     .take(200)
                     .collect();
-                return write_json_response(stream, "200 OK", &results);
+                return write_json_response_with_origin(stream, "200 OK", &results, origin);
             }
         }
     }
 
     if base_path == "/references" {
-        return write_bridge_error(
+        return write_bridge_error_with_origin(
             stream,
             "400 Bad Request",
             "Select a My Work first and use /works/:id/references.",
+            origin,
         );
     }
 
@@ -1210,12 +1307,12 @@ fn handle_word_addin_bridge_request(
         let reference = word_bridge_find_reference(app, &requested_id)?;
 
         return match reference {
-            Some(reference) => write_json_response(stream, "200 OK", &reference),
-            None => write_bridge_error(stream, "404 Not Found", "Reference not found."),
+            Some(reference) => write_json_response_with_origin(stream, "200 OK", &reference, origin),
+            None => write_bridge_error_with_origin(stream, "404 Not Found", "Reference not found.", origin),
         };
     }
 
-    write_bridge_error(stream, "404 Not Found", "Not found.")
+    write_bridge_error_with_origin(stream, "404 Not Found", "Not found.", origin)
 }
 
 fn process_word_addin_bridge_connection(
@@ -1240,8 +1337,9 @@ fn process_word_addin_bridge_connection(
     let path = request_parts
         .next()
         .ok_or_else(|| AppError::Validation("Missing HTTP path.".into()))?;
+    let origin = request_header_value(&request, "Origin");
 
-    handle_word_addin_bridge_request(app, &mut stream, method, path)
+    handle_word_addin_bridge_request(app, &mut stream, method, path, origin.as_deref())
 }
 
 pub fn ensure_word_addin_bridge_server(app: &AppHandle) -> Result<(), AppError> {

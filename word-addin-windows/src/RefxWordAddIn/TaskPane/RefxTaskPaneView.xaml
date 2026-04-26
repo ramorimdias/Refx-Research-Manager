@@ -1,0 +1,94 @@
+<UserControl x:Class="RefxWordAddIn.TaskPane.RefxTaskPaneView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             MinWidth="320"
+             MinHeight="420">
+    <Border Background="#FAFBFC" BorderBrush="#E2E8F0" BorderThickness="0">
+        <Grid Margin="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse Width="10" Height="10" Margin="0,0,8,0" Fill="{Binding ConnectionBrush}" />
+                <StackPanel>
+                    <TextBlock Text="Refx" FontSize="16" FontWeight="SemiBold" Foreground="#0F172A" />
+                    <TextBlock Text="{Binding StatusMessage}" Margin="0,2,0,0" FontSize="12" Foreground="#475569" TextWrapping="Wrap" />
+                </StackPanel>
+            </StackPanel>
+
+            <TextBlock Grid.Row="1"
+                       Margin="0,12,0,0"
+                       Text="{Binding ErrorMessage}"
+                       Foreground="#B91C1C"
+                       FontSize="12"
+                       TextWrapping="Wrap" />
+
+            <Grid Grid.Row="2" Margin="0,12,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <GroupBox Header="Works" Margin="0,0,8,0">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Top"
+                                Margin="0,0,0,8"
+                                Padding="8,4"
+                                Command="{Binding RefreshCommand}"
+                                Content="Refresh" />
+                        <ListBox ItemsSource="{Binding Works}"
+                                 SelectedItem="{Binding SelectedWork, Mode=TwoWay}"
+                                 BorderThickness="0"
+                                 Background="Transparent">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding ReferenceCount, StringFormat=References: {0}}" FontSize="11" Foreground="#64748B" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </GroupBox>
+
+                <GroupBox Grid.Column="1" Header="References" Margin="8,0,0,0">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Top"
+                                Margin="0,0,0,8"
+                                Padding="8,4"
+                                Command="{Binding InsertCitationCommand}"
+                                Content="Insert citation" />
+                        <ListBox ItemsSource="{Binding References}"
+                                 SelectedItem="{Binding SelectedReference, Mode=TwoWay}"
+                                 BorderThickness="0"
+                                 Background="Transparent">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,8">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding CitationKey}" FontSize="11" Foreground="#64748B" />
+                                        <TextBlock Text="{Binding Year, StringFormat=Year: {0}}" FontSize="11" Foreground="#64748B" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </GroupBox>
+            </Grid>
+
+            <TextBlock Grid.Row="3"
+                       Foreground="#64748B"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Text="This Windows-only pane reads the local Refx bridge on the same machine as Word." />
+        </Grid>
+    </Border>
+</UserControl>
