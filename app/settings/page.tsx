@@ -295,6 +295,8 @@ export default function SettingsPage() {
           restoring: 'Restaurando...',
           splashPreview: 'Pré-visualizar tela de carregamento',
           splashPreviewDescription: 'Recarrega o app e força a tela de carregamento por alguns segundos para depuração.',
+          anonymousUsageStats: 'Estatísticas anônimas de uso',
+          anonymousUsageStatsDescription: 'Compartilhe um ID de instalação anônimo, a versão do app e um heartbeat para contar instalações desktop ativas.',
         }
       case 'fr':
         return {
@@ -369,6 +371,8 @@ export default function SettingsPage() {
           restoring: 'Restauration...',
           splashPreview: 'Prévisualiser l’écran de chargement',
           splashPreviewDescription: 'Recharge l’application et force l’écran de chargement pendant quelques secondes pour le débogage.',
+          anonymousUsageStats: "Statistiques d'usage anonymes",
+          anonymousUsageStatsDescription: "Partager un identifiant d'installation anonyme, la version de l'application et un heartbeat pour compter les installations desktop actives.",
         }
       default:
         return {
@@ -443,6 +447,8 @@ export default function SettingsPage() {
           restoring: 'Restoring...',
           splashPreview: 'Preview loading screen',
           splashPreviewDescription: 'Reload the app and force the loading screen for a few seconds so you can debug it.',
+          anonymousUsageStats: 'Anonymous usage stats',
+          anonymousUsageStatsDescription: 'Share an anonymous install ID, app version, and heartbeat so you can count active desktop installs.',
         }
     }
   }, [locale])
@@ -1895,6 +1901,20 @@ export default function SettingsPage() {
                         {updateStatus}
                       </div>
                     ) : null}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between">
+                      <div className="pr-4">
+                        <Label className="text-sm font-medium">{settingsUiCopy.anonymousUsageStats}</Label>
+                      </div>
+                      <Checkbox
+                        checked={settings.shareAnonymousUsageStats}
+                        onCheckedChange={(checked) => updateSettings('shareAnonymousUsageStats', !!checked)}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
               </>

@@ -41,6 +41,7 @@
     ".pnpm-store",
     ".next",
     "src-tauri",
+    "workers",
     "word-addin",
     "out",
     "dist"

@@ -1,0 +1,11 @@
+name = "refx-usage-telemetry"
+main = "src/index.ts"
+compatibility_date = "2026-04-28"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "refx-usage-telemetry"
+database_id = "f3459c2c-9bf2-4ab8-b1a6-ae81aa4199f0"
+
+[vars]
+ADMIN_TOKEN = "a94b2c2b-fbe0-4182-8f9b-f672d902520f641172dc-dfc5-4b0c-a59e-c80ae922b604"

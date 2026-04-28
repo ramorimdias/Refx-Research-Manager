@@ -37,6 +37,9 @@ export type StoredAppSettings = {
     | 'dark-green'
   fontSize: '14' | '16' | '18'
   autoCheckForUpdates: boolean
+  shareAnonymousUsageStats: boolean
+  usageInstallId: string
+  usageTelemetryLastSentAt: string
   autoBackupEnabled: boolean
   autoBackupScope: 'full' | 'documents' | 'settings'
   autoBackupIntervalDays: string
@@ -72,6 +75,9 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   theme: 'system',
   fontSize: '16',
   autoCheckForUpdates: true,
+  shareAnonymousUsageStats: true,
+  usageInstallId: '',
+  usageTelemetryLastSentAt: '',
   autoBackupEnabled: false,
   autoBackupScope: 'full',
   autoBackupIntervalDays: '7',
@@ -214,6 +220,9 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       ...parsed,
       locale: parsed.locale ?? DEFAULT_APP_SETTINGS.locale,
       hasCompletedAppTour: parsed.hasCompletedAppTour ?? DEFAULT_APP_SETTINGS.hasCompletedAppTour,
+      shareAnonymousUsageStats: parsed.shareAnonymousUsageStats ?? DEFAULT_APP_SETTINGS.shareAnonymousUsageStats,
+      usageInstallId: parsed.usageInstallId?.trim() ?? DEFAULT_APP_SETTINGS.usageInstallId,
+      usageTelemetryLastSentAt: parsed.usageTelemetryLastSentAt ?? DEFAULT_APP_SETTINGS.usageTelemetryLastSentAt,
       semanticScholarApiMode: resolveSemanticScholarApiMode(
         typeof parsed.semanticScholarApiMode === 'string' ? parsed.semanticScholarApiMode : undefined,
         typeof parsed.semanticScholarApiKey === 'string' ? parsed.semanticScholarApiKey : undefined,
@@ -247,6 +256,12 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     theme: parseValue(stored.theme, DEFAULT_APP_SETTINGS.theme),
     fontSize: parseValue(stored.fontSize, DEFAULT_APP_SETTINGS.fontSize),
     autoCheckForUpdates: parseValue(stored.autoCheckForUpdates, DEFAULT_APP_SETTINGS.autoCheckForUpdates),
+    shareAnonymousUsageStats: parseValue(stored.shareAnonymousUsageStats, DEFAULT_APP_SETTINGS.shareAnonymousUsageStats),
+    usageInstallId: parseValue(stored.usageInstallId, DEFAULT_APP_SETTINGS.usageInstallId).trim(),
+    usageTelemetryLastSentAt: parseValue(
+      stored.usageTelemetryLastSentAt,
+      DEFAULT_APP_SETTINGS.usageTelemetryLastSentAt,
+    ),
     autoBackupEnabled: parseValue(stored.autoBackupEnabled, DEFAULT_APP_SETTINGS.autoBackupEnabled),
     autoBackupScope: parseValue(stored.autoBackupScope, DEFAULT_APP_SETTINGS.autoBackupScope),
     autoBackupIntervalDays: parseValue(stored.autoBackupIntervalDays, DEFAULT_APP_SETTINGS.autoBackupIntervalDays),
@@ -308,6 +323,9 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     theme: JSON.stringify(settings.theme),
     fontSize: JSON.stringify(settings.fontSize),
     autoCheckForUpdates: JSON.stringify(settings.autoCheckForUpdates),
+    shareAnonymousUsageStats: JSON.stringify(settings.shareAnonymousUsageStats),
+    usageInstallId: JSON.stringify(settings.usageInstallId),
+    usageTelemetryLastSentAt: JSON.stringify(settings.usageTelemetryLastSentAt),
     autoBackupEnabled: JSON.stringify(settings.autoBackupEnabled),
     autoBackupScope: JSON.stringify(settings.autoBackupScope),
     autoBackupIntervalDays: JSON.stringify(settings.autoBackupIntervalDays),

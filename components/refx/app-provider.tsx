@@ -37,6 +37,11 @@ import {
   downloadAndInstallAppUpdate,
   type AppUpdateSummary,
 } from '@/lib/services/app-update-service'
+import {
+  ensureUsageTelemetryIdentity,
+  sendUsageTelemetryEvent,
+  USAGE_TELEMETRY_HEARTBEAT_INTERVAL_MS,
+} from '@/lib/services/usage-telemetry-service'
 import { getCurrentWindow, isTauri, WebviewWindow } from '@/lib/tauri/client'
 import { getRemoteVaultStatusSnapshot, getRemoteVaultSyncPhaseSnapshot } from '@/lib/remote-storage-state'
 
@@ -103,6 +108,7 @@ export function AppProvider({ children }: AppProviderProps) {
   const [startupStatusLine, setStartupStatusLine] = useState('Preparing startup')
   const [startupDiagnostics, setStartupDiagnostics] = useState<string[]>([])
   const hasRevealedDesktopWindow = useRef(false)
+  const telemetrySessionStartedAt = useRef(new Date().toISOString())
   const { initialize } = useRuntimeActions()
   const { initialized, isDesktopApp } = useRuntimeState()
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed)
@@ -157,6 +163,9 @@ export function AppProvider({ children }: AppProviderProps) {
 
       try {
         settings = await withTimeout(loadAppSettings(isDesktopApp), SETTINGS_LOAD_TIMEOUT_MS, 'Loading app settings')
+        if (isDesktopApp) {
+          settings = await ensureUsageTelemetryIdentity(settings, isDesktopApp)
+        }
         pushStartupDiagnostic(`[settings] load:done locale=${settings.locale}`)
       } catch (error) {
         console.error('Failed to load app settings; using defaults.', error)
@@ -197,6 +206,35 @@ export function AppProvider({ children }: AppProviderProps) {
 
     void applySettings()
   }, [initialized, isDesktopApp, setTheme])
+
+  useEffect(() => {
+    if (!initialized || !isSettingsReady || !isDesktopApp || !appSettings) return
+
+    void sendUsageTelemetryEvent(appSettings, {
+      event: 'app_started',
+      sessionStartedAt: telemetrySessionStartedAt.current,
+    })
+
+    const intervalId = window.setInterval(() => {
+      void sendUsageTelemetryEvent(appSettings, {
+        event: 'heartbeat',
+        sessionStartedAt: telemetrySessionStartedAt.current,
+      })
+    }, USAGE_TELEMETRY_HEARTBEAT_INTERVAL_MS)
+
+    const handleBeforeUnload = () => {
+      void sendUsageTelemetryEvent(appSettings, {
+        event: 'app_closed',
+        sessionStartedAt: telemetrySessionStartedAt.current,
+      })
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.clearInterval(intervalId)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [appSettings, initialized, isDesktopApp, isSettingsReady])
 
   useEffect(() => {
     if (!initialized || !isDesktopApp || !appSettings?.autoCheckForUpdates) return
