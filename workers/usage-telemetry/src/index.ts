@@ -18,6 +18,9 @@ function json(data: unknown, init?: ResponseInit) {
     ...init,
     headers: {
       'content-type': 'application/json; charset=utf-8',
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
+      'access-control-allow-headers': 'content-type, authorization, x-admin-token',
       ...(init?.headers ?? {}),
     },
   })
@@ -28,6 +31,9 @@ function html(markup: string, init?: ResponseInit) {
     ...init,
     headers: {
       'content-type': 'text/html; charset=utf-8',
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
+      'access-control-allow-headers': 'content-type, authorization, x-admin-token',
       ...(init?.headers ?? {}),
     },
   })
@@ -52,6 +58,16 @@ function normalizeIsoDate(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString()
 }
 
+function normalizePlatform(value: string | null) {
+  if (!value) return null
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return null
+  if (normalized.startsWith('win')) return 'windows'
+  if (normalized.startsWith('mac')) return 'macos'
+  if (normalized.startsWith('linux')) return 'linux'
+  return normalized
+}
+
 async function handleHeartbeat(request: Request, env: Env) {
   let payload: HeartbeatPayload
 
@@ -67,7 +83,7 @@ async function handleHeartbeat(request: Request, env: Env) {
 
   const installId = payload.install_id.trim()
   const appVersion = isNonEmptyString(payload.app_version, 64) ? payload.app_version.trim() : null
-  const platform = isNonEmptyString(payload.platform, 64) ? payload.platform.trim() : null
+  const platform = normalizePlatform(isNonEmptyString(payload.platform, 64) ? payload.platform.trim() : null)
   const locale = isNonEmptyString(payload.locale, 32) ? payload.locale.trim() : null
   const event = isNonEmptyString(payload.event, 32) ? payload.event.trim() : 'heartbeat'
   const sentAt = normalizeIsoDate(payload.sent_at)
@@ -101,7 +117,10 @@ async function handleStats(request: Request, env: Env) {
     return json({ ok: false, error: 'unauthorized' }, { status: 401 })
   }
 
-  const [current, dau, wau, mau] = await Promise.all([
+  const [total, current, dau, wau, mau] = await Promise.all([
+    env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM install_heartbeats",
+    ).first<{ count: number }>(),
     env.DB.prepare(
       "SELECT COUNT(*) AS count FROM install_heartbeats WHERE datetime(last_seen_at) >= datetime('now', '-5 minutes')",
     ).first<{ count: number }>(),
@@ -119,6 +138,7 @@ async function handleStats(request: Request, env: Env) {
   return json({
     ok: true,
     stats: {
+      total_installs_seen: total?.count ?? 0,
       current_open_estimate: current?.count ?? 0,
       dau: dau?.count ?? 0,
       wau: wau?.count ?? 0,
@@ -297,7 +317,7 @@ function renderAdminPage() {
 
       .stats {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 14px;
         margin-bottom: 18px;
       }
@@ -392,6 +412,7 @@ function renderAdminPage() {
       <div class="status" id="status">Enter your admin token, then load the dashboard.</div>
 
       <div class="stats">
+        <div class="stat"><div class="stat-label">Total Installs Seen</div><div class="stat-value" id="total">-</div></div>
         <div class="stat"><div class="stat-label">Current Open Estimate</div><div class="stat-value" id="current">-</div></div>
         <div class="stat"><div class="stat-label">Daily Active</div><div class="stat-value" id="dau">-</div></div>
         <div class="stat"><div class="stat-label">Weekly Active</div><div class="stat-value" id="wau">-</div></div>
@@ -490,6 +511,7 @@ function renderAdminPage() {
           const statsPayload = await readJsonResponse(statsRes);
           const breakdownPayload = await readJsonResponse(breakdownRes);
 
+          setCount('total', statsPayload.stats.total_installs_seen);
           setCount('current', statsPayload.stats.current_open_estimate);
           setCount('dau', statsPayload.stats.dau);
           setCount('wau', statsPayload.stats.wau);
@@ -523,6 +545,18 @@ function renderAdminPage() {
 export default {
   async fetch(request: Request, env: Env) {
     const url = new URL(request.url)
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': 'GET,POST,OPTIONS',
+          'access-control-allow-headers': 'content-type, authorization, x-admin-token',
+          'access-control-max-age': '86400',
+        },
+      })
+    }
 
     if (request.method === 'GET' && url.pathname === '/admin') {
       return renderAdminPage()

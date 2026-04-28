@@ -81,10 +81,10 @@ export async function sendUsageTelemetryEvent(
     sessionStartedAt: string
   },
 ) {
-  if (!isTauri()) return false
+  if (!isTauri()) return null
 
   const sentAt = new Date()
-  if (shouldSkipSend(settings, options.event, sentAt)) return false
+  if (shouldSkipSend(settings, options.event, sentAt)) return null
 
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -111,16 +111,17 @@ export async function sendUsageTelemetryEvent(
     })
 
     if (!response.ok) {
-      return false
+      return null
     }
 
+    const sentAtIso = sentAt.toISOString()
     await persistTelemetrySettingsPatch({
-      usageTelemetryLastSentAt: sentAt.toISOString(),
+      usageTelemetryLastSentAt: sentAtIso,
     })
-    return true
+    return sentAtIso
   } catch (error) {
     console.warn('Usage telemetry request failed:', error)
-    return false
+    return null
   } finally {
     window.clearTimeout(timeoutId)
   }

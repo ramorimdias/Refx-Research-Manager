@@ -213,12 +213,18 @@ export function AppProvider({ children }: AppProviderProps) {
     void sendUsageTelemetryEvent(appSettings, {
       event: 'app_started',
       sessionStartedAt: telemetrySessionStartedAt.current,
+    }).then((sentAt) => {
+      if (!sentAt) return
+      setAppSettings((current) => current ? { ...current, usageTelemetryLastSentAt: sentAt } : current)
     })
 
     const intervalId = window.setInterval(() => {
       void sendUsageTelemetryEvent(appSettings, {
         event: 'heartbeat',
         sessionStartedAt: telemetrySessionStartedAt.current,
+      }).then((sentAt) => {
+        if (!sentAt) return
+        setAppSettings((current) => current ? { ...current, usageTelemetryLastSentAt: sentAt } : current)
       })
     }, USAGE_TELEMETRY_HEARTBEAT_INTERVAL_MS)
 

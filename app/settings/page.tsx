@@ -43,6 +43,7 @@ import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
 import { PageHeader } from '@/components/refx/page-header'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
+import { isUsageTelemetryConfigured } from '@/lib/services/usage-telemetry-service'
 import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
 import { getRemoteVaultDisplayMessage, getRemoteVaultModeLabel } from '@/lib/remote-vault-copy'
 import { APP_VERSION, getAppVersion } from '@/lib/app-version'
@@ -1906,9 +1907,22 @@ export default function SettingsPage() {
 
                 <Card>
                   <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div className="pr-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0 pr-4">
                         <Label className="text-sm font-medium">{settingsUiCopy.anonymousUsageStats}</Label>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <span>{isUsageTelemetryConfigured() ? 'Configured' : 'Missing'}</span>
+                          <span>•</span>
+                          <span className="max-w-[10rem] truncate">
+                            {settings.usageInstallId || 'No install ID'}
+                          </span>
+                          <span>•</span>
+                          <span>
+                            {settings.usageTelemetryLastSentAt
+                              ? new Date(settings.usageTelemetryLastSentAt).toLocaleString()
+                              : 'Never sent'}
+                          </span>
+                        </div>
                       </div>
                       <Checkbox
                         checked={settings.shareAnonymousUsageStats}
