@@ -1,7 +1,7 @@
 import { getVersion } from '@tauri-apps/api/app'
 import { isTauri } from '@/lib/tauri/client'
 
-export const APP_VERSION = '0.9.2'
+export const APP_VERSION = '0.9.3'
 
 export async function getAppVersion(): Promise<string> {
   if (!isTauri()) {
