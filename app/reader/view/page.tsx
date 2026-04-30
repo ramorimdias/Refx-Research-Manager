@@ -2,7 +2,7 @@
 
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Printer, Search, SquareArrowOutUpRight, StickyNote, Trash2, Type, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Printer, Search, SquareArrowOutUpRight, SquareSquare, StickyNote, Trash2, Type, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -186,7 +186,7 @@ function highlightText(text: string, query: string) {
 
   return segments.map((segment, index) =>
     terms.some((term) => term.toLowerCase() === segment.toLowerCase()) ? (
-      <mark key={`${segment}-${index}`} className="rounded bg-primary/20 px-0.5 text-foreground">
+      <mark key={`${segment}-${index}`} className="bg-amber-200/80 px-0.5 text-inherit shadow-[0_0_0_1px_rgba(217,119,6,0.12)]">
         {segment}
       </mark>
     ) : (
@@ -207,6 +207,10 @@ function firstNonEmptyText(...values: Array<string | null | undefined>) {
 function normalizeZoomLevel(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 100
   return Math.min(250, Math.max(50, Math.round(value)))
+}
+
+function getReaderDisplayedZoom(value: number) {
+  return Math.max(25, Math.round(value / 2))
 }
 
 function getVisibleReaderPages(activePage: number, pageCount: number) {
@@ -418,7 +422,7 @@ function RealReaderViewPage() {
   const queryFromRoute = params.get('query') ?? ''
   const matchTextFromRoute = params.get('matchText') ?? ''
   const pageFromRoute = Number(params.get('page') ?? '1')
-  const zoomFromRoute = Number(params.get('zoom') ?? '100')
+  const zoomFromRoute = Number(params.get('zoom') ?? '200')
   const returnTo = params.get('returnTo') ?? ''
   const isDetachedReaderWindow = params.get('detached') === DETACHED_READER_QUERY_VALUE
   const documents = useDocumentStore((state) => state.documents)
@@ -465,9 +469,11 @@ function RealReaderViewPage() {
   const [activeOccurrenceIndex, setActiveOccurrenceIndex] = useState(0)
   const [searchOccurrences, setSearchOccurrences] = useState<SearchOccurrence[]>([])
   const occurrenceRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const activeOccurrenceHighlightRef = useRef<HTMLDivElement | null>(null)
   const commentCardRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const noteEditorTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shouldAutoScrollOccurrenceRef = useRef(false)
+  const shouldEnsureOccurrenceVisibleRef = useRef(false)
   const shouldAutoScrollCommentRef = useRef(false)
   const shouldAutoFocusNoteEditorRef = useRef(false)
   const skipNextTransientTextDismissRef = useRef(false)
@@ -535,7 +541,7 @@ function RealReaderViewPage() {
 
     const timeout = window.setTimeout(() => {
       setRenderZoom(normalizedZoom)
-    }, 500)
+    }, 180)
 
     return () => window.clearTimeout(timeout)
   }, [renderZoom, zoom])
@@ -784,7 +790,8 @@ function RealReaderViewPage() {
   const activeOccurrence = searchOccurrences[activeOccurrenceIndex] ?? null
   const selectedHighlightColor = getReaderColorOption(selectedHighlightColorId)
   const selectedNoteColor = getReaderColorOption(selectedNoteColorId)
-  const zoomPreviewScale = renderZoom > 0 ? zoom / renderZoom : 1
+  const displayedZoom = getReaderDisplayedZoom(zoom)
+  const isOverlayZoomTransitioning = zoom !== renderZoom
   const totalPageCount = pdfDocument?.numPages ?? document?.pageCount ?? page
   const allPageNumbers = useMemo(
     () => getReaderPageNumbers(totalPageCount),
@@ -824,6 +831,60 @@ function RealReaderViewPage() {
     }
     return grouped
   }, [searchOccurrences])
+  const groupedSearchOccurrences = useMemo(() => {
+    const normalized = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase()
+    const groups: Array<{
+      occurrence: SearchOccurrence
+      occurrenceIndexes: number[]
+      rangeEnd: number
+    }> = []
+
+    for (let index = 0; index < searchOccurrences.length; index += 1) {
+      const occurrence = searchOccurrences[index]
+      if (!occurrence) continue
+
+      const previous = groups[groups.length - 1]
+      const overlapThreshold = previous?.occurrence.rects?.length && occurrence.rects?.length ? 10 : 80
+      const sameAsPrevious = previous
+        && previous.occurrence.estimatedPage === occurrence.estimatedPage
+        && (
+          normalized(previous.occurrence.snippet) === normalized(occurrence.snippet)
+          || occurrence.start <= previous.rangeEnd + overlapThreshold
+        )
+
+      if (sameAsPrevious) {
+        previous.occurrenceIndexes.push(index)
+        previous.rangeEnd = Math.max(previous.rangeEnd, occurrence.end)
+        continue
+      }
+
+      groups.push({
+        occurrence,
+        occurrenceIndexes: [index],
+        rangeEnd: occurrence.end,
+      })
+    }
+
+    return groups
+  }, [searchOccurrences])
+  const occurrenceGroupIndexByOccurrenceIndex = useMemo(() => {
+    const mapping = new Map<number, number>()
+    groupedSearchOccurrences.forEach((group, groupIndex) => {
+      group.occurrenceIndexes.forEach((occurrenceIndex) => {
+        mapping.set(occurrenceIndex, groupIndex)
+      })
+    })
+    return mapping
+  }, [groupedSearchOccurrences])
+  const activeOccurrenceGroupIndexes = useMemo(() => {
+    const activeGroupIndex = occurrenceGroupIndexByOccurrenceIndex.get(activeOccurrenceIndex)
+    if (activeGroupIndex == null) return new Set<number>([activeOccurrenceIndex])
+    return new Set(groupedSearchOccurrences[activeGroupIndex]?.occurrenceIndexes ?? [activeOccurrenceIndex])
+  }, [activeOccurrenceIndex, groupedSearchOccurrences, occurrenceGroupIndexByOccurrenceIndex])
+  const activeOccurrenceGroupIndex = useMemo(
+    () => occurrenceGroupIndexByOccurrenceIndex.get(activeOccurrenceIndex) ?? 0,
+    [activeOccurrenceIndex, occurrenceGroupIndexByOccurrenceIndex],
+  )
   const currentPageComments = useMemo(
     () => (id ? getDocumentPageComments(notes, id, page) : []),
     [id, notes, page],
@@ -947,10 +1008,26 @@ function RealReaderViewPage() {
 
   useEffect(() => {
     if (shouldAutoScrollOccurrenceRef.current) {
-      occurrenceRefs.current[activeOccurrenceIndex]?.scrollIntoView({ block: 'nearest' })
+      const groupIndex = occurrenceGroupIndexByOccurrenceIndex.get(activeOccurrenceIndex) ?? activeOccurrenceIndex
+      occurrenceRefs.current[groupIndex]?.scrollIntoView({ block: 'nearest' })
       shouldAutoScrollOccurrenceRef.current = false
     }
-  }, [activeOccurrenceIndex])
+  }, [activeOccurrenceIndex, occurrenceGroupIndexByOccurrenceIndex])
+
+  useEffect(() => {
+    if (!shouldEnsureOccurrenceVisibleRef.current) return
+    if (activeOccurrence?.estimatedPage !== page) return
+
+    const highlightedRect = activeOccurrenceHighlightRef.current
+    if (!highlightedRect) return
+
+    highlightedRect.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+      behavior: 'auto',
+    })
+    shouldEnsureOccurrenceVisibleRef.current = false
+  }, [activeOccurrence, page, renderZoom, visiblePageNumbers])
 
   useEffect(() => {
     if (shouldAutoScrollCommentRef.current && selectedCommentId) {
@@ -1077,10 +1154,11 @@ function RealReaderViewPage() {
     viewport.scrollLeft = nextScrollLeft
     viewport.scrollTop = nextScrollTop
 
-    if (renderZoom === focus.targetZoom) {
+    const focusedPageRenderedZoom = renderedZoomByPageRef.current[focus.pageNumber]
+    if (renderZoom === focus.targetZoom && focusedPageRenderedZoom === focus.targetZoom) {
       zoomFocusRef.current = null
     }
-  }, [zoom, renderZoom])
+  }, [zoom, renderZoom, page, renderedPageSizes, visiblePageNumbers])
 
   useEffect(() => {
     const viewport = readerViewportRef.current
@@ -1273,19 +1351,26 @@ function RealReaderViewPage() {
     if (!occurrence) return
 
     shouldAutoScrollOccurrenceRef.current = true
+    shouldEnsureOccurrenceVisibleRef.current = true
     setActiveOccurrenceIndex(index)
+    const targetZoom = Math.max(zoom, 200)
+    if (targetZoom !== zoom) {
+      setZoom(targetZoom)
+    }
     if (options?.jumpToPage) {
       setPage(occurrence.estimatedPage)
     }
   }
 
   const rotateOccurrence = (direction: 'next' | 'prev') => {
-    if (searchOccurrences.length === 0) return
-    const nextIndex =
+    if (groupedSearchOccurrences.length === 0) return
+    const nextGroupIndex =
       direction === 'next'
-        ? (activeOccurrenceIndex + 1) % searchOccurrences.length
-        : (activeOccurrenceIndex - 1 + searchOccurrences.length) % searchOccurrences.length
-    selectOccurrence(nextIndex, { jumpToPage: true })
+        ? (activeOccurrenceGroupIndex + 1) % groupedSearchOccurrences.length
+        : (activeOccurrenceGroupIndex - 1 + groupedSearchOccurrences.length) % groupedSearchOccurrences.length
+    const nextOccurrenceIndex = groupedSearchOccurrences[nextGroupIndex]?.occurrenceIndexes[0]
+    if (typeof nextOccurrenceIndex !== 'number') return
+    selectOccurrence(nextOccurrenceIndex, { jumpToPage: true })
   }
 
   useEffect(() => {
@@ -1657,7 +1742,7 @@ function RealReaderViewPage() {
           existing.push({
             occurrenceIndex: occurrence.index,
             rect,
-            isActive: occurrence.index === activeOccurrenceIndex,
+            isActive: activeOccurrenceGroupIndexes.has(occurrence.index),
           })
         }
         searchHighlightsByPage.set(occurrence.estimatedPage, existing)
@@ -2395,10 +2480,20 @@ function RealReaderViewPage() {
           <div className="mx-1 h-5 w-px bg-border/80" aria-hidden="true" />
           <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/80 px-2 py-1">
             <ReaderToolbarIconButton
+              label="Reset zoom"
+              onClick={() => {
+                const nextZoom = 200
+                void captureViewportCenterZoomAnchor(nextZoom)
+                setZoom(nextZoom)
+              }}
+            >
+              <SquareSquare className="h-4 w-4" />
+            </ReaderToolbarIconButton>
+            <ReaderToolbarIconButton
               label="Zoom out"
               onClick={() => {
                 setZoom((current) => {
-                  const nextZoom = Math.max(50, current - 10)
+                  const nextZoom = Math.max(50, current - 20)
                   void captureViewportCenterZoomAnchor(nextZoom)
                   return nextZoom
                 })
@@ -2406,12 +2501,12 @@ function RealReaderViewPage() {
             >
               <ZoomOut className="h-4 w-4" />
             </ReaderToolbarIconButton>
-            <span className="min-w-[2.75rem] text-center text-xs text-muted-foreground">{zoom}%</span>
+            <span className="min-w-[2.75rem] text-center text-xs text-muted-foreground">{displayedZoom}%</span>
             <ReaderToolbarIconButton
               label="Zoom in"
               onClick={() => {
                 setZoom((current) => {
-                  const nextZoom = Math.min(250, current + 10)
+                  const nextZoom = Math.min(250, current + 20)
                   void captureViewportCenterZoomAnchor(nextZoom)
                   return nextZoom
                 })
@@ -2678,6 +2773,8 @@ function RealReaderViewPage() {
                 <div className="relative flex w-full flex-col items-center gap-6 py-2">
                   {allPageNumbers.map((pageNumber) => {
                     const pageSize = renderedPageSizes[pageNumber] ?? fallbackRenderedPageSize
+                    const pageRenderedZoom = renderedZoomByPageRef.current[pageNumber] ?? renderZoom
+                    const pagePreviewScale = pageRenderedZoom > 0 ? zoom / pageRenderedZoom : 1
                     const isActivePage = pageNumber === page
                     const isVisiblePage = visiblePageNumbers.includes(pageNumber)
                     const pageOccurrences = occurrencesByPage.get(pageNumber) ?? []
@@ -2724,8 +2821,8 @@ function RealReaderViewPage() {
                         onPointerUpCapture={isActivePage ? handleTextSelectionGestureEnd : undefined}
                         onPointerCancel={isActivePage ? handleTextSelectionGestureEnd : undefined}
                         style={{
-                          width: pageSize.width > 0 ? `${pageSize.width * zoomPreviewScale}px` : undefined,
-                          height: pageSize.height > 0 ? `${pageSize.height * zoomPreviewScale}px` : undefined,
+                          width: pageSize.width > 0 ? `${pageSize.width * pagePreviewScale}px` : undefined,
+                          height: pageSize.height > 0 ? `${pageSize.height * pagePreviewScale}px` : undefined,
                         }}
                       >
                         <div
@@ -2736,7 +2833,7 @@ function RealReaderViewPage() {
                           style={{
                             width: pageSize.width > 0 ? `${pageSize.width}px` : undefined,
                             height: pageSize.height > 0 ? `${pageSize.height}px` : undefined,
-                            transform: `scale(${zoomPreviewScale})`,
+                            transform: `scale(${pagePreviewScale})`,
                           }}
                         >
                           {isVisiblePage ? (
@@ -2744,7 +2841,7 @@ function RealReaderViewPage() {
                               ref={(element) => {
                                 pageCanvasRefs.current[pageNumber] = element
                               }}
-                              className="block bg-white"
+                              className="relative z-0 block bg-white"
                             />
                           ) : (
                             <div
@@ -2760,7 +2857,12 @@ function RealReaderViewPage() {
                             </div>
                           )}
                           {isVisiblePage && pageSize.width > 0 && (
-                            <div className="absolute inset-0">
+                            <div
+                              className={cn(
+                                'absolute inset-0 transition-opacity duration-200',
+                                isOverlayZoomTransitioning ? 'pointer-events-none opacity-0' : 'opacity-100',
+                              )}
+                            >
                               {isActivePage && isTextSelectionLayerVisible ? (
                                 <div className="absolute inset-0 z-30 overflow-hidden select-text cursor-text">
                                   {pageWords.map((word, wordIndex) => (
@@ -2907,12 +3009,13 @@ function RealReaderViewPage() {
                               <div className="pointer-events-none absolute inset-0">
                                 {pageHighlights.flatMap((occurrence) =>
                                   (occurrence.rects ?? []).map((rect, rectIndex) => {
-                                    const isActive = occurrence.index === activeOccurrenceIndex
+                                    const isActive = activeOccurrenceGroupIndexes.has(occurrence.index)
                                     return (
                                       <div
                                         key={`${occurrence.index}-${rectIndex}`}
-                                        className={`absolute rounded-sm mix-blend-multiply ${
-                                          isActive ? 'bg-amber-300/50 ring-1 ring-amber-500/45' : 'bg-sky-200/35'
+                                        ref={isActive && occurrence.index === activeOccurrenceIndex && rectIndex === 0 ? activeOccurrenceHighlightRef : null}
+                                        className={`absolute mix-blend-multiply ${
+                                          isActive ? 'bg-amber-300/52' : 'bg-sky-300/28'
                                         }`}
                                         style={{
                                           left: `${rect.left * (zoom / 100)}px`,
@@ -3140,8 +3243,8 @@ function RealReaderViewPage() {
             <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('readerView.keywordOrPhrase')} />
             {searchQuery.trim() ? (
               <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{searchOccurrences.length} occurrence{searchOccurrences.length === 1 ? '' : 's'}</span>
-                {searchOccurrences.length > 0 && <span>Selected {activeOccurrenceIndex + 1}</span>}
+                <span>{groupedSearchOccurrences.length} occurrence{groupedSearchOccurrences.length === 1 ? '' : 's'}</span>
+                {groupedSearchOccurrences.length > 0 && <span>Selected {activeOccurrenceGroupIndex + 1}</span>}
               </div>
             ) : null}
             {searchQuery.trim() ? (
@@ -3170,33 +3273,33 @@ function RealReaderViewPage() {
             ) : null}
             {searchOccurrences.length > 0 ? (
               <div className="max-h-72 space-y-2 overflow-auto pr-1">
-                {searchOccurrences.map((occurrence, index) => (
+                {groupedSearchOccurrences.map(({ occurrence, occurrenceIndexes }, groupIndex) => (
                   <button
-                    key={`${occurrence.start}-${index}`}
+                    key={`${occurrence.start}-${occurrenceIndexes.join('-')}`}
                     ref={(element) => {
-                      occurrenceRefs.current[index] = element
+                      occurrenceRefs.current[groupIndex] = element
                     }}
                     type="button"
                     onClick={() => {
-                      selectOccurrence(index, { jumpToPage: true })
+                      selectOccurrence(occurrenceIndexes[0] ?? 0, { jumpToPage: true })
                     }}
                     className={`w-full rounded-md border p-2 text-left text-sm transition ${
-                      index === activeOccurrenceIndex ? 'border-primary bg-primary/8' : 'border-border bg-muted/40 hover:bg-muted/70'
+                      occurrenceIndexes.includes(activeOccurrenceIndex) ? 'border-primary bg-primary/8' : 'border-border bg-muted/40 hover:bg-muted/70'
                     }`}
                   >
                     <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{t('readerView.occurrence', { index: index + 1 })}</span>
+                      <span>
+                        {occurrenceIndexes.length === 1
+                          ? t('readerView.occurrence', { index: (occurrenceIndexes[0] ?? 0) + 1 })
+                          : `Occurrences ${occurrenceIndexes.map((value) => value + 1).join(', ')}`}
+                      </span>
                       <span>{occurrence.rects?.length ? 'Page' : t('readerView.approxPage')} {occurrence.estimatedPage}</span>
                     </div>
-                    {occurrence.rects?.length ? (
-                      <Badge variant="outline" className="mb-2">
-                        {t('readerView.exactRegion')}
-                      </Badge>
-                    ) : (
+                    {!occurrence.rects?.length ? (
                       <Badge variant="outline" className="mb-2">
                         {t('readerView.pageFallback')}
                       </Badge>
-                    )}
+                    ) : null}
                     <div className="leading-6">{highlightText(occurrence.snippet, searchQuery)}</div>
                   </button>
                 ))}

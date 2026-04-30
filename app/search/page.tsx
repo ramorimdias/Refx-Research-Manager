@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { EmptyState, MetadataStatusBadge, ReadingStageBadge } from '@/components/refx/common'
+import { EmptyState } from '@/components/refx/common'
 import { PageHeader } from '@/components/refx/page-header'
 import type { KeywordGroup, MetadataStatus, ReadingStage } from '@/lib/types'
 import { searchDocuments, type DocumentSearchPageHit, type DocumentSearchQuery, type SearchProgressUpdate } from '@/lib/services/document-search-service'
@@ -806,16 +806,18 @@ function RealSearchPage() {
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-6 p-4 md:p-6">
+    <div className="flex h-full min-h-0 flex-col gap-6 overflow-hidden p-4 md:p-6">
+        <div className="sticky top-0 z-20 -mx-4 bg-background/95 px-4 pb-1 pt-1 backdrop-blur md:-mx-6 md:px-6">
         <PageHeader
           icon={<SearchIcon className="h-6 w-6" />}
           title={t('searchPage.title')}
           subtitle={t('searchPage.subtitleCompact')}
         />
+        </div>
 
-        <div className="grid min-h-0 gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="h-fit" data-tour-id="search-query">
-            <CardContent className="space-y-5 pt-6">
+        <div className="grid min-h-0 flex-1 gap-6 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
+          <Card className="h-fit self-start overflow-hidden" data-tour-id="search-query">
+            <CardContent className="space-y-5 overflow-y-auto pt-6 lg:max-h-[calc(100vh-8.5rem)] lg:[scrollbar-gutter:stable]">
               <form
                 className="space-y-4"
                 onSubmit={(event) => {
@@ -1031,7 +1033,7 @@ function RealSearchPage() {
             </CardContent>
           </Card>
 
-          <div className="space-y-4" data-tour-id="search-results">
+          <div className="min-h-0 space-y-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]" data-tour-id="search-results">
             {executedGroups.length > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
                 <div>
@@ -1095,16 +1097,16 @@ function RealSearchPage() {
 
               return (
                 <Card key={document.id}>
-                  <CardContent className="flex flex-col gap-4 py-6">
-                    <div className="flex items-start justify-between gap-4">
+                  <CardContent className="flex flex-col gap-3 py-4">
+                    <div className="min-w-0">
                       <div className="min-w-0">
                         <Link
                           href={readerHref}
-                          className="text-lg font-semibold hover:text-primary"
+                          className="block truncate text-lg font-semibold hover:text-primary"
                         >
                           {document.title}
                         </Link>
-                        <p className="mt-1 text-sm text-muted-foreground">
+                        <p className="mt-1 truncate text-sm text-muted-foreground">
                           {document.authors.join(', ') || t('searchPage.unknownAuthor')}
                           {document.year ? ` • ${document.year}` : ''}
                           {library ? ` • ${library.name}` : ''}
@@ -1112,9 +1114,7 @@ function RealSearchPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <ReadingStageBadge stage={document.readingStage} />
-                      <MetadataStatusBadge status={document.metadataStatus} />
+                    <div className="flex flex-wrap gap-1.5">
                       {document.tags.slice(0, 4).map((tag) => (
                         <Badge key={tag} variant="secondary">
                           {tag}
@@ -1141,16 +1141,6 @@ function RealSearchPage() {
                       <p className="text-sm leading-6 text-muted-foreground">{highlightText(preview, executedKeywords)}</p>
                     ) : null}
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button asChild>
-                        <Link href={readerHref}>
-                          {t('searchPage.openReader')}
-                        </Link>
-                      </Button>
-                      <Button asChild variant="outline">
-                        <Link href={`/documents?id=${document.id}&edit=1`}>{t('searchPage.openDetails')}</Link>
-                      </Button>
-                    </div>
                   </CardContent>
                 </Card>
               )

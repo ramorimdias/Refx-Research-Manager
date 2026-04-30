@@ -442,27 +442,29 @@ async function extractPdfPages(filePath: string) {
           const raw = normalizeText(item.str ?? '')
           if (!raw) continue
 
-          const segments = raw.split(/\s+/).filter(Boolean)
-          if (segments.length === 0) continue
+          const segmentMatches = Array.from(raw.matchAll(/\S+/g))
+          if (segmentMatches.length === 0) continue
 
-          const totalCharacters = segments.reduce((sum, segment) => sum + segment.length, 0)
-          const itemWidth = Math.max(item.width ?? 0, segments.length * 8)
+          const rawLength = raw.length
+          const itemWidth = Math.max(item.width ?? 0, segmentMatches.length * 8)
           const itemHeight = Math.max(item.height ?? 0, 10)
           const transform = item.transform ?? [1, 0, 0, 1, 0, 0]
-          let cursorX = transform[4] ?? 0
+          const itemLeft = transform[4] ?? 0
 
-          for (const segment of segments) {
-            const ratio = totalCharacters > 0 ? segment.length / totalCharacters : 1 / segments.length
-            const width = Math.max(6, itemWidth * ratio)
+          for (const segmentMatch of segmentMatches) {
+            const segment = segmentMatch[0]
+            const startIndex = segmentMatch.index ?? 0
+            const endIndex = startIndex + segment.length
+            const left = itemLeft + (itemWidth * (startIndex / Math.max(1, rawLength)))
+            const width = Math.max(6, itemWidth * ((endIndex - startIndex) / Math.max(1, rawLength)))
             words.push({
               text: segment,
-              left: cursorX,
+              left,
               top: viewport.height - (transform[5] ?? 0) - itemHeight,
               width,
               height: itemHeight,
               confidence: 1,
             })
-            cursorX += width + 2
           }
         }
 
