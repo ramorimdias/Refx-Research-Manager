@@ -27,11 +27,13 @@ import {
   extractPdfPageWords,
   extractSearchPreview,
   findPdfSearchOccurrences,
+  findPdfSearchOccurrencesForQueries,
   loadPdfJsModule,
+  parseFlexibleSearchTerms,
   type PdfWord,
   type SearchOccurrence,
 } from '@/lib/services/document-processing'
-import { findDocumentPageHits } from '@/lib/services/document-search-service'
+import { findDocumentPageHits, type DocumentSearchQuery } from '@/lib/services/document-search-service'
 import { DETACHED_READER_QUERY_VALUE, openDetachedReaderWindow } from '@/lib/services/reader-window-service'
 import { parseAreaNoteAnchor, parseNoteAnchorColor, serializeAreaNoteAnchor, serializePointNoteAnchor, type NoteAreaRect } from '@/lib/services/document-note-anchor-service'
 import { cn } from '@/lib/utils'
@@ -172,9 +174,10 @@ function highlightText(text: string, query: string) {
   const trimmed = query.trim()
   if (!trimmed) return text
 
+  const parsedTerms = parseFlexibleSearchTerms(trimmed)
   const terms = Array.from(new Set([
-    trimmed,
-    ...trimmed.split(/\s+/).map((term) => term.trim()).filter((term) => term.length >= 2),
+    ...parsedTerms,
+    ...parsedTerms.flatMap((term) => term.split(/\s+/).map((part) => part.trim()).filter((part) => part.length >= 2)),
   ]))
   const pattern = terms
     .sort((left, right) => right.length - left.length)
@@ -211,6 +214,25 @@ function normalizeZoomLevel(value: number) {
 
 function getReaderDisplayedZoom(value: number) {
   return Math.max(25, Math.round(value / 2))
+}
+
+function buildReaderOccurrenceTerms(query: string, routeTerms: string[], routeQuery: string) {
+  const normalizedRouteTerms = Array.from(new Set(routeTerms.map((term) => term.trim()).filter(Boolean)))
+  if (query.trim() === routeQuery.trim() && normalizedRouteTerms.length > 0) {
+    return normalizedRouteTerms
+  }
+
+  return parseFlexibleSearchTerms(query)
+}
+
+function buildReaderOccurrenceQuery(terms: string[]): DocumentSearchQuery | null {
+  const normalizedTerms = Array.from(new Set(terms.map((term) => term.trim()).filter(Boolean)))
+  if (normalizedTerms.length === 0) return null
+  if (normalizedTerms.length === 1) return normalizedTerms[0] ?? null
+  return {
+    combineWith: 'OR',
+    queries: normalizedTerms,
+  }
 }
 
 function getVisibleReaderPages(activePage: number, pageCount: number) {
@@ -421,6 +443,11 @@ function RealReaderViewPage() {
   const id = params.get('id') ?? ''
   const queryFromRoute = params.get('query') ?? ''
   const matchTextFromRoute = params.get('matchText') ?? ''
+  const routeTermsParamKey = params.getAll('term').join('\u0000')
+  const routeTermsFromParams = useMemo(
+    () => routeTermsParamKey.split('\u0000').filter(Boolean),
+    [routeTermsParamKey],
+  )
   const pageFromRoute = Number(params.get('page') ?? '1')
   const zoomFromRoute = Number(params.get('zoom') ?? '200')
   const returnTo = params.get('returnTo') ?? ''
@@ -727,9 +754,15 @@ function RealReaderViewPage() {
         return
       }
 
+      const occurrenceTerms = buildReaderOccurrenceTerms(searchQuery, routeTermsFromParams, queryFromRoute)
+      if (occurrenceTerms.length === 0) {
+        setSearchOccurrences([])
+        return
+      }
+
       if (viewerMode === 'pdfjs' && activeFilePath && isTauri()) {
         try {
-          const results = await findPdfSearchOccurrences(activeFilePath, searchQuery, document.pageCount)
+          const results = await findPdfSearchOccurrencesForQueries(activeFilePath, occurrenceTerms, document.pageCount)
           if (!cancelled) {
             setSearchOccurrences(results)
             return
@@ -740,7 +773,8 @@ function RealReaderViewPage() {
       }
 
       if (!cancelled) {
-        const fallbackResults = await findDocumentPageHits(document.id, searchQuery)
+        const fallbackQuery = buildReaderOccurrenceQuery(occurrenceTerms)
+        const fallbackResults = fallbackQuery ? await findDocumentPageHits(document.id, fallbackQuery) : []
         if (!cancelled) {
           setSearchOccurrences(fallbackResults)
         }
@@ -752,7 +786,7 @@ function RealReaderViewPage() {
     return () => {
       cancelled = true
     }
-  }, [activeFilePath, document, searchQuery, viewerMode])
+  }, [activeFilePath, document, queryFromRoute, routeTermsParamKey, searchQuery, viewerMode])
 
   useEffect(() => {
     let cancelled = false

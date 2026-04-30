@@ -349,6 +349,8 @@ function findMatchesInWordList(words: PdfWord[], query: string, maxResults = 100
         addMatch(index, index + queryTokens.length - 1)
       }
     }
+
+    return occurrences
   }
 
   for (const token of queryTokens) {
@@ -675,29 +677,53 @@ export async function findPdfSearchOccurrences(filePath: string, query: string, 
   const trimmedQuery = query.trim()
   if (!trimmedQuery) return []
 
+  return findPdfSearchOccurrencesForQueries(filePath, [trimmedQuery], _pageCount, maxResults)
+}
+
+export async function findPdfSearchOccurrencesForQueries(filePath: string, queries: string[], _pageCount?: number, maxResults = 100): Promise<SearchOccurrence[]> {
+  const normalizedQueries = unique(queries.map((query) => query.trim()).filter(Boolean))
+  if (normalizedQueries.length === 0) return []
+
   const pages = await extractPdfPages(filePath)
   const occurrences: SearchOccurrence[] = []
+  const seen = new Set<string>()
 
   for (const page of pages) {
     if (occurrences.length >= maxResults) break
 
-    const pageMatches = findMatchesInWordList(page.words, trimmedQuery, maxResults - occurrences.length)
-    for (const match of pageMatches) {
-      occurrences.push({
-        index: occurrences.length,
-        matchedText: match.matchedText,
-        start: match.startIndex,
-        end: match.endIndex,
-        estimatedPage: page.pageNumber,
-        snippet: match.snippet,
-        rects: match.rects,
-      })
-
+    for (const query of normalizedQueries) {
       if (occurrences.length >= maxResults) break
+
+      const pageMatches = findMatchesInWordList(page.words, query, maxResults - occurrences.length)
+      for (const match of pageMatches) {
+        const dedupeKey = `${page.pageNumber}:${match.startIndex}:${match.endIndex}:${normalizeOccurrenceSnippet(match.snippet)}`
+        if (seen.has(dedupeKey)) continue
+        seen.add(dedupeKey)
+
+        occurrences.push({
+          index: occurrences.length,
+          matchedText: match.matchedText,
+          start: match.startIndex,
+          end: match.endIndex,
+          estimatedPage: page.pageNumber,
+          snippet: match.snippet,
+          rects: match.rects,
+        })
+
+        if (occurrences.length >= maxResults) break
+      }
     }
   }
 
   return occurrences
+}
+
+export function parseFlexibleSearchTerms(query: string) {
+  return unique(
+    Array.from(query.matchAll(/"([^"]+)"|(\S+)/g))
+      .map((match) => normalizeText((match[1] ?? match[2] ?? '').trim()))
+      .filter(Boolean),
+  )
 }
 
 export async function searchDocumentDeep(document: Document, query: string) {

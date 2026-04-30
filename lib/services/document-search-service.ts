@@ -80,6 +80,7 @@ export type DocumentSearchResult = {
   matchedTerms: string[]
   occurrenceCounts: Record<string, number>
   pageHits: DocumentSearchPageHit[]
+  relevancePercent: number
   score: number
   snippet?: string
   title: string
@@ -94,18 +95,52 @@ const INDEX_OPTIONS: MiniSearchOptions<IndexedDocument> = {
 }
 // The ranking layer keeps MiniSearch retrieval, then reranks candidates with a
 // simple weighted formula that stays easy to tune later.
-const SEARCH_RANKING_WEIGHTS = {
-  indexScore: 0.38,
-  metadataMatch: 0.08,
-  phraseMatch: 0.16,
-  termFrequency: 0.24,
-  titleMatch: 0.14,
+const SEARCH_RELEVANCE_WEIGHTS = {
+  bestFieldMatch: 0.45,
+  matchTypeQuality: 0.2,
+  metadataBoost: 0.1,
+  normalizedMiniSearch: 0.25,
+} as const
+const SEARCH_FIELD_WEIGHTS = {
+  abstract: 0.45,
+  authors: 0.85,
+  commentary: 0.4,
+  doi: 0.7,
+  extractedText: 0.25,
+  filename: 0.75,
+  tags: 0.9,
+  title: 1,
+} as const
+const SEARCH_MATCH_TYPE_WEIGHTS = {
+  exact: 1,
+  fuzzy: 0.65,
+  none: 0,
+  prefix: 0.85,
+  synonym: 0.45,
+} as const
+const SEARCH_RELEVANCE_PENALTIES = {
+  abstractOnly: 0.12,
+  extractedTextOnly: 0.2,
+  synonymOnly: 0.18,
 } as const
 const SEARCH_RESULT_CANDIDATE_MULTIPLIER = 4
 const SEARCH_RESULT_CANDIDATE_MINIMUM = 100
 const OCR_CONFIDENCE_MULTIPLIER_RANGE = {
   max: 1,
   min: 0.88,
+} as const
+const EXPLORATORY_FLEXIBILITY_THRESHOLD = 65
+const FLEXIBLE_FLEXIBILITY_THRESHOLD = 31
+const LOCAL_SYNONYM_DICTIONARY = {
+  ai: ['artificial intelligence', 'machine learning', 'llm'],
+  author: ['researcher', 'writer', 'contributor'],
+  citation: ['reference', 'bibliography', 'source'],
+  library: ['vault', 'collection', 'repository'],
+  map: ['graph', 'network', 'relationship', 'connection'],
+  note: ['annotation', 'comment', 'highlight'],
+  paper: ['article', 'publication', 'manuscript', 'study'],
+  pdf: ['document', 'file', 'paper'],
+  tag: ['label', 'category', 'classification'],
 } as const
 
 let indexStatePromise: Promise<SearchIndexState> | null = null
@@ -138,7 +173,15 @@ function clamp01(value: number) {
 }
 
 function normalizeSearchText(input: string) {
-  return firstNonEmptyText(input).toLowerCase()
+  return stripDiacritics(
+    firstNonEmptyText(input)
+      .toLowerCase()
+      .replace(/['’`]/g, '')
+      .replace(/[\p{Pd}]+/gu, ' ')
+      .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  )
 }
 
 function normalizeQueryFragment(input: string) {
@@ -150,7 +193,7 @@ function stripDiacritics(input: string) {
 }
 
 function normalizeWordToken(input: string) {
-  return stripDiacritics(normalizeQueryFragment(input))
+  return normalizeQueryFragment(input)
 }
 
 function tokenizeWordLike(input: string) {
@@ -228,28 +271,75 @@ function buildQuerySignals(query: DocumentSearchQuery) {
   )
 
   return {
+    strings,
     phrases,
     tokens,
   }
 }
 
 type SearchCorpus = {
+  abstractText: string
+  authorText: string
   compactText: string
+  commentaryText: string
+  doiText: string
+  fileName: string
+  metadataText: string
+  tagText: string
+  titleText: string
   text: string
   words: string[]
 }
 
 function buildSearchCorpus(document: repo.DbDocument, persistedText?: Awaited<ReturnType<typeof readPersistedDocumentText>> | null): SearchCorpus {
-  const title = document.title ?? ''
-  const authors = parseDocumentAuthors(document).join(' ')
-  const metadataCorpus = buildDocumentMetadataCorpus(document)
+  const title = normalizeWordToken(document.title ?? '')
+  const authors = normalizeWordToken(parseDocumentAuthors(document).join(' '))
+  const metadataCorpus = normalizeWordToken(buildDocumentMetadataCorpus(document))
+  const abstractText = normalizeWordToken(document.abstractText ?? '')
+  const commentaryText = normalizeWordToken(document.commentaryText ?? '')
+  const doiText = normalizeWordToken(document.doi ?? '')
+  const tagText = normalizeWordToken(document.tags.join(' '))
+  const fileName = normalizeWordToken(extractDocumentFileName(document))
   const fullText = persistedText?.text ?? document.searchText ?? ''
-  const text = normalizeWordToken([title, authors, metadataCorpus, fullText].join(' '))
+  const text = normalizeWordToken([title, authors, metadataCorpus, commentaryText, fullText].join(' '))
   return {
+    abstractText,
+    authorText: authors,
     compactText: text.replace(/[\s-]+/g, ''),
+    commentaryText,
+    doiText,
+    fileName,
+    metadataText: metadataCorpus,
+    tagText,
+    titleText: title,
     text,
     words: tokenizeWordLike(text),
   }
+}
+
+function extractDocumentFileName(document: Pick<repo.DbDocument, 'importedFilePath' | 'sourcePath' | 'title'>) {
+  const filePath = firstNonEmptyText(document.importedFilePath, document.sourcePath)
+  if (!filePath) return document.title ?? ''
+  return filePath.split(/[\\/]/).pop() ?? filePath
+}
+
+function buildIndexedDocumentText(document: repo.DbDocument, searchText: string) {
+  return [
+    document.title,
+    parseDocumentAuthors(document).join(' '),
+    document.abstractText,
+    document.tags.join(' '),
+    document.year ? String(document.year) : '',
+    document.publisher,
+    document.citationKey,
+    document.doi,
+    extractDocumentFileName(document),
+    document.commentaryText,
+    searchText,
+  ]
+    .map((entry) => firstNonEmptyText(entry))
+    .filter(Boolean)
+    .join(' ')
 }
 
 function levenshteinDistance(left: string, right: string) {
@@ -280,10 +370,59 @@ function levenshteinDistance(left: string, right: string) {
 }
 
 function buildAllowedFuzzyDistance(token: string, flexibility = 35) {
-  if (flexibility < 45) return 0
-  if (token.length < 6) return 0
-  if (flexibility < 75) return 1
-  return token.length >= 10 ? 2 : 1
+  if (flexibility < FLEXIBLE_FLEXIBILITY_THRESHOLD) return 0
+  if (token.length <= 4) return flexibility >= EXPLORATORY_FLEXIBILITY_THRESHOLD ? 1 : 0
+  if (token.length <= 8) return flexibility >= EXPLORATORY_FLEXIBILITY_THRESHOLD ? 1 : 0
+  return flexibility >= 85 ? 2 : 1
+}
+
+// The existing slider drives strict, balanced, and exploratory search modes in place.
+function buildSliderThreshold(flexibility = 35) {
+  return 0.05 + (clamp01(flexibility / 100) * 0.55)
+}
+
+function collectSynonymVariants(term: string, flexibility = 35) {
+  const normalized = normalizeQueryFragment(term)
+  if (!normalized || flexibility < EXPLORATORY_FLEXIBILITY_THRESHOLD) return []
+
+  const direct = LOCAL_SYNONYM_DICTIONARY[normalized as keyof typeof LOCAL_SYNONYM_DICTIONARY] ?? []
+  return unique(direct.map((entry) => normalizeQueryFragment(entry)).filter(Boolean))
+}
+
+function buildExpandedLeafQuery(term: string, flexibility = 35): DocumentSearchQuery {
+  const variants = unique([normalizeQueryFragment(term), ...collectSynonymVariants(term, flexibility)].filter(Boolean))
+  if (variants.length <= 1) return term
+  return {
+    combineWith: 'OR',
+    queries: variants,
+  }
+}
+
+function buildExpandedQuery(query: DocumentSearchQuery, flexibility = 35): DocumentSearchQuery {
+  if (typeof query === 'string') {
+    return buildExpandedLeafQuery(query, flexibility)
+  }
+
+  return {
+    ...query,
+    queries: query.queries.map((entry) => buildExpandedQuery(entry, flexibility)),
+  }
+}
+
+function buildSearchPlan(query: DocumentSearchQuery, flexibility = 35) {
+  const expandedQuery = buildExpandedQuery(query, flexibility)
+  const originalSignals = buildQuerySignals(query)
+  const expandedSignals = buildQuerySignals(expandedQuery)
+  const synonymStrings = expandedSignals.strings.filter((entry) => !originalSignals.strings.includes(entry))
+  const synonymTokens = expandedSignals.tokens.filter((entry) => !originalSignals.tokens.includes(entry))
+
+  return {
+    expandedQuery,
+    expandedSignals,
+    originalSignals,
+    synonymStrings: new Set(synonymStrings),
+    synonymTokens: new Set(synonymTokens),
+  }
 }
 
 function hasVerifiedTokenMatch(corpus: SearchCorpus, token: string, flexibility = 35) {
@@ -317,15 +456,21 @@ function hasVerifiedPhraseMatch(corpus: SearchCorpus, phrase: string) {
   return corpus.compactText.includes(normalizedPhrase.replace(/[\s-]+/g, ''))
 }
 
+function documentMatchesLeaf(corpus: SearchCorpus, query: string, flexibility = 35) {
+  const normalized = normalizeQueryFragment(query)
+  if (!normalized) return true
+
+  const candidates = unique([normalized, ...collectSynonymVariants(normalized, flexibility)])
+  return candidates.some((candidate) => (
+    candidate.includes(' ')
+      ? hasVerifiedPhraseMatch(corpus, candidate)
+      : hasVerifiedTokenMatch(corpus, candidate, flexibility)
+  ))
+}
+
 function documentMatchesQuery(corpus: SearchCorpus, query: DocumentSearchQuery, flexibility = 35): boolean {
   if (typeof query === 'string') {
-    const normalized = normalizeQueryFragment(query)
-    if (!normalized) return true
-    if (normalized.includes(' ')) {
-      return hasVerifiedPhraseMatch(corpus, normalized)
-    }
-
-    return hasVerifiedTokenMatch(corpus, normalized, flexibility)
+    return documentMatchesLeaf(corpus, query, flexibility)
   }
 
   if (query.combineWith === 'AND') {
@@ -359,59 +504,244 @@ function parseDocumentAuthors(document: repo.DbDocument) {
 function buildDocumentMetadataCorpus(document: repo.DbDocument) {
   const authors = parseDocumentAuthors(document).join(' ')
   const tags = document.tags.join(' ')
-  return normalizeSearchText([
+  return normalizeQueryFragment([
+    document.title,
     authors,
     document.abstractText,
     document.citationKey,
     document.doi,
     document.publisher,
     tags,
+    extractDocumentFileName(document),
     document.year ? String(document.year) : '',
   ].join(' '))
 }
 
 function buildFieldTokenCoverageScore(field: string, tokens: string[]) {
   if (tokens.length === 0) return 0
-  const normalizedField = normalizeSearchText(field)
+  const normalizedField = normalizeQueryFragment(field)
   if (!normalizedField) return 0
 
   const matchedTokenCount = tokens.filter((token) => normalizedField.includes(token)).length
   return clamp01(matchedTokenCount / tokens.length)
 }
 
-function buildPhraseMatchScore(
-  fullText: string,
-  title: string,
-  metadataCorpus: string,
-  phrases: string[],
-) {
-  if (phrases.length === 0) return 0
+function buildExactFieldMatchScore(field: string, strings: string[]) {
+  const normalizedField = normalizeQueryFragment(field)
+  if (!normalizedField) return 0
+  return strings.some((entry) => normalizeQueryFragment(entry) === normalizedField) ? 1 : 0
+}
 
-  let best = 0
-  for (const phrase of phrases) {
-    if (title.includes(phrase)) best = Math.max(best, 1)
-    else if (metadataCorpus.includes(phrase)) best = Math.max(best, 0.8)
-    else if (fullText.includes(phrase)) best = Math.max(best, 0.68)
+function buildArrayExactMatchScore(values: string[], strings: string[]) {
+  if (values.length === 0 || strings.length === 0) return 0
+  const normalizedValues = values.map((value) => normalizeQueryFragment(value)).filter(Boolean)
+  if (normalizedValues.length === 0) return 0
+  return strings.some((entry) => normalizedValues.includes(normalizeQueryFragment(entry))) ? 1 : 0
+}
+
+function buildOccurrenceBoost(totalOccurrences: number) {
+  return Math.min(0.15, Math.log1p(Math.max(0, totalOccurrences)) * 0.04)
+}
+
+type SearchMatchType = keyof typeof SEARCH_MATCH_TYPE_WEIGHTS
+type SearchFieldName = keyof typeof SEARCH_FIELD_WEIGHTS
+
+type SearchFieldEvaluation = {
+  field: SearchFieldName
+  fieldScore: number
+  matched: boolean
+  matchType: SearchMatchType
+}
+
+function hasExactTokenMatch(fieldWords: string[], token: string) {
+  return fieldWords.includes(token)
+}
+
+function hasPrefixTokenMatch(fieldWords: string[], token: string) {
+  return fieldWords.some((word) => word.startsWith(token) && word !== token)
+}
+
+function hasFuzzyTokenMatch(fieldWords: string[], token: string, flexibility = 35) {
+  const allowedDistance = buildAllowedFuzzyDistance(token, flexibility)
+  if (allowedDistance <= 0) return false
+
+  return fieldWords.some((word) => {
+    if (!word) return false
+    if (word[0] !== token[0]) return false
+    if (Math.abs(word.length - token.length) > allowedDistance) return false
+    return levenshteinDistance(word, token) <= allowedDistance
+  })
+}
+
+function buildSignalsFromSets(strings: Set<string>, tokens: Set<string>) {
+  const nextStrings = Array.from(strings)
+  return {
+    strings: nextStrings,
+    phrases: nextStrings.filter((entry) => entry.includes(' ')),
+    tokens: Array.from(tokens),
+  }
+}
+
+function classifyFieldMatchType(fieldText: string, querySignals: ReturnType<typeof buildQuerySignals>, flexibility = 35): SearchMatchType {
+  const fieldWords = tokenizeWordLike(fieldText)
+  const compactField = fieldText.replace(/[\s-]+/g, '')
+
+  for (const phrase of querySignals.strings) {
+    if (!phrase) continue
+    if (fieldText.includes(phrase)) return 'exact'
+    if (compactField.includes(phrase.replace(/[\s-]+/g, ''))) return 'exact'
   }
 
-  return best
+  for (const token of querySignals.tokens) {
+    if (!token) continue
+    if (hasExactTokenMatch(fieldWords, token)) return 'exact'
+  }
+
+  for (const token of querySignals.tokens) {
+    if (!token) continue
+    if (hasPrefixTokenMatch(fieldWords, token)) return 'prefix'
+  }
+
+  for (const token of querySignals.tokens) {
+    if (!token) continue
+    if (hasFuzzyTokenMatch(fieldWords, token, flexibility)) return 'fuzzy'
+  }
+
+  return 'none'
 }
 
-function buildTermFrequencyScore(fullText: string, terms: string[]) {
-  if (terms.length === 0) return 0
+function evaluateSearchFields(corpus: SearchCorpus, plan: ReturnType<typeof buildSearchPlan>, flexibility = 35) {
+  const synonymSignals = buildSignalsFromSets(plan.synonymStrings, plan.synonymTokens)
+  const fields: Record<SearchFieldName, string> = {
+    abstract: corpus.abstractText,
+    authors: corpus.authorText,
+    commentary: corpus.commentaryText,
+    doi: corpus.doiText,
+    extractedText: corpus.text,
+    filename: corpus.fileName,
+    tags: corpus.tagText,
+    title: corpus.titleText,
+  }
 
-  const contributions = unique(terms)
-    .map((term) => countOccurrences(fullText, term))
-    .filter((count) => count > 0)
-    .map((count) => clamp01(Math.log1p(count) / Math.log1p(6)))
+  const evaluations = (Object.entries(fields) as Array<[SearchFieldName, string]>).map(([field, text]) => {
+    const directMatchType = classifyFieldMatchType(text, plan.originalSignals, flexibility)
+    const synonymMatchType = directMatchType === 'none' ? classifyFieldMatchType(text, synonymSignals, flexibility) : 'none'
+    const matchType = directMatchType !== 'none' ? directMatchType : synonymMatchType !== 'none' ? 'synonym' : 'none'
+    return {
+      field,
+      fieldScore: matchType === 'none' ? 0 : SEARCH_FIELD_WEIGHTS[field],
+      matched: matchType !== 'none',
+      matchType,
+    } satisfies SearchFieldEvaluation
+  })
 
-  if (contributions.length === 0) return 0
-  return clamp01(contributions.reduce((sum, value) => sum + value, 0) / contributions.length)
+  const bestMatch = evaluations.reduce<SearchFieldEvaluation>(
+    (current, candidate) => {
+      const currentComposite = current.fieldScore * SEARCH_MATCH_TYPE_WEIGHTS[current.matchType]
+      const candidateComposite = candidate.fieldScore * SEARCH_MATCH_TYPE_WEIGHTS[candidate.matchType]
+      return candidateComposite > currentComposite ? candidate : current
+    },
+    { field: 'extractedText', fieldScore: 0, matched: false, matchType: 'none' },
+  )
+
+  return {
+    bestFieldMatchScore: bestMatch.fieldScore,
+    bestMatch,
+    evaluations,
+    matchTypeQualityScore: SEARCH_MATCH_TYPE_WEIGHTS[bestMatch.matchType],
+  }
 }
 
-function buildIndexScore(rawScore: number, topRawScore: number) {
-  if (rawScore <= 0 || topRawScore <= 0) return 0
-  return clamp01(Math.log1p(rawScore) / Math.log1p(topRawScore))
+function isSynonymOnlyMatch(matchedTerms: string[], matchedQueryTerms: string[], originalSignals: ReturnType<typeof buildQuerySignals>, synonymStrings: Set<string>, synonymTokens: Set<string>) {
+  const normalizedMatched = unique([...matchedTerms, ...matchedQueryTerms].map((entry) => normalizeQueryFragment(entry)).filter(Boolean))
+  if (normalizedMatched.some((entry) => originalSignals.strings.includes(entry) || originalSignals.tokens.includes(entry))) {
+    return false
+  }
+  return normalizedMatched.some((entry) => synonymStrings.has(entry) || synonymTokens.has(entry))
+}
+
+function buildMetadataBoostScore(
+  document: repo.DbDocument,
+  corpus: SearchCorpus,
+  plan: ReturnType<typeof buildSearchPlan>,
+  occurrenceCounts: Record<string, number>,
+) {
+  const exactTitleBoost = buildExactFieldMatchScore(document.title, plan.originalSignals.strings)
+  const exactTagBoost = buildArrayExactMatchScore(document.tags, [...plan.originalSignals.strings, ...plan.originalSignals.tokens])
+  const authorBoost = buildFieldTokenCoverageScore(corpus.authorText, plan.originalSignals.tokens)
+  const fileNameBoost = buildFieldTokenCoverageScore(corpus.fileName, plan.originalSignals.tokens)
+  const doiBoost = buildFieldTokenCoverageScore(corpus.doiText, plan.originalSignals.tokens)
+  const totalOccurrences = Object.values(occurrenceCounts).reduce((sum, count) => sum + Math.max(0, count), 0)
+
+  return clamp01(
+    Math.max(
+      exactTitleBoost,
+      exactTagBoost * 0.95,
+      authorBoost * 0.9,
+      fileNameBoost * 0.8,
+      doiBoost * 0.75,
+    ) + buildOccurrenceBoost(totalOccurrences),
+  )
+}
+
+function buildRelevanceScoreBreakdown(
+  document: repo.DbDocument,
+  corpus: SearchCorpus,
+  plan: ReturnType<typeof buildSearchPlan>,
+  rawMiniSearchScore: number,
+  topRawScore: number,
+  matchedTerms: string[],
+  matchedQueryTerms: string[],
+  occurrenceCounts: Record<string, number>,
+) {
+  const normalizedMiniSearchScore = topRawScore > 0 ? clamp01(rawMiniSearchScore / topRawScore) : 0
+  const { bestFieldMatchScore, bestMatch, evaluations, matchTypeQualityScore } = evaluateSearchFields(corpus, plan)
+  const metadataBoostScore = buildMetadataBoostScore(document, corpus, plan, occurrenceCounts)
+  const hasHighValueFieldMatch = evaluations.some((evaluation) => (
+    evaluation.matched
+    && ['title', 'tags', 'authors', 'filename', 'doi'].includes(evaluation.field)
+  ))
+  const hasAbstractMatch = evaluations.some((evaluation) => evaluation.field === 'abstract' && evaluation.matched)
+  const hasExtractedTextMatch = evaluations.some((evaluation) => evaluation.field === 'extractedText' && evaluation.matched)
+  const isDirectMatch = evaluations.some((evaluation) => evaluation.matched && evaluation.matchType !== 'synonym')
+
+  let finalScore = (
+    normalizedMiniSearchScore * SEARCH_RELEVANCE_WEIGHTS.normalizedMiniSearch
+    + bestFieldMatchScore * SEARCH_RELEVANCE_WEIGHTS.bestFieldMatch
+    + matchTypeQualityScore * SEARCH_RELEVANCE_WEIGHTS.matchTypeQuality
+    + metadataBoostScore * SEARCH_RELEVANCE_WEIGHTS.metadataBoost
+  )
+
+  if (!isDirectMatch && isSynonymOnlyMatch(
+    matchedTerms,
+    matchedQueryTerms,
+    plan.originalSignals,
+    plan.synonymStrings,
+    plan.synonymTokens,
+  )) {
+    finalScore -= SEARCH_RELEVANCE_PENALTIES.synonymOnly
+  }
+
+  if (hasAbstractMatch && !hasHighValueFieldMatch && !hasExtractedTextMatch) {
+    finalScore -= SEARCH_RELEVANCE_PENALTIES.abstractOnly
+  }
+
+  if (hasExtractedTextMatch && !hasHighValueFieldMatch && !hasAbstractMatch) {
+    finalScore -= SEARCH_RELEVANCE_PENALTIES.extractedTextOnly
+  }
+
+  finalScore = clamp01(finalScore)
+
+  return {
+    bestFieldMatchScore,
+    bestMatch,
+    evaluations,
+    finalScore,
+    matchTypeQualityScore,
+    metadataBoostScore,
+    normalizedMiniSearchScore,
+    relevancePercent: Math.round(finalScore * 100),
+  }
 }
 
 function buildOcrConfidenceWeight(activeSource: 'native' | 'ocr', ocrConfidence?: number) {
@@ -523,44 +853,30 @@ export async function findDocumentPageHits(documentId: string, query: DocumentSe
 
 async function buildNormalizedSearchScore(
   document: repo.DbDocument,
-  query: DocumentSearchQuery,
+  plan: ReturnType<typeof buildSearchPlan>,
   rawScore: number,
   topRawScore: number,
   matchedTerms: string[],
   matchedQueryTerms: string[],
+  occurrenceCounts: Record<string, number>,
 ) {
   const persistedText = await readPersistedDocumentText(document)
-  const fullText = normalizeSearchText(persistedText?.text ?? document.searchText ?? '')
-  const title = normalizeSearchText(document.title)
-  const metadataCorpus = buildDocumentMetadataCorpus(document)
-  const { phrases, tokens } = buildQuerySignals(query)
-  const effectiveTerms = matchedTerms.length > 0 ? matchedTerms : tokens
-  const effectiveQueryTerms = matchedQueryTerms.length > 0 ? matchedQueryTerms : tokens
-
-  const indexScore = buildIndexScore(rawScore, topRawScore)
-  const termFrequencyScore = buildTermFrequencyScore(fullText, effectiveTerms)
-  const phraseMatchScore = buildPhraseMatchScore(fullText, title, metadataCorpus, phrases)
-  const titleMatchScore = Math.max(
-    buildFieldTokenCoverageScore(title, effectiveQueryTerms),
-    phraseMatchScore === 1 ? 1 : 0,
+  const corpus = buildSearchCorpus(document, persistedText)
+  const relevance = buildRelevanceScoreBreakdown(
+    document,
+    corpus,
+    plan,
+    rawScore,
+    topRawScore,
+    matchedTerms,
+    matchedQueryTerms,
+    occurrenceCounts,
   )
-  const metadataMatchScore = buildFieldTokenCoverageScore(metadataCorpus, effectiveQueryTerms)
-  const ocrConfidenceWeight = buildOcrConfidenceWeight(
-    persistedText?.activeSource ?? 'native',
-    persistedText?.activeSource === 'ocr' ? persistedText.ocr?.confidence : undefined,
-  )
-
-  const weightedScore = (
-    indexScore * SEARCH_RANKING_WEIGHTS.indexScore
-    + termFrequencyScore * SEARCH_RANKING_WEIGHTS.termFrequency
-    + phraseMatchScore * SEARCH_RANKING_WEIGHTS.phraseMatch
-    + titleMatchScore * SEARCH_RANKING_WEIGHTS.titleMatch
-    + metadataMatchScore * SEARCH_RANKING_WEIGHTS.metadataMatch
-  ) * ocrConfidenceWeight
 
   return {
     persistedText,
-    score: toAbsoluteScore(clamp01(weightedScore) * 100),
+    relevancePercent: relevance.relevancePercent,
+    score: toAbsoluteScore(relevance.finalScore * 100),
     snippet: buildSnippet(
       firstNonEmptyText(persistedText?.text, document.searchText),
       matchedTerms.length > 0 ? matchedTerms : matchedQueryTerms,
@@ -704,14 +1020,16 @@ async function upsertDocument(state: SearchIndexState, document: repo.DbDocument
     }
   }
 
-  const textHash = (await ensureDocumentTextHash(document)) ?? (await sha256Hex(searchText))
-  if (state.index.has(document.id) && state.indexedTextHashes[document.id] === textHash) {
+  await ensureDocumentTextHash(document)
+  const indexedText = buildIndexedDocumentText(document, searchText)
+  const indexTextHash = await sha256Hex(indexedText)
+  if (state.index.has(document.id) && state.indexedTextHashes[document.id] === indexTextHash) {
     return false
   }
 
   const indexedDocument: IndexedDocument = {
     id: document.id,
-    text: searchText,
+    text: indexedText,
   }
 
   if (state.index.has(document.id)) {
@@ -720,7 +1038,7 @@ async function upsertDocument(state: SearchIndexState, document: repo.DbDocument
     state.index.add(indexedDocument)
   }
 
-  state.indexedTextHashes[document.id] = textHash
+  state.indexedTextHashes[document.id] = indexTextHash
   state.dirty = true
   return true
 }
@@ -784,14 +1102,12 @@ function isQueryEmpty(query: DocumentSearchQuery): boolean {
 }
 
 function buildFuzzySetting(flexibility = 35) {
-  if (flexibility < 25) return false
-  if (flexibility < 45) return 0.1
-  if (flexibility < 70) return 0.15
-  return 0.2
+  if (flexibility < FLEXIBLE_FLEXIBILITY_THRESHOLD) return false
+  return buildSliderThreshold(flexibility)
 }
 
 function buildPrefixSetting(flexibility = 35) {
-  return flexibility >= 25
+  return flexibility >= 20
 }
 
 function buildSnippet(text: string, terms: string[], radius = 110) {
@@ -912,6 +1228,7 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
   if (isQueryEmpty(query)) return []
 
   return withIndexLock(async () => {
+    const plan = buildSearchPlan(query, options.flexibility)
     const documents = await repo.listAllDocuments()
     const state = await getSearchIndexState()
     const allowedIds = options.documentIds?.length ? new Set(options.documentIds) : null
@@ -938,7 +1255,7 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
       total: searchableDocuments.length,
     })
 
-    const rawResults = state.index.search(query as MiniSearchQuery, {
+    const rawResults = state.index.search(plan.expandedQuery as MiniSearchQuery, {
       combineWith: typeof query === 'string' ? (options.combineWith ?? 'AND') : undefined,
       filter: allowedIds ? (result) => allowedIds.has(String(result.id)) : undefined,
       fuzzy: buildFuzzySetting(options.flexibility),
@@ -964,15 +1281,18 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
 
       const matchedTerms = unique(result.terms)
       const matchedQueryTerms = unique(result.queryTerms)
+      const persistedText = await readPersistedDocumentText(document)
+      const occurrenceCounts = buildOccurrenceCounts(query, document, persistedText)
       const ranked = await buildNormalizedSearchScore(
         document,
-        query,
+        plan,
         result.score,
         topRawScore,
         matchedTerms,
         matchedQueryTerms,
+        occurrenceCounts,
       )
-      const corpus = buildSearchCorpus(document, ranked.persistedText)
+      const corpus = buildSearchCorpus(document, persistedText)
       rankedCount += 1
       options.onProgress?.({
         detail: `Scoring ${rankedCount}/${totalCandidateResults || 1}`,
@@ -989,16 +1309,21 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
         documentId: document.id,
         matchedQueryTerms,
         matchedTerms,
-        occurrenceCounts: buildOccurrenceCounts(query, document, ranked.persistedText),
+        occurrenceCounts,
         pageHits: [],
-        persistedText: ranked.persistedText,
+        persistedText,
+        relevancePercent: ranked.relevancePercent,
         score: ranked.score,
         snippet: ranked.snippet,
         title: document.title,
       })
     }
 
-    mappedResults.sort((left, right) => right.score - left.score || left.title.localeCompare(right.title))
+    mappedResults.sort((left, right) => (
+      right.relevancePercent - left.relevancePercent
+      || right.score - left.score
+      || left.title.localeCompare(right.title)
+    ))
     const limitedResults = mappedResults.slice(0, options.limit ?? 100)
     const finalResults = limitedResults.map(({ persistedText, ...result }, index) => {
         options.onProgress?.({
@@ -1022,4 +1347,16 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
     })
     return finalResults
   })
+}
+
+export const __searchTesting = {
+  buildMetadataBoostScore,
+  buildOccurrenceBoost,
+  buildRelevanceScoreBreakdown,
+  buildIndexedDocumentText,
+  buildSearchCorpus,
+  buildSearchPlan,
+  documentMatchesQuery,
+  normalizeQueryFragment,
+  normalizeSearchText,
 }

@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/refx/common'
 import { PageHeader } from '@/components/refx/page-header'
+import { parseFlexibleSearchTerms } from '@/lib/services/document-processing'
 import type { KeywordGroup, MetadataStatus, ReadingStage } from '@/lib/types'
 import { searchDocuments, type DocumentSearchPageHit, type DocumentSearchQuery, type SearchProgressUpdate } from '@/lib/services/document-search-service'
 import { useT } from '@/lib/localization'
@@ -31,6 +32,7 @@ type SearchResult = {
   occurrenceCounts: Record<string, number>
   pageHits: DocumentSearchPageHit[]
   preview: string
+  relevancePercent: number
   score: number
 }
 
@@ -60,11 +62,14 @@ function normalizeSelectedMetadataStatuses(values: MetadataStatus[]) {
   return Array.from(new Set(values))
 }
 
+function relevanceBadgeClassName(relevancePercent: number) {
+  if (relevancePercent >= 75) return 'border-emerald-300 bg-emerald-50 text-emerald-800'
+  if (relevancePercent >= 45) return 'border-amber-300 bg-amber-50 text-amber-800'
+  return 'border-slate-300 bg-slate-50 text-slate-700'
+}
+
 function parseSimpleSearchTerms(query: string) {
-  const matches = Array.from(query.matchAll(/"([^"]+)"|(\S+)/g))
-  return normalizeKeywords(
-    matches.map((match) => (match[1] ?? match[2] ?? '').trim()),
-  )
+  return normalizeKeywords(parseFlexibleSearchTerms(query))
 }
 
 function normalizeGroups(groups: KeywordGroup[]) {
@@ -631,6 +636,7 @@ function RealSearchPage() {
           occurrenceCounts: result.occurrenceCounts,
           pageHits: result.pageHits,
           preview: result.snippet ?? '',
+          relevancePercent: result.relevancePercent,
           score: result.score,
         }] satisfies SearchResult[]
       })
@@ -1084,16 +1090,24 @@ function RealSearchPage() {
               />
             )}
 
-            {results.map(({ document, matchedTerms, occurrenceCounts, pageHits, preview }) => {
+            {results.map(({ document, matchedTerms, occurrenceCounts, pageHits, preview, relevancePercent }) => {
               const library = libraries.find((item) => item.id === document.libraryId)
               const readerKeyword = executedKeywords[0] ?? ''
               const primaryPageHit = pageHits[0]
               const occurrenceEntries = executedKeywords
                 .map((term) => [term, occurrenceCounts[term] ?? 0] as const)
                 .filter(([, count]) => count > 0)
-              const readerHref = `/reader/view?id=${document.id}&query=${encodeURIComponent(readerKeyword)}${
+              const routeMatchedTerms = queryMode === 'simple'
+                ? parseSimpleSearchTerms(executedSimpleQuery)
+                : normalizeKeywords([
+                    ...matchedTerms,
+                    ...executedKeywords.filter((term) => term.includes(' ')),
+                  ])
+              const readerSearchQuery = queryMode === 'simple' ? executedSimpleQuery : readerKeyword
+              const matchedTermParams = routeMatchedTerms.map((term) => `&term=${encodeURIComponent(term)}`).join('')
+              const readerHref = `/reader/view?id=${document.id}&query=${encodeURIComponent(readerSearchQuery)}${
                 primaryPageHit ? `&page=${primaryPageHit.pageNumber}&matchText=${encodeURIComponent(primaryPageHit.matchedText)}&matchStart=${primaryPageHit.positions[0]?.start ?? 0}` : ''
-              }&returnTo=search`
+              }${matchedTermParams}&returnTo=search`
 
               return (
                 <Card key={document.id}>
@@ -1115,6 +1129,9 @@ function RealSearchPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-1.5">
+                      <Badge variant="outline" className={relevanceBadgeClassName(relevancePercent)}>
+                        {relevancePercent}%
+                      </Badge>
                       {document.tags.slice(0, 4).map((tag) => (
                         <Badge key={tag} variant="secondary">
                           {tag}
