@@ -89,7 +89,13 @@ type ReaderPrintMode = 'original' | 'highlights' | 'highlights-notes'
 
 const READER_HIGHLIGHT_COLOR_KEY = 'refx-reader-highlight-color'
 const READER_NOTE_COLOR_KEY = 'refx-reader-note-color'
+const READER_VIEW_STATE_KEY_PREFIX = 'refx-reader-view-state'
 const READER_PAGE_RENDER_BUFFER = 1
+const READER_DEFAULT_INTERNAL_ZOOM = 150
+const READER_MIN_INTERNAL_ZOOM = 75
+const READER_MAX_INTERNAL_ZOOM = 375
+const READER_BUTTON_ZOOM_STEP = 15
+const READER_WHEEL_ZOOM_STEP = 2
 
 const READER_COLOR_OPTIONS = [
   { id: 'yellow', highlight: '#fde047', note: '#f59e0b' },
@@ -208,12 +214,16 @@ function firstNonEmptyText(...values: Array<string | null | undefined>) {
 }
 
 function normalizeZoomLevel(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return 100
-  return Math.min(250, Math.max(50, Math.round(value)))
+  if (!Number.isFinite(value) || value <= 0) return READER_DEFAULT_INTERNAL_ZOOM
+  return Math.min(READER_MAX_INTERNAL_ZOOM, Math.max(READER_MIN_INTERNAL_ZOOM, Math.round(value)))
 }
 
 function getReaderDisplayedZoom(value: number) {
-  return Math.max(25, Math.round(value / 2))
+  return Math.max(25, Math.round((value / READER_DEFAULT_INTERNAL_ZOOM) * 100))
+}
+
+function getReaderViewStateKey(documentId: string) {
+  return `${READER_VIEW_STATE_KEY_PREFIX}:${documentId}`
 }
 
 function buildReaderOccurrenceTerms(query: string, routeTerms: string[], routeQuery: string) {
@@ -443,13 +453,17 @@ function RealReaderViewPage() {
   const id = params.get('id') ?? ''
   const queryFromRoute = params.get('query') ?? ''
   const matchTextFromRoute = params.get('matchText') ?? ''
+  const pageParam = params.get('page')
+  const zoomParam = params.get('zoom')
   const routeTermsParamKey = params.getAll('term').join('\u0000')
   const routeTermsFromParams = useMemo(
     () => routeTermsParamKey.split('\u0000').filter(Boolean),
     [routeTermsParamKey],
   )
-  const pageFromRoute = Number(params.get('page') ?? '1')
-  const zoomFromRoute = Number(params.get('zoom') ?? '200')
+  const pageFromRoute = Number(pageParam ?? '1')
+  const zoomFromRoute = Number(zoomParam ?? String(READER_DEFAULT_INTERNAL_ZOOM))
+  const hasExplicitRoutePage = pageParam !== null
+  const hasExplicitRouteZoom = zoomParam !== null
   const returnTo = params.get('returnTo') ?? ''
   const isDetachedReaderWindow = params.get('detached') === DETACHED_READER_QUERY_VALUE
   const documents = useDocumentStore((state) => state.documents)
@@ -553,14 +567,17 @@ function RealReaderViewPage() {
   }, [queryFromRoute])
 
   useEffect(() => {
-    if (Number.isFinite(pageFromRoute) && pageFromRoute > 0) {
+    if (hasExplicitRoutePage && Number.isFinite(pageFromRoute) && pageFromRoute > 0) {
       setPage(pageFromRoute)
     }
-  }, [pageFromRoute])
+  }, [hasExplicitRoutePage, pageFromRoute])
 
   useEffect(() => {
-    setZoom(normalizeZoomLevel(zoomFromRoute))
-  }, [zoomFromRoute])
+    if (!hasExplicitRouteZoom) return
+    const normalizedZoom = normalizeZoomLevel(zoomFromRoute)
+    setZoom(normalizedZoom)
+    setRenderZoom(normalizedZoom)
+  }, [hasExplicitRouteZoom, zoomFromRoute])
 
   useEffect(() => {
     const normalizedZoom = normalizeZoomLevel(zoom)
@@ -577,14 +594,61 @@ function RealReaderViewPage() {
     if (!document) return
     setActiveDocument(document.id)
     if (initializedDocumentIdRef.current !== document.id) {
-      if (Number.isFinite(pageFromRoute) && pageFromRoute > 0) {
+      let nextPage = document.lastReadPage && document.lastReadPage > 0 ? document.lastReadPage : 1
+      let nextZoom = READER_DEFAULT_INTERNAL_ZOOM
+      if (typeof window !== 'undefined') {
+        try {
+          const storedStateRaw = window.localStorage.getItem(getReaderViewStateKey(document.id))
+          if (storedStateRaw) {
+            const storedState = JSON.parse(storedStateRaw) as { page?: number; zoom?: number }
+            if (Number.isFinite(storedState.page) && (storedState.page ?? 0) > 0) {
+              nextPage = Math.round(storedState.page as number)
+            }
+            if (Number.isFinite(storedState.zoom) && (storedState.zoom ?? 0) > 0) {
+              nextZoom = normalizeZoomLevel(storedState.zoom as number)
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to restore reader view state:', error)
+        }
+      }
+
+      if (hasExplicitRoutePage && Number.isFinite(pageFromRoute) && pageFromRoute > 0) {
         setPage(pageFromRoute)
-      } else if (document.lastReadPage) {
-        setPage(document.lastReadPage)
+      } else {
+        setPage(nextPage)
+      }
+
+      if (hasExplicitRouteZoom) {
+        const normalizedZoom = normalizeZoomLevel(zoomFromRoute)
+        setZoom(normalizedZoom)
+        setRenderZoom(normalizedZoom)
+      } else {
+        setZoom(nextZoom)
+        setRenderZoom(nextZoom)
       }
     }
     initializedDocumentIdRef.current = document.id
-  }, [document?.id, document?.lastReadPage, pageFromRoute, setActiveDocument])
+  }, [document?.id, document?.lastReadPage, hasExplicitRoutePage, hasExplicitRouteZoom, pageFromRoute, setActiveDocument, zoomFromRoute])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !document?.id) return
+    const timeout = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(
+          getReaderViewStateKey(document.id),
+          JSON.stringify({
+            page,
+            zoom,
+          }),
+        )
+      } catch (error) {
+        console.warn('Failed to persist reader view state:', error)
+      }
+    }, 150)
+
+    return () => window.clearTimeout(timeout)
+  }, [document?.id, page, zoom])
 
   useEffect(() => {
     if (!document || document.readingStage !== 'unread') return
@@ -1201,9 +1265,9 @@ function RealReaderViewPage() {
     const handleWheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
-        const zoomStep = event.deltaY < 0 ? 2 : -2
+        const zoomStep = event.deltaY < 0 ? READER_WHEEL_ZOOM_STEP : -READER_WHEEL_ZOOM_STEP
         setZoom((current) => {
-          const nextZoom = Math.max(50, Math.min(250, current + zoomStep))
+          const nextZoom = Math.max(READER_MIN_INTERNAL_ZOOM, Math.min(READER_MAX_INTERNAL_ZOOM, current + zoomStep))
           void captureViewportCenterZoomAnchor(nextZoom)
           return nextZoom
         })
@@ -1387,7 +1451,7 @@ function RealReaderViewPage() {
     shouldAutoScrollOccurrenceRef.current = true
     shouldEnsureOccurrenceVisibleRef.current = true
     setActiveOccurrenceIndex(index)
-    const targetZoom = Math.max(zoom, 200)
+    const targetZoom = Math.max(zoom, READER_DEFAULT_INTERNAL_ZOOM)
     if (targetZoom !== zoom) {
       setZoom(targetZoom)
     }
@@ -2516,7 +2580,7 @@ function RealReaderViewPage() {
             <ReaderToolbarIconButton
               label="Reset zoom"
               onClick={() => {
-                const nextZoom = 200
+                const nextZoom = READER_DEFAULT_INTERNAL_ZOOM
                 void captureViewportCenterZoomAnchor(nextZoom)
                 setZoom(nextZoom)
               }}
@@ -2527,7 +2591,7 @@ function RealReaderViewPage() {
               label="Zoom out"
               onClick={() => {
                 setZoom((current) => {
-                  const nextZoom = Math.max(50, current - 20)
+                  const nextZoom = Math.max(READER_MIN_INTERNAL_ZOOM, current - READER_BUTTON_ZOOM_STEP)
                   void captureViewportCenterZoomAnchor(nextZoom)
                   return nextZoom
                 })
@@ -2540,7 +2604,7 @@ function RealReaderViewPage() {
               label="Zoom in"
               onClick={() => {
                 setZoom((current) => {
-                  const nextZoom = Math.min(250, current + 20)
+                  const nextZoom = Math.min(READER_MAX_INTERNAL_ZOOM, current + READER_BUTTON_ZOOM_STEP)
                   void captureViewportCenterZoomAnchor(nextZoom)
                   return nextZoom
                 })
