@@ -95,6 +95,8 @@ type AppLoadingScreenProps = {
   diagnostics?: string[]
 }
 
+const STATUS_LINE_SWAP_DELAY_MS = 5000
+
 function detectLocale(): AppLocale {
   if (typeof window === 'undefined') return 'en'
   const language = window.navigator.language
@@ -112,6 +114,7 @@ export function AppLoadingScreen({
 }: AppLoadingScreenProps) {
   const [resolvedLocale, setResolvedLocale] = useState<AppLocale>(locale ?? 'en')
   const [phraseIndex, setPhraseIndex] = useState<number | null>(null)
+  const [shouldShowStatusLineAsPrimary, setShouldShowStatusLineAsPrimary] = useState(false)
 
   useEffect(() => {
     setResolvedLocale(locale ?? detectLocale())
@@ -127,6 +130,22 @@ export function AppLoadingScreen({
     () => copy.phrases[phraseIndex ?? 0] ?? copy.phrases[0],
     [copy.phrases, phraseIndex],
   )
+
+  useEffect(() => {
+    setShouldShowStatusLineAsPrimary(false)
+
+    if (!statusLine?.trim()) return
+
+    const timeoutId = window.setTimeout(() => {
+      setShouldShowStatusLineAsPrimary(true)
+    }, STATUS_LINE_SWAP_DELAY_MS)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [statusLine])
+
+  const primaryMessage = shouldShowStatusLineAsPrimary && statusLine?.trim()
+    ? statusLine
+    : phrase
 
   return (
     <div
@@ -162,10 +181,10 @@ export function AppLoadingScreen({
             </div>
 
             <p className="mt-5 max-w-sm text-sm leading-6 text-muted-foreground">
-              {phrase}
+              {primaryMessage}
             </p>
 
-            {statusLine ? (
+            {statusLine && !shouldShowStatusLineAsPrimary ? (
               <p className="mt-4 text-xs font-medium uppercase tracking-[0.18em] text-primary/75">
                 {statusLine}
               </p>

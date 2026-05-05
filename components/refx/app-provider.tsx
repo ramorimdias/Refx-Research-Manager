@@ -516,7 +516,7 @@ export function AppProvider({ children }: AppProviderProps) {
       <AppLoadingScreen
         compact
         locale={locale}
-        statusLine={isMacTauri ? startupStatusLine : undefined}
+        statusLine={startupStatusLine}
         diagnostics={isMacTauri ? startupDiagnostics : undefined}
         className="min-h-screen bg-[radial-gradient(circle_at_top,#dbeafe_0%,#f8fafc_34%,#eef2ff_100%)] dark:bg-[radial-gradient(circle_at_top,#1d2841_0%,#0f172a_36%,#09090b_100%)]"
       />

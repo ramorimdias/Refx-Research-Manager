@@ -121,6 +121,55 @@ Creates a connected research graph automatically.
 
 ---
 
+## Project Structure
+
+```text
+refx-research-app/
+├─ app/                 # Next.js App Router pages and feature entry points
+│  ├─ libraries/        # Library management
+│  ├─ documents/        # Document listing and management
+│  ├─ reader/           # PDF reader experience
+│  ├─ search/           # Local search UI
+│  ├─ references/       # References and citation workflows
+│  ├─ maps/             # Research graph and relationship views
+│  ├─ discover/         # Discovery and journey workflows
+│  ├─ notes/            # Notes workspace
+│  ├─ comments/         # Document comments
+│  ├─ metadata/         # Metadata tools and enrichment flows
+│  └─ settings/         # App settings
+├─ components/
+│  ├─ refx/             # App-specific components
+│  └─ ui/               # Reusable design-system primitives
+├─ lib/
+│  ├─ repositories/     # Local database access and persistence helpers
+│  ├─ services/         # Search, OCR, PDF, metadata, reader, and domain logic
+│  ├─ stores/           # Zustand/shared app state
+│  ├─ tauri/            # Tauri client helpers and desktop bridge utilities
+│  ├─ hooks/            # Shared hooks
+│  └─ utils/            # Generic utilities
+├─ public/
+│  ├─ pdfjs/            # PDF.js assets
+│  └─ tesseract/        # OCR assets
+├─ src-tauri/           # Native desktop shell, migrations, icons, capabilities
+├─ workers/             # Cloudflare Workers and lightweight backend helpers
+├─ scripts/             # Local development and maintenance scripts
+├─ docs/                # Project notes and supporting documentation
+├─ styles/              # Global styles
+├─ types/               # Shared TypeScript types
+├─ word-addin/          # Word add-in project
+└─ workflows/           # Workflow-related assets/configuration
+```
+
+### Key Files
+
+- `README.md`: project overview
+- `package.json`: frontend scripts and dependencies
+- `src-tauri/src/lib.rs`: Tauri desktop entry point
+- `app/layout.tsx`: global app shell bootstrap
+- `app/page.tsx`: home page
+
+---
+
 ## Philosophy
 
 Refx is not just a reference manager.
