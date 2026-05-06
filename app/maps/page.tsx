@@ -7,16 +7,10 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
 } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import {
-  Background,
-  BackgroundVariant,
-  Controls,
   MarkerType,
-  MiniMap,
-  ReactFlow,
   ReactFlowProvider,
   type Connection,
   type Node,
@@ -34,37 +28,19 @@ import {
 import 'reactflow/dist/style.css'
 import {
   Check,
-  FilePenLine,
   GitBranch,
   Loader2,
-  Plus,
-  RefreshCw,
-  Save,
-  SaveAll,
-  Search,
-  SlidersHorizontal,
-  Trash2,
-  WandSparkles,
   ChevronsUpDown,
   Waypoints,
 } from 'lucide-react'
-import { DocumentGraphPanel } from '@/components/refx/document-graph-panel'
+import { MapsManagementDialogs, DEFAULT_GRAPH_VIEW_DRAFT } from '@/components/refx/maps-management-dialogs'
+import { MapsWorkspaceCanvas } from '@/components/refx/maps-workspace-canvas'
+import { MapsWorkspaceToolbar } from '@/components/refx/maps-workspace-toolbar'
 import { EmptyState } from '@/components/refx/common'
-import { PageHeader } from '@/components/refx/page-header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Select,
@@ -73,22 +49,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
 import { useLibraryStore } from '@/lib/stores/library-store'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
 import { useGraphActions, useGraphStore } from '@/lib/stores/graph-store'
 import { useRelationActions, useRelationStore } from '@/lib/stores/relation-store'
 import * as repo from '@/lib/repositories/local-db'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import {
   buildDocumentGraphMetrics,
   buildNodeAppearance,
@@ -131,11 +96,6 @@ type GraphPreferences = {
   yearMin?: number
 }
 
-type GraphViewDraft = {
-  name: string
-  description: string
-}
-
 type GraphContextMenuState =
   | {
       kind: 'node'
@@ -154,7 +114,6 @@ type GraphContextMenuState =
 const GRAPH_PREFERENCES_STORAGE_KEY = 'refx.maps.phase4.preferences'
 const WORKING_MAP_LAYOUT_STORAGE_KEY = 'refx.maps.working-layouts'
 const LAST_ACTIVE_MAP_STORAGE_KEY = 'refx.maps.last-active-map'
-const WORKING_MAP_SELECT_VALUE = '__working__'
 const MY_WORK_HEXAGON_CLIP_PATH = 'polygon(25% 6%, 75% 6%, 98% 50%, 75% 94%, 25% 94%, 2% 50%)'
 const GRAPH_POSITION_LIMIT = 12000
 const DEFAULT_GRAPH_PREFERENCES: GraphPreferences = {
@@ -166,42 +125,6 @@ const DEFAULT_GRAPH_PREFERENCES: GraphPreferences = {
   relationFilter: 'all',
   scopeMode: 'mapped',
   sizeMode: 'total_degree',
-}
-
-const DEFAULT_GRAPH_VIEW_DRAFT: GraphViewDraft = {
-  name: '',
-  description: '',
-}
-
-function MapsToolbarIconButton({
-  label,
-  tooltipSide = 'top',
-  className,
-  children,
-  ...props
-}: ComponentProps<typeof Button> & {
-  label: string
-  tooltipSide?: 'top' | 'bottom'
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          {...props}
-          aria-label={label}
-          className={cn(
-            'h-9 w-9 rounded-full border border-border/70 bg-background text-muted-foreground hover:bg-accent hover:text-foreground',
-            className,
-          )}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side={tooltipSide} sideOffset={8}>
-        {label}
-      </TooltipContent>
-    </Tooltip>
-  )
 }
 
 function getWorkReferenceTargetDocumentId(workReference: repo.DbWorkReference) {
@@ -794,7 +717,7 @@ function MapsPageContent() {
   const [isCreateMapDialogOpen, setIsCreateMapDialogOpen] = useState(false)
   const [isSaveViewDialogOpen, setIsSaveViewDialogOpen] = useState(false)
   const [isEditingViewDialogOpen, setIsEditingViewDialogOpen] = useState(false)
-  const [graphViewDraft, setGraphViewDraft] = useState<GraphViewDraft>(DEFAULT_GRAPH_VIEW_DRAFT)
+  const [graphViewDraft, setGraphViewDraft] = useState(DEFAULT_GRAPH_VIEW_DRAFT)
   const [workReferencesByDocumentId, setWorkReferencesByDocumentId] = useState<Record<string, repo.DbWorkReference[]>>({})
   const [workReferencesReloadTick, setWorkReferencesReloadTick] = useState(0)
   const [isRefreshingWorkReferences, setIsRefreshingWorkReferences] = useState(false)
@@ -1232,10 +1155,6 @@ function MapsPageContent() {
     [libraryRelations, selectedRelationId],
   )
 
-  const pendingDeleteRelation = useMemo(
-    () => libraryRelations.find((relation) => relation.id === pendingDeleteRelationId) ?? null,
-    [libraryRelations, pendingDeleteRelationId],
-  )
 
   const pendingDeleteAllLinksCount = useMemo(
     () =>
@@ -2844,292 +2763,49 @@ function MapsPageContent() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-hidden bg-background p-4 md:p-6">
       <div className="shrink-0 space-y-4">
-        <PageHeader
-          icon={<Waypoints className="h-6 w-6" />}
-          title={t('mapsPage.title')}
-          subtitle={t('mapsPage.subtitle')}
-          actions={(
-            <>
-              <Badge variant="outline" className="h-8 rounded-full px-3 text-xs">
-                {visibleDocuments.length}
-              </Badge>
-
-              <div className="min-w-[220px] flex-1" data-tour-id="maps-workspace">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div>
-                      <Select
-                        value={activeGraphViewId ?? WORKING_MAP_SELECT_VALUE}
-                        onValueChange={(value) => setActiveGraphViewId(value === WORKING_MAP_SELECT_VALUE ? null : value)}
-                      >
-                        <SelectTrigger className="h-9 rounded-xl bg-background">
-                          <SelectValue placeholder={t('mapsPage.workingMap')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value={WORKING_MAP_SELECT_VALUE}>
-                            {t('mapsPage.workingMap')}
-                          </SelectItem>
-                          {activeLibraryGraphViews.map((view) => (
-                            <SelectItem key={view.id} value={view.id}>
-                              {view.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" sideOffset={8}>
-                    {activeGraphView?.description?.trim() || t('mapsPage.workingMapDescription')}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-
-              {activeGraphView ? (
-                <MapsToolbarIconButton
-                  label={t('mapsPage.renameView')}
-                  tooltipSide="bottom"
-                  variant="ghost"
-                  onClick={handleOpenEditViewDialog}
-                >
-                  <FilePenLine className="h-4 w-4" />
-                </MapsToolbarIconButton>
-              ) : null}
-
-              <Popover open={isAddDocumentPopoverOpen} onOpenChange={setIsAddDocumentPopoverOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                title={t('mapsPage.addDocumentToMap')}
-                aria-label={t('mapsPage.addDocumentToMap')}
-                className="h-9 w-9 rounded-full"
-                data-tour-id="maps-add-document"
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[360px] p-0" align="start">
-                  <div className="space-y-2 p-2">
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        value={addDocumentQuery}
-                        onChange={(event) => setAddDocumentQuery(event.target.value)}
-                        placeholder={pendingConnectionDirection ? t('mapsPage.searchAndLinkPlaceholder') : t('mapsPage.searchDocumentsPlaceholder')}
-                        className="bg-background pl-9"
-                      />
-                    </div>
-                    <div className="max-h-[320px] overflow-y-auto">
-                      {filteredAddableDocuments.length > 0 ? (
-                        <div className="space-y-1">
-                          {filteredAddableDocuments.map((document) => (
-                            <button
-                              key={document.id}
-                              type="button"
-                              className="flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left transition hover:bg-accent hover:text-accent-foreground"
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => {
-                                void handleAddDocumentToMap(document.id)
-                                setIsAddDocumentPopoverOpen(false)
-                                setAddDocumentQuery('')
-                              }}
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <p className="truncate text-sm font-medium">{document.title}</p>
-                                  {document.documentType === 'my_work' ? (
-                                    <Badge className="h-5 rounded-full border-amber-300/70 bg-amber-50 px-2 text-[10px] font-medium text-amber-900 hover:bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/15">
-                                      {t('referencesPage.title')}
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                                <p className="truncate text-xs text-muted-foreground">
-                                  {document.authors.slice(0, 2).join(', ') || t('searchPage.unknownAuthor')}
-                                  {document.year ? ` - ${document.year}` : ''}
-                                </p>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="px-2 py-6 text-center text-sm text-muted-foreground">
-                          {addableDocuments.length > 0 || hasAddableWorks
-                            ? t('mapsPage.noMatchingDocument')
-                            : t('mapsPage.myWorkAlreadyOnMap')}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    title={t('mapsPage.filterLayout')}
-                    aria-label={t('mapsPage.filterLayout')}
-                    className="h-9 w-9 rounded-full"
-                    data-tour-id="maps-layout-filter"
-                  >
-                    <SlidersHorizontal className="h-4 w-4" />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-[320px] p-3" align="end">
-                  <div className="grid gap-3">
-                    <div className="space-y-2">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <h3 className="inline-flex cursor-help text-xs font-semibold uppercase tracking-[0.16em] text-foreground">
-                            {t('mapsPage.appearance')}
-                          </h3>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" sideOffset={8}>
-                          {t('mapsPage.appearanceDescription')}
-                        </TooltipContent>
-                      </Tooltip>
-                      <div className="grid gap-2">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">{t('mapsPage.nodeColors')}</Label>
-                          <Select
-                            value={graphPreferences.colorMode}
-                            onValueChange={(value) => setGraphPreferences((current) => ({ ...current, colorMode: value as GraphColorMode }))}
-                          >
-                            <SelectTrigger className="h-8 bg-background">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="library">{t('mapsPage.libraryColors')}</SelectItem>
-                              <SelectItem value="year">{t('mapsPage.yearColors')}</SelectItem>
-                              <SelectItem value="density">{t('mapsPage.density')}</SelectItem>
-                              <SelectItem value="status">{t('mapsPage.status')}</SelectItem>
-                              <SelectItem value="component">{t('mapsPage.component')}</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs">{t('mapsPage.nodeSize')}</Label>
-                          <Select
-                            value={graphPreferences.sizeMode}
-                            onValueChange={(value) => setGraphPreferences((current) => ({ ...current, sizeMode: value as GraphSizeMode }))}
-                          >
-                            <SelectTrigger className="h-8 bg-background">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="uniform">{t('mapsPage.uniform')}</SelectItem>
-                              <SelectItem value="inbound_citations">{t('mapsPage.inboundCitations')}</SelectItem>
-                              <SelectItem value="total_degree">{t('mapsPage.totalDegree')}</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-2 border-t border-border/60 pt-3">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <h3 className="inline-flex cursor-help text-xs font-semibold uppercase tracking-[0.16em] text-foreground">
-                            {t('mapsPage.focus')}
-                          </h3>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" sideOffset={8}>
-                          {t('mapsPage.focusDescription')}
-                        </TooltipContent>
-                      </Tooltip>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">{t('mapsPage.focusType')}</Label>
-                        <Select
-                          value={graphPreferences.neighborhoodDepth}
-                          onValueChange={(value) => setGraphPreferences((current) => ({
-                            ...current,
-                            neighborhoodDepth: value as GraphNeighborhoodDepth,
-                            focusMode: value !== 'full',
-                          }))}
-                        >
-                          <SelectTrigger className="h-8 bg-background">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="full">{t('mapsPage.fullGraph')}</SelectItem>
-                            <SelectItem value="1">{t('mapsPage.oneHopNeighbors')}</SelectItem>
-                            <SelectItem value="2">{t('mapsPage.twoHopNeighbors')}</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              <MapsToolbarIconButton
-                label={t('mapsPage.newMap')}
-                tooltipSide="bottom"
-                onClick={handleOpenCreateMapDialog}
-                variant="outline"
-                data-tour-id="maps-new-view"
-              >
-                <Plus className="h-4 w-4" />
-              </MapsToolbarIconButton>
-              {activeGraphView ? (
-                <MapsToolbarIconButton
-                  label={t('mapsPage.saveCurrentView')}
-                  tooltipSide="bottom"
-                  variant="outline"
-                  onClick={() => void persistActiveViewSnapshot()}
-                >
-                  <Save className="h-4 w-4" />
-                </MapsToolbarIconButton>
-              ) : null}
-            <MapsToolbarIconButton
-              label={activeGraphView ? t('mapsPage.saveAsNewView') : t('mapsPage.saveView')}
-              tooltipSide="bottom"
-              variant="outline"
-              onClick={handleOpenSaveViewDialog}
-              data-tour-id="maps-save-as-view"
-            >
-              <SaveAll className="h-4 w-4" />
-            </MapsToolbarIconButton>
-            <MapsToolbarIconButton
-              label={t('mapsPage.rebuildLayout')}
-              tooltipSide="bottom"
-              variant="outline"
-              onClick={() => void handleReheatLayout()}
-              disabled={isReheatingLayout || visibleDocuments.length === 0}
-              data-tour-id="maps-rebuild-layout"
-            >
-              <WandSparkles className={cn('h-4 w-4', isReheatingLayout && 'animate-pulse')} />
-            </MapsToolbarIconButton>
-            <MapsToolbarIconButton
-              label={t('mapsPage.refreshReferences')}
-              tooltipSide="bottom"
-              variant="outline"
-              onClick={() => void refreshWorkReferences()}
-              disabled={isRefreshingWorkReferences}
-            >
-              <RefreshCw className={cn('h-4 w-4', isRefreshingWorkReferences && 'animate-spin')} />
-            </MapsToolbarIconButton>
-            <MapsToolbarIconButton
-              label={t('mapsPage.deleteMap')}
-              tooltipSide="bottom"
-              variant="outline"
-              className="text-rose-600 hover:text-rose-700"
-              onClick={() => setIsDeleteWorkspaceDialogOpen(true)}
-              disabled={!activeGraphView}
-              data-tour-id="maps-delete-map"
-            >
-              <Trash2 className="h-4 w-4" />
-            </MapsToolbarIconButton>
-            </>
-          )}
+        <MapsWorkspaceToolbar
+          visibleDocumentsCount={visibleDocuments.length}
+          activeGraphViewId={activeGraphViewId}
+          onActiveGraphViewIdChange={setActiveGraphViewId}
+          activeLibraryGraphViews={activeLibraryGraphViews}
+          activeGraphView={activeGraphView}
+          isAddDocumentPopoverOpen={isAddDocumentPopoverOpen}
+          onAddDocumentPopoverOpenChange={setIsAddDocumentPopoverOpen}
+          addDocumentQuery={addDocumentQuery}
+          onAddDocumentQueryChange={setAddDocumentQuery}
+          pendingConnectionDirection={pendingConnectionDirection}
+          filteredAddableDocuments={filteredAddableDocuments}
+          addableDocumentsLength={addableDocuments.length}
+          hasAddableWorks={hasAddableWorks}
+          onAddDocumentToMap={(documentId) => {
+            void handleAddDocumentToMap(documentId)
+          }}
+          onRenameView={handleOpenEditViewDialog}
+          graphPreferences={graphPreferences}
+          setGraphPreferences={setGraphPreferences}
+          onOpenCreateMapDialog={handleOpenCreateMapDialog}
+          onPersistActiveViewSnapshot={() => {
+            void persistActiveViewSnapshot()
+          }}
+          onOpenSaveViewDialog={handleOpenSaveViewDialog}
+          isReheatingLayout={isReheatingLayout}
+          onReheatLayout={() => {
+            void handleReheatLayout()
+          }}
+          isRefreshingWorkReferences={isRefreshingWorkReferences}
+          onRefreshWorkReferences={() => {
+            void refreshWorkReferences()
+          }}
+          onDeleteWorkspace={() => setIsDeleteWorkspaceDialogOpen(true)}
         />
       </div>
 
-      <div
-        className="relative min-h-0 flex-1 overflow-hidden"
-        onMouseMove={(event) => {
+      <MapsWorkspaceCanvas
+        visibleDocumentsCount={visibleDocuments.length}
+        edgesCount={edges.length}
+        pendingConnectionDirection={pendingConnectionDirection}
+        pendingConnectionCursor={pendingConnectionCursor}
+        onWorkspaceMouseMove={(event) => {
           if (!pendingConnectionDirection) return
           const bounds = event.currentTarget.getBoundingClientRect()
           setPendingConnectionCursor({
@@ -3137,473 +2813,183 @@ function MapsPageContent() {
             y: event.clientY - bounds.top,
           })
         }}
-        onMouseLeave={() => {
+        onWorkspaceMouseLeave={() => {
           if (!pendingConnectionDirection) return
           setPendingConnectionCursor(null)
         }}
-      >
-        <div className="relative h-full min-h-0 overflow-hidden bg-muted/55 dark:bg-[#141821]">
-          {visibleDocuments.length === 0 ? (
-            <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
-              <Card className="border-dashed bg-card/92 p-4 shadow-sm backdrop-blur">
-                <p className="text-sm text-muted-foreground">
-                  {t('mapsPage.noDocumentsControls')}
-                </p>
-              </Card>
-            </div>
-          ) : edges.length === 0 ? (
-            <div className="pointer-events-none absolute left-6 top-6 z-10 max-w-sm">
-              <Card className="border-dashed bg-card/92 p-4 shadow-sm backdrop-blur">
-                <p className="text-sm text-muted-foreground">
-                  {t('mapsPage.noLinksControls')}
-                </p>
-              </Card>
-            </div>
-          ) : null}
-
-          {pendingConnectionDirection && pendingConnectionCursor ? (
-            <div
-              className={cn(
-                'pointer-events-none absolute z-20 w-[250px] -translate-x-1/2 -translate-y-full rounded-full border px-3 py-2 text-center text-xs font-medium shadow-sm',
-                pendingConnectionDirection === 'outbound'
-                  ? 'border-sky-300 bg-sky-50/95 text-sky-800'
-                  : 'border-rose-300 bg-rose-50/95 text-rose-800',
-              )}
-              style={{
-                left: Math.max(pendingConnectionCursor.x, 140),
-                top: Math.max(pendingConnectionCursor.y - 16, 24),
-              }}
-            >
-              {pendingConnectionDirection === 'outbound'
-                ? t('mapsPage.selectReferenceTarget')
-                : t('mapsPage.selectCitationTarget')}
-            </div>
-          ) : null}
-
-          <div data-tour-id="maps-canvas" className="h-full min-h-0 w-full">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={handleNodesChange}
-            onNodeDragStart={handleNodeDragStart}
-            onNodeDragStop={(event, node, nodesForDrag) => void handleNodeDragStop(event, node, nodesForDrag)}
-            onEdgesChange={handleEdgesChange}
-            onConnectStart={handleConnectStart}
-            onConnect={(connection) => void handleConnect(connection)}
-            onConnectEnd={(event) => void handleConnectEnd(event)}
-            onNodeClick={async (_, node) => {
-              if (node.type === 'reference') {
-                clearPendingConnection()
-                setSelectedDocumentId(null)
-                setSelectedRelationId(null)
-                setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
-                setContextMenu(null)
-                setActiveDocument(null)
-                return
-              }
-              if (pendingConnectionDocumentId && pendingConnectionDocumentId !== node.id) {
-                await handleClickToConnect(node.id)
-                return
-              }
-              setSelectedDocumentId(node.id)
-              setSelectedWorkReferenceId(null)
-              setSelectedRelationId(null)
-              setActiveDocument(node.id)
-            }}
-            onNodeContextMenu={(event, node) => {
-              if (node.type === 'reference') {
-                event.preventDefault()
-                clearPendingConnection()
-                setSelectedDocumentId(null)
-                setSelectedRelationId(null)
-                setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
-                setContextMenu(null)
-                setActiveDocument(null)
-                return
-              }
-              if (node.type !== 'document') return
-              event.preventDefault()
-              setSelectedDocumentId(node.id)
-              setSelectedWorkReferenceId(null)
-              setSelectedRelationId(null)
-              setContextMenu({
-                kind: 'node',
-                documentId: node.id,
-                x: event.clientX,
-                y: event.clientY,
-              })
-              setActiveDocument(node.id)
-            }}
-            onNodeMouseEnter={(_, node) => {
-              if (node.type === 'reference') {
-                setHoveredWorkReferenceId(node.id.replace('work-reference-node-', ''))
-                return
-              }
-              if (node.type !== 'document') return
-              setHoveredDocumentId(node.id)
-            }}
-            onNodeMouseLeave={(_, node) => {
-              if (node.type === 'reference') {
-                setHoveredWorkReferenceId(null)
-                return
-              }
-              if (node.type !== 'document') return
-              setHoveredDocumentId(null)
-            }}
-            onEdgeClick={(_, edge) => {
-              if (edge.id.startsWith('work-reference-edge-')) {
-                setSelectedDocumentId(null)
-                setSelectedRelationId(null)
-                setSelectedWorkReferenceId(edge.id.replace('work-reference-edge-', ''))
-                clearPendingConnection()
-                setActiveDocument(null)
-                return
-              }
-              setSelectedDocumentId(null)
-              setSelectedWorkReferenceId(null)
-              clearPendingConnection()
-              setSelectedRelationId(edge.id)
-              setActiveDocument(null)
-            }}
-            onEdgeContextMenu={(event, edge) => {
-              if (edge.id.startsWith('work-reference-edge-')) {
-                event.preventDefault()
-                setSelectedDocumentId(null)
-                setSelectedRelationId(null)
-                setSelectedWorkReferenceId(edge.id.replace('work-reference-edge-', ''))
-                clearPendingConnection()
-                setActiveDocument(null)
-                return
-              }
-              event.preventDefault()
-              setSelectedDocumentId(null)
-              setSelectedWorkReferenceId(null)
-              clearPendingConnection()
-              setSelectedRelationId(edge.id)
-              setActiveDocument(null)
-              setContextMenu({
-                kind: 'edge',
-                relationId: edge.id,
-                x: event.clientX,
-                y: event.clientY,
-              })
-            }}
-            onEdgeMouseEnter={(_, edge) => setHoveredRelationId(edge.id)}
-            onEdgeMouseLeave={() => setHoveredRelationId(null)}
-            onPaneClick={() => {
-              clearSelection()
-              clearPendingConnection()
-            }}
-            nodeTypes={FLOW_NODE_TYPES}
-            edgeTypes={FLOW_EDGE_TYPES}
-            connectionRadius={72}
-            className="h-full bg-transparent"
-            proOptions={{ hideAttribution: true }}
-          >
-            <MiniMap
-              pannable
-              zoomable
-              nodeStrokeColor={(node) => node.data?.borderColor ?? '#cbd5e1'}
-              nodeColor={(node) => node.data?.fillColor ?? '#ffffff'}
-              maskColor={isDarkMode ? 'rgba(20,24,33,0.78)' : 'rgba(241,245,249,0.72)'}
-            />
-            <Controls />
-            <Background
-              variant={BackgroundVariant.Dots}
-              gap={20}
-              size={1}
-              color={isDarkMode ? '#334155' : '#cbd5e1'}
-            />
-          </ReactFlow>
-          </div>
-          {contextMenu ? (
-            <div
-              className="fixed z-[1000] min-w-[180px] rounded-md border bg-popover p-1 text-popover-foreground shadow-lg"
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-            >
-              {contextMenu.kind === 'node' ? (
-                <>
-                  <button
-                    type="button"
-                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                    onClick={() => {
-                      void handleRemoveDocumentFromCurrentView(contextMenu.documentId)
-                      setContextMenu(null)
-                    }}
-                  >
-                    {t('mapsPage.deleteNode')}
-                  </button>
-                  <button
-                    type="button"
-                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                    onClick={() => {
-                      setPendingDeleteAllLinksDocumentId(contextMenu.documentId)
-                      setContextMenu(null)
-                    }}
-                  >
-                    {t('mapsPage.deleteAllLinks')}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                    onClick={() => {
-                      void handleDeleteRelationWithoutPrompt(contextMenu.relationId)
-                      setContextMenu(null)
-                    }}
-                  >
-                    {t('mapsPage.removeLinkMenu')}
-                  </button>
-                  <button
-                    type="button"
-                    className="w-full rounded-sm px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                    onClick={() => {
-                      void handleInvertRelation(contextMenu.relationId)
-                      setContextMenu(null)
-                    }}
-                  >
-                    {t('mapsPage.invertLinkMenu')}
-                  </button>
-                </>
-              )}
-            </div>
-          ) : null}
-        </div>
-
-        {isSelectionPanelOpen ? (
-          <div className="pointer-events-none absolute inset-y-4 right-4 z-30 flex w-full max-w-[540px] justify-end">
-            <aside className="pointer-events-auto h-full w-full overflow-hidden rounded-[28px] border border-border/80 bg-background/96 shadow-[0_24px_60px_rgba(15,23,42,0.18)] backdrop-blur">
-              <DocumentGraphPanel
-                selectedDocument={selectedDocument}
-                selectedWorkReference={selectedWorkReference}
-                selectedRelation={selectedRelation}
-                sourceDocument={sourceDocument}
-                targetDocument={targetDocument}
-                relatedIncomingDocuments={selectedDocumentVisibleIncomingDocuments}
-                relatedOutgoingDocuments={panelOutgoingDocuments}
-                relatedOutgoingReferences={selectedDocumentVisibleOutgoingReferences}
-                otherIncomingDocuments={selectedDocumentOtherIncomingDocuments}
-                otherOutgoingDocuments={panelOtherOutgoingDocuments}
-                onDeleteRelation={handleDeleteRelation}
-                onInvertRelation={handleInvertRelation}
-                onAddLinkedDocumentToMap={handleAddLinkedDocumentToMap}
-                onHideLinkedDocumentFromMap={handleRemoveDocumentFromCurrentView}
-                isDeletingRelation={isDeletingRelation}
-                onCloseSelection={clearSelection}
-              />
-            </aside>
-          </div>
-        ) : null}
-      </div>
-
-      <Dialog
-        open={isCreateMapDialogOpen}
-        onOpenChange={(open) => {
-          setIsCreateMapDialogOpen(open)
-          if (!open) {
-            setGraphViewDraft(DEFAULT_GRAPH_VIEW_DRAFT)
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={handleNodesChange}
+        onNodeDragStart={handleNodeDragStart}
+        onNodeDragStop={(event, node, nodesForDrag) => void handleNodeDragStop(event, node, nodesForDrag)}
+        onEdgesChange={handleEdgesChange}
+        onConnectStart={handleConnectStart}
+        onConnect={(connection) => void handleConnect(connection)}
+        onConnectEnd={(event) => void handleConnectEnd(event)}
+        onNodeClick={async (_, node) => {
+          if (node.type === 'reference') {
+            clearPendingConnection()
+            setSelectedDocumentId(null)
+            setSelectedRelationId(null)
+            setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
+            setContextMenu(null)
+            setActiveDocument(null)
+            return
           }
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('mapsPage.newMap')}</DialogTitle>
-            <DialogDescription>
-              Create a named map from the current view without clearing the existing one.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="create-graph-view-name">{t('mapsPage.name')}</Label>
-              <Input
-                id="create-graph-view-name"
-                value={graphViewDraft.name}
-                onChange={(event) => setGraphViewDraft((current) => ({ ...current, name: event.target.value }))}
-                placeholder={t('mapsPage.newMap')}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-graph-view-description">{t('mapsPage.workspaceNote')}</Label>
-              <Textarea
-                id="create-graph-view-description"
-                value={graphViewDraft.description}
-                onChange={(event) => setGraphViewDraft((current) => ({ ...current, description: event.target.value }))}
-                placeholder={t('mapsPage.workspaceNotePlaceholder')}
-                className="min-h-24"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsCreateMapDialogOpen(false)}>
-              {t('mapsPage.cancel')}
-            </Button>
-            <Button onClick={() => void handleCreateNewMap()}>
-              {t('mapsPage.newMap')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isSaveViewDialogOpen} onOpenChange={setIsSaveViewDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('mapsPage.saveGraphView')}</DialogTitle>
-            <DialogDescription>
-              {t('mapsPage.saveGraphViewDescription')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="graph-view-name">{t('mapsPage.name')}</Label>
-              <Input
-                id="graph-view-name"
-                value={graphViewDraft.name}
-                onChange={(event) => setGraphViewDraft((current) => ({ ...current, name: event.target.value }))}
-                placeholder={t('mapsPage.saveGraphView')}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="graph-view-description">{t('mapsPage.workspaceNote')}</Label>
-              <Textarea
-                id="graph-view-description"
-                value={graphViewDraft.description}
-                onChange={(event) => setGraphViewDraft((current) => ({ ...current, description: event.target.value }))}
-                placeholder={t('mapsPage.workspaceNotePlaceholder')}
-                className="min-h-24"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsSaveViewDialogOpen(false)}>
-              {t('mapsPage.cancel')}
-            </Button>
-            <Button onClick={() => void handleSaveCurrentView()}>
-              {t('mapsPage.saveView')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isEditingViewDialogOpen} onOpenChange={setIsEditingViewDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('mapsPage.editGraphView')}</DialogTitle>
-            <DialogDescription>
-              {t('mapsPage.editGraphViewDescription')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-graph-view-name">{t('mapsPage.name')}</Label>
-              <Input
-                id="edit-graph-view-name"
-                value={graphViewDraft.name}
-                onChange={(event) => setGraphViewDraft((current) => ({ ...current, name: event.target.value }))}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-graph-view-description">{t('mapsPage.workspaceNote')}</Label>
-              <Textarea
-                id="edit-graph-view-description"
-                value={graphViewDraft.description}
-                onChange={(event) => setGraphViewDraft((current) => ({ ...current, description: event.target.value }))}
-                className="min-h-24"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditingViewDialogOpen(false)}>
-              {t('mapsPage.cancel')}
-            </Button>
-            <Button onClick={() => void handleUpdateGraphViewMeta()}>
-              {t('mapsPage.saveChanges')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(pendingDeleteRelation)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingDeleteRelationId(null)
+          if (pendingConnectionDocumentId && pendingConnectionDocumentId !== node.id) {
+            await handleClickToConnect(node.id)
+            return
           }
+          setSelectedDocumentId(node.id)
+          setSelectedWorkReferenceId(null)
+          setSelectedRelationId(null)
+          setActiveDocument(node.id)
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('mapsPage.breakLink')}</DialogTitle>
-            <DialogDescription>
-              This will remove permanently the relationship between those two documents.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingDeleteRelationId(null)}>
-              {t('mapsPage.cancel')}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                if (!pendingDeleteRelationId) return
-                void handleDeleteRelationWithoutPrompt(pendingDeleteRelationId)
-                setPendingDeleteRelationId(null)
-              }}
-              disabled={isDeletingRelation}
-            >
-              {isDeletingRelation ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              {t('mapsPage.breakLink')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <AlertDialog
-        open={Boolean(pendingDeleteAllLinksDocumentId)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setPendingDeleteAllLinksDocumentId(null)
+        onNodeContextMenu={(event, node) => {
+          if (node.type === 'reference') {
+            event.preventDefault()
+            clearPendingConnection()
+            setSelectedDocumentId(null)
+            setSelectedRelationId(null)
+            setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
+            setContextMenu(null)
+            setActiveDocument(null)
+            return
           }
+          if (node.type !== 'document') return
+          event.preventDefault()
+          setSelectedDocumentId(node.id)
+          setSelectedWorkReferenceId(null)
+          setSelectedRelationId(null)
+          setContextMenu({
+            kind: 'node',
+            documentId: node.id,
+            x: event.clientX,
+            y: event.clientY,
+          })
+          setActiveDocument(node.id)
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('mapsPage.deleteAllLinks')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {`Delete ${pendingDeleteAllLinksCount} link(s) connected to this node?`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeletingRelation}>{t('mapsPage.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={isDeletingRelation}
-              onClick={() => {
-                if (!pendingDeleteAllLinksDocumentId) return
-                void handleDeleteAllLinksForDocument(pendingDeleteAllLinksDocumentId)
-              }}
-            >
-              {isDeletingRelation ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {t('mapsPage.deleteAllLinks')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={isDeleteWorkspaceDialogOpen} onOpenChange={setIsDeleteWorkspaceDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('mapsPage.delete')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {activeGraphView ? `Delete workspace "${activeGraphView.name}"?` : 'Delete this workspace?'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('mapsPage.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void handleDeleteActiveGraphView()}>
-              {t('mapsPage.delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onNodeMouseEnter={(_, node) => {
+          if (node.type === 'reference') {
+            setHoveredWorkReferenceId(node.id.replace('work-reference-node-', ''))
+            return
+          }
+          if (node.type !== 'document') return
+          setHoveredDocumentId(node.id)
+        }}
+        onNodeMouseLeave={(_, node) => {
+          if (node.type === 'reference') {
+            setHoveredWorkReferenceId(null)
+            return
+          }
+          if (node.type !== 'document') return
+          setHoveredDocumentId(null)
+        }}
+        onEdgeClick={(_, edge) => {
+          if (edge.id.startsWith('work-reference-edge-')) {
+            setSelectedDocumentId(null)
+            setSelectedRelationId(null)
+            setSelectedWorkReferenceId(edge.id.replace('work-reference-edge-', ''))
+            clearPendingConnection()
+            setActiveDocument(null)
+            return
+          }
+          setSelectedDocumentId(null)
+          setSelectedWorkReferenceId(null)
+          clearPendingConnection()
+          setSelectedRelationId(edge.id)
+          setActiveDocument(null)
+        }}
+        onEdgeContextMenu={(event, edge) => {
+          if (edge.id.startsWith('work-reference-edge-')) {
+            event.preventDefault()
+            setSelectedDocumentId(null)
+            setSelectedRelationId(null)
+            setSelectedWorkReferenceId(edge.id.replace('work-reference-edge-', ''))
+            clearPendingConnection()
+            setActiveDocument(null)
+            return
+          }
+          event.preventDefault()
+          setSelectedDocumentId(null)
+          setSelectedWorkReferenceId(null)
+          clearPendingConnection()
+          setSelectedRelationId(edge.id)
+          setActiveDocument(null)
+          setContextMenu({
+            kind: 'edge',
+            relationId: edge.id,
+            x: event.clientX,
+            y: event.clientY,
+          })
+        }}
+        onEdgeMouseEnter={(_, edge) => setHoveredRelationId(edge.id)}
+        onEdgeMouseLeave={() => setHoveredRelationId(null)}
+        onPaneClick={() => {
+          clearSelection()
+          clearPendingConnection()
+        }}
+        isDarkMode={isDarkMode}
+        contextMenu={contextMenu}
+        onCloseContextMenu={() => setContextMenu(null)}
+        onRemoveDocumentFromCurrentView={(documentId) => {
+          void handleRemoveDocumentFromCurrentView(documentId)
+        }}
+        onRequestDeleteAllLinks={setPendingDeleteAllLinksDocumentId}
+        onDeleteRelationWithoutPrompt={(relationId) => {
+          void handleDeleteRelationWithoutPrompt(relationId)
+        }}
+        onInvertRelation={(relationId) => {
+          void handleInvertRelation(relationId)
+        }}
+        isSelectionPanelOpen={isSelectionPanelOpen}
+        selectedDocument={selectedDocument}
+        selectedWorkReference={selectedWorkReference}
+        selectedRelation={selectedRelation}
+        sourceDocument={sourceDocument}
+        targetDocument={targetDocument}
+        relatedIncomingDocuments={selectedDocumentVisibleIncomingDocuments}
+        relatedOutgoingDocuments={panelOutgoingDocuments}
+        relatedOutgoingReferences={selectedDocumentVisibleOutgoingReferences}
+        otherIncomingDocuments={selectedDocumentOtherIncomingDocuments}
+        otherOutgoingDocuments={panelOtherOutgoingDocuments}
+        onDeleteRelation={handleDeleteRelation}
+        isDeletingRelation={isDeletingRelation}
+        onCloseSelection={clearSelection}
+        onAddLinkedDocumentToMap={handleAddLinkedDocumentToMap}
+        onHideLinkedDocumentFromMap={handleRemoveDocumentFromCurrentView}
+      />
+
+      <MapsManagementDialogs
+        isCreateMapDialogOpen={isCreateMapDialogOpen}
+        onCreateMapDialogOpenChange={setIsCreateMapDialogOpen}
+        isSaveViewDialogOpen={isSaveViewDialogOpen}
+        onSaveViewDialogOpenChange={setIsSaveViewDialogOpen}
+        isEditingViewDialogOpen={isEditingViewDialogOpen}
+        onEditingViewDialogOpenChange={setIsEditingViewDialogOpen}
+        isDeleteWorkspaceDialogOpen={isDeleteWorkspaceDialogOpen}
+        onDeleteWorkspaceDialogOpenChange={setIsDeleteWorkspaceDialogOpen}
+        graphViewDraft={graphViewDraft}
+        onGraphViewDraftChange={setGraphViewDraft}
+        onResetGraphViewDraft={() => setGraphViewDraft(DEFAULT_GRAPH_VIEW_DRAFT)}
+        onCreateMap={() => void handleCreateNewMap()}
+        onSaveCurrentView={() => void handleSaveCurrentView()}
+        onUpdateGraphViewMeta={() => void handleUpdateGraphViewMeta()}
+        pendingDeleteRelationId={pendingDeleteRelationId}
+        onPendingDeleteRelationIdChange={setPendingDeleteRelationId}
+        onDeleteRelationWithoutPrompt={(relationId) => {
+          void handleDeleteRelationWithoutPrompt(relationId)
+        }}
+        isDeletingRelation={isDeletingRelation}
+        pendingDeleteAllLinksDocumentId={pendingDeleteAllLinksDocumentId}
+        onPendingDeleteAllLinksDocumentIdChange={setPendingDeleteAllLinksDocumentId}
+        pendingDeleteAllLinksCount={pendingDeleteAllLinksCount}
+        onDeleteAllLinksForDocument={(documentId) => {
+          void handleDeleteAllLinksForDocument(documentId)
+        }}
+        activeGraphView={activeGraphView}
+        onDeleteActiveGraphView={() => void handleDeleteActiveGraphView()}
+      />
     </div>
   )
 }

@@ -707,5 +707,10 @@ function RealCommentsPage() {
 }
 
 export default function CommentsPage() {
+  const params = useSearchParams()
+  if (params.get('tour') === '1') {
+    return <CommentsTourDemo />
+  }
+
   return <RealCommentsPage />
 }

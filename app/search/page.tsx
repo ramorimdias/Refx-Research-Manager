@@ -1169,5 +1169,10 @@ function RealSearchPage() {
 }
 
 export default function SearchPage() {
+  const params = useSearchParams()
+  if (params.get('tour') === '1') {
+    return <SearchTourDemo />
+  }
+
   return <RealSearchPage />
 }

@@ -12,16 +12,18 @@ import {
   type CSSProperties,
 } from 'react'
 import { createPortal } from 'react-dom'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ArrowRight, ChevronLeft, Lightbulb, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { APP_PAGE_TOURS, type AppTourPlacement } from '@/lib/app-tour'
+import { APP_GLOBAL_TOUR_STEPS, APP_PAGE_TOURS, type AppGlobalTourStep, type AppTourPlacement, type AppTourStep } from '@/lib/app-tour'
 import { translate, type AppLocale, useLocale } from '@/lib/localization'
 import { cn } from '@/lib/utils'
 
 type AppTourContextValue = {
   isOpen: boolean
+  isGlobalTourRunning: boolean
   startCurrentPageTour: () => void
+  startGlobalAppTour: () => void
   closeCurrentPageTour: () => void
   nextTourStep: () => void
   previousTourStep: () => void
@@ -34,6 +36,8 @@ type AppTourContextValue = {
 type AppTourProviderProps = {
   children: React.ReactNode
   enabled: boolean
+  autoStartGlobalTour?: boolean
+  onGlobalTourComplete?: (reason: 'completed' | 'dismissed') => void
 }
 
 type SpotlightRect = {
@@ -45,12 +49,47 @@ type SpotlightRect = {
 
 const TARGET_SELECTOR_PREFIX = '[data-tour-id="'
 const TARGET_WAIT_TIMEOUT_MS = 2400
+const GLOBAL_TOUR_LOG_PREFIX = '[app-tour]'
 const BALLOON_WIDTH = 360
 const VIEWPORT_PADDING = 24
 const GAP = 18
 
 const APP_TOUR_TRANSLATIONS: Partial<Record<AppLocale, Record<string, string>>> = {
+  en: {
+    'tour.steps.homeOverview.title': 'Home page',
+    'tour.steps.homeOverview.body': 'This is your dashboard. You can jump back into recent work, open favorite content, and get a quick sense of what is happening across your research workspace.',
+    'tour.steps.searchOverview.title': 'Search page',
+    'tour.steps.searchOverview.body': 'Use search to explore your library with quick queries, grouped logic, and focused filters.',
+    'tour.steps.readerOverview.title': 'Reader home',
+    'tour.steps.readerOverview.body': 'This page helps you resume reading quickly. You can reopen recent documents and continue from where you left off.',
+    'tour.steps.readerViewOverview.title': 'PDF reader',
+    'tour.steps.readerViewOverview.body': 'This is the document reading workspace. You can read PDFs, search inside them, add highlights and notes, and move through your material in context.',
+    'tour.steps.discoverOverview.title': 'Discover page',
+    'tour.steps.discoverOverview.body': 'This page helps you explore a document outward. You can start discovery journeys, follow references and citations, save paths, and inspect connected works visually.',
+    'tour.steps.librariesOverview.title': 'Libraries page',
+    'tour.steps.librariesOverview.body': 'Libraries organize your research collection. From here you can browse documents, switch views, and manage the contents of the current library.',
+    'tour.steps.documentsOverview.title': 'Document details page',
+    'tour.steps.documentsOverview.body': 'This page is where you review and edit a document in depth, including metadata, tags, references, and the preview of the file itself.',
+    'tour.steps.referencesOverview.title': 'References page',
+    'tour.steps.referencesOverview.body': 'Use this workspace to manage references around your own work, review linked sources, and build structured citation outputs.',
+    'tour.steps.settingsOverview.title': 'Settings page',
+    'tour.steps.settingsOverview.body': 'Settings control how Refx behaves on this device, including appearance, processing defaults, backups, updates, and onboarding tools.',
+  },
   'pt-BR': {
+    'tour.steps.readerOverview.title': 'Início do leitor',
+    'tour.steps.readerOverview.body': 'Esta página ajuda você a retomar a leitura rapidamente. Aqui você pode reabrir documentos recentes e continuar de onde parou.',
+    'tour.steps.readerViewOverview.title': 'Leitor de PDF',
+    'tour.steps.readerViewOverview.body': 'Este é o espaço de leitura do documento. Aqui você pode ler PDFs, buscar dentro deles, adicionar destaques e notas e navegar pelo material com contexto.',
+    'tour.steps.discoverOverview.title': 'Página Discover',
+    'tour.steps.discoverOverview.body': 'Esta página ajuda você a explorar um documento para fora. Aqui você pode iniciar jornadas de descoberta, seguir referências e citações, salvar caminhos e inspecionar conexões visualmente.',
+    'tour.steps.librariesOverview.title': 'Página de bibliotecas',
+    'tour.steps.librariesOverview.body': 'As bibliotecas organizam a sua coleção de pesquisa. Nesta página você pode navegar pelos documentos, trocar a visualização e gerenciar o conteúdo da biblioteca atual.',
+    'tour.steps.documentsOverview.title': 'Página de detalhes do documento',
+    'tour.steps.documentsOverview.body': 'Aqui você revisa e edita o documento em profundidade, incluindo metadados, tags, referências e a visualização do arquivo.',
+    'tour.steps.referencesOverview.title': 'Página de referências',
+    'tour.steps.referencesOverview.body': 'Use este espaço para gerenciar referências ligadas aos seus próprios trabalhos, revisar fontes conectadas e montar saídas de citação.',
+    'tour.steps.settingsOverview.title': 'Página de configurações',
+    'tour.steps.settingsOverview.body': 'As configurações controlam como o Refx funciona neste dispositivo, incluindo aparência, processamento, backups, atualizações e ferramentas de onboarding.',
     'tour.steps.navigatorOverview.title': 'Navegador principal',
     'tour.steps.navigatorOverview.body': 'Este menu à esquerda é o navegador principal do app e dá acesso rápido a cada área importante.',
     'tour.steps.homeOverview.title': 'Tela inicial',
@@ -97,6 +136,20 @@ const APP_TOUR_TRANSLATIONS: Partial<Record<AppLocale, Record<string, string>>> 
     'tour.steps.settingsOptions.body': 'Estas seções agrupam as principais preferências do app, da configuração geral até aparência, processamento, dados e sobre.',
   },
   fr: {
+    'tour.steps.readerOverview.title': 'Accueil du lecteur',
+    'tour.steps.readerOverview.body': 'Cette page vous aide à reprendre rapidement votre lecture. Vous pouvez rouvrir des documents récents et continuer là où vous vous êtes arrêté.',
+    'tour.steps.readerViewOverview.title': 'Lecteur PDF',
+    'tour.steps.readerViewOverview.body': 'Ceci est l’espace de lecture du document. Vous pouvez lire des PDF, chercher à l’intérieur, ajouter des surlignages et des notes, et avancer avec plus de contexte.',
+    'tour.steps.discoverOverview.title': 'Page Discover',
+    'tour.steps.discoverOverview.body': 'Cette page vous aide à explorer un document au-delà de sa lecture directe. Vous pouvez lancer des parcours de découverte, suivre références et citations, enregistrer des chemins et inspecter les connexions visuellement.',
+    'tour.steps.librariesOverview.title': 'Page des bibliothèques',
+    'tour.steps.librariesOverview.body': 'Les bibliothèques organisent votre collection de recherche. Ici, vous pouvez parcourir les documents, changer l’affichage et gérer le contenu de la bibliothèque active.',
+    'tour.steps.documentsOverview.title': 'Page de détail du document',
+    'tour.steps.documentsOverview.body': 'Cette page permet de revoir et modifier un document en profondeur, y compris les métadonnées, les tags, les références et l’aperçu du fichier.',
+    'tour.steps.referencesOverview.title': 'Page des références',
+    'tour.steps.referencesOverview.body': 'Utilisez cet espace pour gérer les références autour de votre propre travail, revoir les sources liées et produire des sorties de citation structurées.',
+    'tour.steps.settingsOverview.title': 'Page des réglages',
+    'tour.steps.settingsOverview.body': 'Les réglages contrôlent le comportement de Refx sur cet appareil, notamment l’apparence, le traitement, les sauvegardes, les mises à jour et les outils d’onboarding.',
     'tour.steps.navigatorOverview.title': 'Navigateur principal',
     'tour.steps.navigatorOverview.body': 'Ce menu à gauche est le navigateur principal de l’application et donne un accès rapide à chaque zone importante.',
     'tour.steps.homeOverview.title': 'Écran d’accueil',
@@ -146,7 +199,9 @@ const APP_TOUR_TRANSLATIONS: Partial<Record<AppLocale, Record<string, string>>> 
 
 const AppTourContext = createContext<AppTourContextValue>({
   isOpen: false,
+  isGlobalTourRunning: false,
   startCurrentPageTour: () => undefined,
+  startGlobalAppTour: () => undefined,
   closeCurrentPageTour: () => undefined,
   nextTourStep: () => undefined,
   previousTourStep: () => undefined,
@@ -182,6 +237,30 @@ function measureTourTarget(targetTourId: string): SpotlightRect | null {
     width: rect.width,
     height: rect.height,
   }
+}
+
+function buildGlobalTourHref(step: AppGlobalTourStep) {
+  const search = new URLSearchParams(step.routeQuery ?? {})
+  const query = search.toString()
+  return query ? `${step.routePath}?${query}` : step.routePath
+}
+
+function doesGlobalTourStepMatchRoute(
+  step: AppGlobalTourStep,
+  pathname: string,
+  searchParams: { get: (key: string) => string | null },
+) {
+  if (step.routePath !== pathname) return false
+  return Object.entries(step.routeQuery ?? {}).every(([key, value]) => searchParams.get(key) === value)
+}
+
+function logGlobalTour(message: string, details?: Record<string, unknown>) {
+  if (details) {
+    console.info(`${GLOBAL_TOUR_LOG_PREFIX} ${message}`, details)
+    return
+  }
+
+  console.info(`${GLOBAL_TOUR_LOG_PREFIX} ${message}`)
 }
 
 function translateTour(locale: AppLocale, key: string, params?: Record<string, string | number>) {
@@ -377,16 +456,24 @@ function Spotlight({
 export function AppTourProvider({
   children,
   enabled,
+  autoStartGlobalTour = false,
+  onGlobalTourComplete,
 }: AppTourProviderProps) {
   const { locale } = useLocale()
+  const router = useRouter()
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const normalizedPathname = normalizeTourPathname(pathname)
+  const normalizedSearchParams = useMemo(() => new URLSearchParams(searchParams.toString()), [searchParams])
   const [isOpen, setIsOpen] = useState(false)
+  const [tourMode, setTourMode] = useState<'page' | 'global' | null>(null)
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [rect, setRect] = useState<SpotlightRect | null>(null)
   const [resolvedPlacement, setResolvedPlacement] = useState<AppTourPlacement>('bottom')
   const [currentPageAvailableTargetIds, setCurrentPageAvailableTargetIds] = useState<string[]>([])
   const previousPathnameRef = useRef<string | null>(null)
+  const lastGlobalNavigationRef = useRef<string | null>(null)
+  const hasAutoStartedGlobalTourRef = useRef(false)
   const currentPageTourSteps = useMemo(
     () => APP_PAGE_TOURS[normalizedPathname] ?? [],
     [normalizedPathname],
@@ -396,11 +483,27 @@ export function AppTourProvider({
     [currentPageAvailableTargetIds, currentPageTourSteps],
   )
   const hasCurrentPageTour = currentPageTourSteps.length > 0
+  const isGlobalTourRunning = isOpen && tourMode === 'global'
+  const activeTourSteps = tourMode === 'global' ? APP_GLOBAL_TOUR_STEPS : runnableCurrentPageTourSteps
+  const currentStep = activeTourSteps[currentStepIndex] ?? null
+
+  const completeGlobalTour = useCallback((reason: 'completed' | 'dismissed') => {
+    setIsOpen(false)
+    setTourMode(null)
+    setRect(null)
+    onGlobalTourComplete?.(reason)
+  }, [onGlobalTourComplete])
 
   const closeCurrentPageTour = useCallback(() => {
+    if (tourMode === 'global') {
+      completeGlobalTour('dismissed')
+      return
+    }
+
     setIsOpen(false)
+    setTourMode(null)
     setRect(null)
-  }, [])
+  }, [completeGlobalTour, tourMode])
 
   const canStartCurrentPageTour = enabled && runnableCurrentPageTourSteps.length > 0
   const currentPageTourUnavailableReason = canStartCurrentPageTour
@@ -409,10 +512,24 @@ export function AppTourProvider({
 
   const startCurrentPageTour = useCallback(() => {
     if (!canStartCurrentPageTour) return
+    logGlobalTour('starting page guide', { route: normalizedPathname })
+    lastGlobalNavigationRef.current = null
+    setTourMode('page')
     setCurrentStepIndex(0)
     setRect(null)
     setIsOpen(true)
-  }, [canStartCurrentPageTour])
+  }, [canStartCurrentPageTour, normalizedPathname])
+
+  const startGlobalAppTour = useCallback(() => {
+    if (!enabled || APP_GLOBAL_TOUR_STEPS.length === 0) return
+    logGlobalTour('starting global onboarding', { route: normalizedPathname })
+    lastGlobalNavigationRef.current = null
+    hasAutoStartedGlobalTourRef.current = true
+    setTourMode('global')
+    setCurrentStepIndex(0)
+    setRect(null)
+    setIsOpen(true)
+  }, [enabled, normalizedPathname])
 
   const skipCurrentPageTour = useCallback(() => {
     closeCurrentPageTour()
@@ -421,13 +538,18 @@ export function AppTourProvider({
   const nextTourStep = useCallback(() => {
     setRect(null)
     setCurrentStepIndex((current) => {
-      if (current >= runnableCurrentPageTourSteps.length - 1) {
-        closeCurrentPageTour()
+      if (current >= activeTourSteps.length - 1) {
+        if (tourMode === 'global') {
+          completeGlobalTour('completed')
+        } else {
+          setIsOpen(false)
+          setTourMode(null)
+        }
         return current
       }
       return current + 1
     })
-  }, [closeCurrentPageTour, runnableCurrentPageTourSteps.length])
+  }, [activeTourSteps.length, completeGlobalTour, tourMode])
 
   const previousTourStep = useCallback(() => {
     setRect(null)
@@ -487,27 +609,25 @@ export function AppTourProvider({
 
   useEffect(() => {
     if (previousPathnameRef.current === null) {
-      previousPathnameRef.current = pathname
+      previousPathnameRef.current = normalizedPathname
       return
     }
 
-    if (previousPathnameRef.current !== normalizedPathname && isOpen) {
+    if (previousPathnameRef.current !== normalizedPathname && isOpen && tourMode === 'page') {
       closeCurrentPageTour()
     }
 
     previousPathnameRef.current = normalizedPathname
-  }, [closeCurrentPageTour, isOpen, normalizedPathname])
-
-  const currentStep = runnableCurrentPageTourSteps[currentStepIndex] ?? null
+  }, [closeCurrentPageTour, isOpen, normalizedPathname, tourMode])
 
   useEffect(() => {
     if (!isOpen) return
-    if (runnableCurrentPageTourSteps.length === 0) {
+    if (activeTourSteps.length === 0) {
       closeCurrentPageTour()
       return
     }
-    setCurrentStepIndex((current) => Math.min(current, runnableCurrentPageTourSteps.length - 1))
-  }, [closeCurrentPageTour, isOpen, runnableCurrentPageTourSteps.length])
+    setCurrentStepIndex((current) => Math.min(current, activeTourSteps.length - 1))
+  }, [activeTourSteps.length, closeCurrentPageTour, isOpen])
 
   useEffect(() => {
     if (!isOpen) return
@@ -529,6 +649,33 @@ export function AppTourProvider({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, nextTourStep, previousTourStep, skipCurrentPageTour])
 
+  useEffect(() => {
+    if (!autoStartGlobalTour || !enabled || isOpen || hasAutoStartedGlobalTourRef.current) return
+    startGlobalAppTour()
+  }, [autoStartGlobalTour, enabled, isOpen, startGlobalAppTour])
+
+  useEffect(() => {
+    if (!isOpen || tourMode !== 'global' || !currentStep) return
+
+    const currentGlobalStep = currentStep as AppGlobalTourStep
+    const currentHref = buildGlobalTourHref(currentGlobalStep)
+    const routeMatches = doesGlobalTourStepMatchRoute(currentGlobalStep, normalizedPathname, normalizedSearchParams)
+    if (routeMatches) {
+      lastGlobalNavigationRef.current = null
+      return
+    }
+
+    if (lastGlobalNavigationRef.current === currentHref) return
+
+    lastGlobalNavigationRef.current = currentHref
+    logGlobalTour('route transition start', {
+      stepId: currentGlobalStep.id,
+      route: currentHref,
+      currentPathname: normalizedPathname,
+    })
+    router.push(currentHref)
+  }, [currentStep, isOpen, normalizedPathname, normalizedSearchParams, router, tourMode])
+
   useLayoutEffect(() => {
     if (!isOpen || !currentStep) return
 
@@ -538,10 +685,36 @@ export function AppTourProvider({
 
     const measure = () => {
       if (cancelled) return
+      if (tourMode === 'global') {
+        const globalStep = currentStep as AppGlobalTourStep
+        if (!doesGlobalTourStepMatchRoute(globalStep, normalizedPathname, normalizedSearchParams)) {
+          if (Date.now() >= deadline) {
+            logGlobalTour('route transition timeout, skipping step', {
+              stepId: globalStep.id,
+              targetRoute: buildGlobalTourHref(globalStep),
+              currentPathname: normalizedPathname,
+            })
+            nextTourStep()
+            return
+          }
+          frameId = window.requestAnimationFrame(measure)
+          return
+        }
+      }
+
       const spotlightRect = measureTourTarget(currentStep.targetTourId)
       if (!spotlightRect) {
         if (Date.now() >= deadline) {
-          closeCurrentPageTour()
+          if (tourMode === 'global') {
+            logGlobalTour('target lookup timeout, skipping step', {
+              stepId: currentStep.id,
+              targetTourId: currentStep.targetTourId,
+              currentPathname: normalizedPathname,
+            })
+            nextTourStep()
+          } else {
+            closeCurrentPageTour()
+          }
           return
         }
         frameId = window.requestAnimationFrame(measure)
@@ -550,11 +723,28 @@ export function AppTourProvider({
 
       const element = queryTourTarget(currentStep.targetTourId)
       if (!element) return
+      if (tourMode === 'global') {
+        logGlobalTour('target resolved', {
+          stepId: currentStep.id,
+          targetTourId: currentStep.targetTourId,
+          currentPathname: normalizedPathname,
+        })
+      }
       element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' })
       setRect(spotlightRect)
       setResolvedPlacement(
         computePlacement(currentStep.placement, spotlightRect, window.innerWidth, window.innerHeight),
       )
+      if (tourMode === 'global') {
+        logGlobalTour('spotlight rect created', {
+          stepId: currentStep.id,
+          targetTourId: currentStep.targetTourId,
+          top: spotlightRect.top,
+          left: spotlightRect.left,
+          width: spotlightRect.width,
+          height: spotlightRect.height,
+        })
+      }
     }
 
     measure()
@@ -565,7 +755,7 @@ export function AppTourProvider({
         window.cancelAnimationFrame(frameId)
       }
     }
-  }, [closeCurrentPageTour, currentStep, isOpen])
+  }, [closeCurrentPageTour, currentStep, isOpen, nextTourStep, normalizedPathname, normalizedSearchParams, tourMode])
 
   useEffect(() => {
     if (!isOpen || !currentStep || !rect) return
@@ -590,7 +780,9 @@ export function AppTourProvider({
   const value = useMemo<AppTourContextValue>(
     () => ({
       isOpen,
+      isGlobalTourRunning,
       startCurrentPageTour,
+      startGlobalAppTour,
       closeCurrentPageTour,
       nextTourStep,
       previousTourStep,
@@ -604,16 +796,18 @@ export function AppTourProvider({
       closeCurrentPageTour,
       currentPageTourUnavailableReason,
       hasCurrentPageTour,
+      isGlobalTourRunning,
       isOpen,
       nextTourStep,
       previousTourStep,
       skipCurrentPageTour,
+      startGlobalAppTour,
       startCurrentPageTour,
     ],
   )
 
   const progressPercent = currentStep
-    ? ((currentStepIndex + 1) / Math.max(runnableCurrentPageTourSteps.length, 1)) * 100
+    ? ((currentStepIndex + 1) / Math.max(activeTourSteps.length, 1)) * 100
     : 0
   const hasVisibleSpotlight = Boolean(isOpen && currentStep && rect)
   const spotlightRect = rect
@@ -632,7 +826,7 @@ export function AppTourProvider({
           onNext={nextTourStep}
           onClose={skipCurrentPageTour}
           isFirstStep={currentStepIndex === 0}
-          isLastStep={currentStepIndex === runnableCurrentPageTourSteps.length - 1}
+          isLastStep={currentStepIndex === activeTourSteps.length - 1}
           progressPercent={progressPercent}
         />
       ) : null}

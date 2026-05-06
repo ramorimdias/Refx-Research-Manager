@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useUiStore } from '@/lib/stores/ui-store'
 import { useRuntimeActions, useRuntimeState } from '@/lib/stores/runtime-store'
 import {
@@ -349,6 +349,14 @@ export function AppProvider({ children }: AppProviderProps) {
     setAppSettings((current) => (current ? { ...current, locale: nextLocale } : current))
   }
 
+  const handleGlobalTourCompletion = useCallback(async () => {
+    if (!appSettings || appSettings.hasCompletedAppTour) return
+
+    const nextSettings = { ...appSettings, hasCompletedAppTour: true }
+    setAppSettings(nextSettings)
+    await saveAppSettings(isDesktopApp, nextSettings)
+  }, [appSettings, isDesktopApp])
+
   useEffect(() => {
     if (!initialized || typeof window === 'undefined') return
 
@@ -528,6 +536,10 @@ export function AppProvider({ children }: AppProviderProps) {
     <LocaleProvider initialLocale={locale}>
       <AppTourProvider
         enabled={!isNameDialogOpen}
+        autoStartGlobalTour={!isNameDialogOpen && Boolean(appSettings) && !appSettings?.hasCompletedAppTour}
+        onGlobalTourComplete={() => {
+          void handleGlobalTourCompletion()
+        }}
       >
         {!isNameDialogOpen ? children : null}
       </AppTourProvider>

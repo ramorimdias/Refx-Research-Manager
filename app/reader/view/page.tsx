@@ -2,7 +2,14 @@
 
 import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight, FilePenLine, Highlighter, Loader2, MapPin, Printer, Search, SquareArrowOutUpRight, SquareSquare, StickyNote, Trash2, Type, X, ZoomIn, ZoomOut } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, X } from 'lucide-react'
+import { ReaderNavigationToolbar } from '@/components/refx/reader-navigation-toolbar'
+import { ReaderNotesPanel } from '@/components/refx/reader-notes-panel'
+import { ReaderPageOverlays } from '@/components/refx/reader-page-overlays'
+import { ReaderSearchPanel } from '@/components/refx/reader-search-panel'
+import { ReaderToolbarActions } from '@/components/refx/reader-toolbar-actions'
+import { ReaderToolbarIconButton } from '@/components/refx/reader-toolbar-icon-button'
+import { ReaderViewTourDemo } from '@/components/refx/reader-view-tour-demo'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -15,10 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
-import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import * as repo from '@/lib/repositories/local-db'
 import { appDataDir, convertFileSrc, copyFile, getCurrentWindow, isTauri, join, mkdir, open, readFile } from '@/lib/tauri/client'
@@ -345,104 +349,6 @@ function ReaderToolbarColorIndicator({
         />
       )}
     </span>
-  )
-}
-
-const ReaderToolbarIconButton = forwardRef<
-  HTMLButtonElement,
-  React.ComponentProps<typeof Button> & { label: string }
->(({ label, children, className, ...props }, ref) => {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          ref={ref}
-          variant="ghost"
-          size="icon"
-          aria-label={label}
-          className={cn(
-            'h-8 w-8 rounded-full border border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted/70 hover:text-foreground',
-            className,
-          )}
-          {...props}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
-  )
-})
-
-ReaderToolbarIconButton.displayName = 'ReaderToolbarIconButton'
-
-function ReaderViewTourDemo() {
-  return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="border-b border-border bg-background/95 px-6 py-4">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <Button asChild variant="outline" size="sm">
-              <a href="/reader">
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
-              </a>
-            </Button>
-            <div>
-              <h1 className="text-xl font-semibold">REFX Tour Sample PDF</h1>
-              <p className="text-sm text-muted-foreground">A safe bundled PDF used only for the guided tour.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" aria-label="Reader search">
-              <Search className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="icon" data-tour-id="reader-highlight" aria-label="Reader highlights">
-              <Highlighter className="h-4 w-4" />
-            </Button>
-            <Button variant="ghost" size="icon" data-tour-id="reader-notes" aria-label="Reader notes">
-              <StickyNote className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-4 p-6">
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-background/80 p-3" data-tour-id="reader-search">
-          <Input className="max-w-sm" value="tour sample" readOnly />
-          <Badge variant="secondary">Reader demo</Badge>
-        </div>
-        <div className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-border bg-muted/15 p-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" aria-label="Previous page">
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Badge variant="outline">Page 1 / 2</Badge>
-              <Button variant="outline" size="icon" aria-label="Next page">
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="icon" aria-label="Zoom out">
-                <ZoomOut className="h-4 w-4" />
-              </Button>
-              <Badge variant="outline">100%</Badge>
-              <Button variant="outline" size="icon" aria-label="Zoom in">
-                <ZoomIn className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-          <div className="overflow-hidden rounded-xl border border-border bg-white shadow-sm">
-            <iframe
-              src="/tour-sample.pdf#toolbar=0&navpanes=0&scrollbar=0"
-              className="pointer-events-none h-[70vh] w-full border-0"
-              title="Tour sample PDF"
-            />
-          </div>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -2526,12 +2432,9 @@ function RealReaderViewPage() {
       <ResizablePanel defaultSize={74} minSize={45}>
         <div className="flex h-full flex-1 flex-col">
         <div className="flex flex-nowrap items-center gap-1 overflow-x-auto border-b px-2 py-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={backLabel}
-            className="h-8 w-8 shrink-0 rounded-full border border-transparent text-muted-foreground hover:border-border/70 hover:bg-muted/70 hover:text-foreground"
-            onClick={() => {
+          <ReaderNavigationToolbar
+            backLabel={backLabel}
+            onBack={() => {
               if (isDetachedReaderWindow) {
                 if (isTauri()) {
                   void getCurrentWindow().close()
@@ -2547,318 +2450,75 @@ function RealReaderViewPage() {
               }
               router.push(fallbackBackHref)
             }}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/80 px-2 py-1">
-            <ReaderToolbarIconButton
-              label={t('common.goToPreviousPage')}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-            <div className="relative min-w-[4.6rem]">
-              <Input
-                value={page}
-                onChange={(event) => setPage(Math.max(1, Number(event.target.value) || 1))}
-                aria-label={t('common.currentPage')}
-                className="h-8 w-16 border-transparent bg-background pr-6 text-center text-sm shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0"
-              />
-              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">
-                / {pdfDocument?.numPages ?? document.pageCount ?? '—'}
-              </span>
-            </div>
-            <ReaderToolbarIconButton
-              label={t('common.goToNextPage')}
-              onClick={() => setPage((current) => Math.min(pdfDocument?.numPages ?? current + 1, current + 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-          </div>
-          <div className="mx-1 h-5 w-px bg-border/80" aria-hidden="true" />
-          <div className="flex shrink-0 items-center gap-1 rounded-full border border-border/70 bg-background/80 px-2 py-1">
-            <ReaderToolbarIconButton
-              label="Reset zoom"
-              onClick={() => {
-                const nextZoom = READER_DEFAULT_INTERNAL_ZOOM
-                void captureViewportCenterZoomAnchor(nextZoom)
-                setZoom(nextZoom)
-              }}
-            >
-              <SquareSquare className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-            <ReaderToolbarIconButton
-              label="Zoom out"
-              onClick={() => {
-                setZoom((current) => {
-                  const nextZoom = Math.max(READER_MIN_INTERNAL_ZOOM, current - READER_BUTTON_ZOOM_STEP)
-                  void captureViewportCenterZoomAnchor(nextZoom)
-                  return nextZoom
-                })
-              }}
-            >
-              <ZoomOut className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-            <span className="min-w-[2.75rem] text-center text-xs text-muted-foreground">{displayedZoom}%</span>
-            <ReaderToolbarIconButton
-              label="Zoom in"
-              onClick={() => {
-                setZoom((current) => {
-                  const nextZoom = Math.min(READER_MAX_INTERNAL_ZOOM, current + READER_BUTTON_ZOOM_STEP)
-                  void captureViewportCenterZoomAnchor(nextZoom)
-                  return nextZoom
-                })
-              }}
-            >
-              <ZoomIn className="h-4 w-4" />
-            </ReaderToolbarIconButton>
-          </div>
-          <div className="mx-1 h-5 w-px bg-border/80" aria-hidden="true" />
-          <Popover open={isHighlightPickerOpen} onOpenChange={setIsHighlightPickerOpen}>
-            <PopoverTrigger asChild>
-              <ReaderToolbarIconButton
-                label="Highlight colors"
-                disabled={!canUsePreciseViewer}
-                aria-pressed={isHighlightMode || isHighlightDeleteMode}
-                className={cn((isHighlightMode || isHighlightDeleteMode) && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
-                data-tour-id="reader-highlight"
-                onClick={() => {
-                  if (!isHighlightMode || isHighlightDeleteMode) {
-                    activateHighlightPlacementMode()
-                  }
-                }}
-              >
-                {isHighlightMode || isHighlightDeleteMode ? (
-                  <ReaderToolbarColorIndicator
-                    color={selectedHighlightColor.highlight}
-                    label="Active highlight color"
-                    showDeleteMark={isHighlightDeleteMode}
-                  />
-                ) : (
-                  <Highlighter className="h-4 w-4" />
-                )}
-              </ReaderToolbarIconButton>
-            </PopoverTrigger>
-            <PopoverContent align="start" sideOffset={10} className="w-64 rounded-2xl border-border/80 bg-background/98 p-2 shadow-xl">
-              <div className="px-2 pb-2 pt-1">
-                <div className="text-sm font-medium text-foreground">Highlight colors</div>
-                <div className="text-xs text-muted-foreground">Choose a highlight color and mode.</div>
-              </div>
-              <div className="px-2 pb-2">
-                <ReaderColorPalette
-                  selectedColorId={selectedHighlightColorId}
-                  onSelect={(colorId) => {
-                    activateHighlightPlacementMode(colorId)
-                    setIsHighlightPickerOpen(false)
-                  }}
-                  type="highlight"
-                  isDeleteMode={isHighlightDeleteMode}
-                  onToggleDeleteMode={() => {
-                    deactivateTextSelectionMode()
-                    exitNoteMode()
-                    setIsHighlightDeleteMode(true)
-                    setIsHighlightMode(true)
-                    setIsHighlightPickerOpen(false)
-                  }}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-2 px-2 pb-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 rounded-xl px-3"
-                  onClick={() => {
-                    exitHighlightMode()
-                    setIsHighlightPickerOpen(false)
-                  }}
-                  disabled={!isHighlightMode && !isHighlightDeleteMode}
-                >
-                  Exit highlight mode
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-          <Popover open={isNotePickerOpen} onOpenChange={setIsNotePickerOpen}>
-            <PopoverTrigger asChild>
-              <ReaderToolbarIconButton
-                label="Note colors"
-                disabled={!canUsePreciseViewer}
-                aria-pressed={isSelectingCommentPosition || isNoteDeleteMode}
-                className={cn((isSelectingCommentPosition || isNoteDeleteMode) && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
-                data-tour-id="reader-notes"
-                onClick={() => {
-                  if (isNoteDeleteMode || (!isSelectingCommentPosition && !isNoteEditorOpen)) {
-                    activateNotePlacementMode()
-                  }
-                }}
-              >
-                {isSelectingCommentPosition || isNoteDeleteMode ? (
-                  <ReaderToolbarColorIndicator
-                    color={selectedNoteColor.note}
-                    label="Active note color"
-                    showDeleteMark={isNoteDeleteMode}
-                  />
-                ) : (
-                  <StickyNote className="h-4 w-4" />
-                )}
-              </ReaderToolbarIconButton>
-            </PopoverTrigger>
-            <PopoverContent align="start" sideOffset={10} className="w-64 rounded-2xl border-border/80 bg-background/98 p-2 shadow-xl">
-              <div className="px-2 pb-2 pt-1">
-                <div className="text-sm font-medium text-foreground">Note colors</div>
-                <div className="text-xs text-muted-foreground">Choose a note color and start placing it.</div>
-              </div>
-              <div className="px-2 pb-2">
-                <ReaderColorPalette
-                  selectedColorId={selectedNoteColorId}
-                  onSelect={(colorId) => {
-                    activateNotePlacementMode(colorId)
-                    setIsNotePickerOpen(false)
-                  }}
-                  type="note"
-                  isDeleteMode={isNoteDeleteMode}
-                  onToggleDeleteMode={() => {
-                    deactivateTextSelectionMode()
-                    exitHighlightMode()
-                    exitNoteMode()
-                    setSelectedCommentId(null)
-                    setCommentDraftPosition(null)
-                    setIsNoteDeleteMode(true)
-                    setIsNotePickerOpen(false)
-                  }}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-2 px-2 pb-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 rounded-xl px-3"
-                  onClick={() => {
-                    if (isSelectingCommentPosition || isNoteDeleteMode) {
-                      handleCancelCommentEditor()
-                    }
-                    setIsNotePickerOpen(false)
-                  }}
-                  disabled={!isSelectingCommentPosition && !isNoteDeleteMode}
-                >
-                  Cancel note mode
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-          <ReaderToolbarIconButton
-            label={isTextSelectionLayerVisible ? 'Exit text selection' : 'Select text'}
-            onClick={() => {
-              exitHighlightMode()
-              exitNoteMode()
-              if (isTextSelectionLayerVisible) {
-                deactivateTextSelectionMode()
-              } else {
-                setIsTextSelectionMode(true)
-              }
+            page={page}
+            onPageChange={setPage}
+            totalPages={pdfDocument?.numPages ?? document.pageCount ?? '-'}
+            onPreviousPage={() => setPage((current) => Math.max(1, current - 1))}
+            onNextPage={() => setPage((current) => Math.min(pdfDocument?.numPages ?? current + 1, current + 1))}
+            displayedZoom={displayedZoom}
+            onResetZoom={() => {
+              const nextZoom = READER_DEFAULT_INTERNAL_ZOOM
+              void captureViewportCenterZoomAnchor(nextZoom)
+              setZoom(nextZoom)
             }}
-            disabled={!canUsePreciseViewer}
-            aria-pressed={isTextSelectionLayerVisible}
-            className={cn(isTextSelectionLayerVisible && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
-          >
-            <Type className="h-4 w-4" />
-          </ReaderToolbarIconButton>
-          {viewerMode === 'native' ? (
-            <Badge variant="outline" className="shrink-0 border-amber-300 bg-amber-50 text-amber-900 text-xs">
-              Basic preview only
-            </Badge>
-          ) : null}
-          <div className="ml-auto flex shrink-0 items-center gap-1">
-            {activeFilePath && (
-              <>
-                <Popover open={isPrintOptionsOpen} onOpenChange={setIsPrintOptionsOpen}>
-                  <PopoverTrigger asChild>
-                    <ReaderToolbarIconButton
-                      label="Print document"
-                      disabled={!isDesktopApp || !activeFilePath || isPrinting}
-                    >
-                      {isPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                    </ReaderToolbarIconButton>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" sideOffset={10} className="w-64 rounded-2xl border-border/80 bg-background/98 p-2 shadow-xl">
-                    <div className="px-2 pb-2 pt-1">
-                      <div className="text-sm font-medium text-foreground">Print document</div>
-                      <div className="text-xs text-muted-foreground">Choose how this PDF should be prepared.</div>
-                    </div>
-                    <div className="grid gap-1">
-                      <Button
-                        variant="ghost"
-                        className="justify-start rounded-xl"
-                        onClick={() => void handlePrintDocument('original')}
-                        disabled={isPrinting}
-                      >
-                        Print original
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="justify-start rounded-xl"
-                        onClick={() => void handlePrintDocument('highlights')}
-                        disabled={isPrinting}
-                      >
-                        Print with highlights
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        className="justify-start rounded-xl"
-                        onClick={() => void handlePrintDocument('highlights-notes')}
-                        disabled={isPrinting}
-                      >
-                        Highlights + notes text
-                      </Button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </>
-            )}
-            {activeFilePath && (
-              <ReaderToolbarIconButton
-                label="Open in window"
-                onClick={() => void detachReaderWindow()}
-                disabled={!isDesktopApp || !activeFilePath}
-              >
-                <SquareArrowOutUpRight className="h-4 w-4" />
-              </ReaderToolbarIconButton>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 border-border/80 px-2"
-              onClick={() => router.push(`/documents?id=${document.id}`)}
-            >
-              <FilePenLine className="h-4 w-4" />
-              Details
-            </Button>
-          </div>
-          {activeFilePath && !hasNativeTextLayer && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="ml-1 h-8 border-border/80 px-2"
-              onClick={() => void runOcrForDocument()}
-              disabled={!isDesktopApp || !activeFilePath || isRunningOcr || document.ocrStatus === 'processing'}
-              aria-label={
-                isRunningOcr || document.ocrStatus === 'processing'
-                  ? 'Running OCR'
-                  : document.hasOcrText
-                    ? 'Re-run OCR'
-                    : 'Run OCR'
-              }
-            >
-              <Loader2 className={`mr-2 h-4 w-4 ${isRunningOcr || document.ocrStatus === 'processing' ? 'animate-spin' : 'hidden'}`} />
-              {isRunningOcr || document.ocrStatus === 'processing'
-                ? 'Running OCR...'
-                : document.hasOcrText
-                  ? 'Re-run OCR'
-                  : 'Run OCR'}
-            </Button>
-          )}
+            onZoomOut={() => {
+              setZoom((current) => {
+                const nextZoom = Math.max(READER_MIN_INTERNAL_ZOOM, current - READER_BUTTON_ZOOM_STEP)
+                void captureViewportCenterZoomAnchor(nextZoom)
+                return nextZoom
+              })
+            }}
+            onZoomIn={() => {
+              setZoom((current) => {
+                const nextZoom = Math.min(READER_MAX_INTERNAL_ZOOM, current + READER_BUTTON_ZOOM_STEP)
+                void captureViewportCenterZoomAnchor(nextZoom)
+                return nextZoom
+              })
+            }}
+          />
+          <ReaderToolbarActions
+            canUsePreciseViewer={canUsePreciseViewer}
+            viewerMode={viewerMode}
+            isHighlightPickerOpen={isHighlightPickerOpen}
+            onHighlightPickerOpenChange={setIsHighlightPickerOpen}
+            isHighlightMode={isHighlightMode}
+            isHighlightDeleteMode={isHighlightDeleteMode}
+            selectedHighlightColorId={selectedHighlightColorId}
+            selectedHighlightColor={selectedHighlightColor}
+            activateHighlightPlacementMode={activateHighlightPlacementMode}
+            deactivateTextSelectionMode={deactivateTextSelectionMode}
+            exitNoteMode={exitNoteMode}
+            setIsHighlightMode={setIsHighlightMode}
+            setIsHighlightDeleteMode={setIsHighlightDeleteMode}
+            exitHighlightMode={exitHighlightMode}
+            isNotePickerOpen={isNotePickerOpen}
+            onNotePickerOpenChange={setIsNotePickerOpen}
+            isSelectingCommentPosition={isSelectingCommentPosition}
+            isNoteDeleteMode={isNoteDeleteMode}
+            isNoteEditorOpen={isNoteEditorOpen}
+            selectedNoteColorId={selectedNoteColorId}
+            selectedNoteColor={selectedNoteColor}
+            activateNotePlacementMode={activateNotePlacementMode}
+            setSelectedCommentId={setSelectedCommentId}
+            setCommentDraftPosition={setCommentDraftPosition}
+            setIsNoteDeleteMode={setIsNoteDeleteMode}
+            handleCancelCommentEditor={handleCancelCommentEditor}
+            isTextSelectionLayerVisible={isTextSelectionLayerVisible}
+            setIsTextSelectionMode={setIsTextSelectionMode}
+            activeFilePath={activeFilePath}
+            isPrintOptionsOpen={isPrintOptionsOpen}
+            onPrintOptionsOpenChange={setIsPrintOptionsOpen}
+            isDesktopApp={isDesktopApp}
+            isPrinting={isPrinting}
+            onPrintDocument={(mode) => void handlePrintDocument(mode)}
+            onDetachReaderWindow={() => void detachReaderWindow()}
+            onOpenDetails={() => router.push(`/documents?id=${document.id}`)}
+            onRunOcr={() => void runOcrForDocument()}
+            isRunningOcr={isRunningOcr}
+            ocrStatus={document.ocrStatus}
+            hasNativeTextLayer={hasNativeTextLayer}
+            hasOcrText={document.hasOcrText}
+          />
         </div>
         <div ref={readerViewportRef} className="flex-1 overflow-auto bg-muted/30 p-4">
           {searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && viewerMode === 'pdfjs' && (
@@ -2955,321 +2615,67 @@ function RealReaderViewPage() {
                             </div>
                           )}
                           {isVisiblePage && pageSize.width > 0 && (
-                            <div
-                              className={cn(
-                                'absolute inset-0 transition-opacity duration-200',
-                                isOverlayZoomTransitioning ? 'pointer-events-none opacity-0' : 'opacity-100',
-                              )}
-                            >
-                              {isActivePage && isTextSelectionLayerVisible ? (
-                                <div className="absolute inset-0 z-30 overflow-hidden select-text cursor-text">
-                                  {pageWords.map((word, wordIndex) => (
-                                    <span
-                                      key={`${wordIndex}-${word.left}-${word.top}`}
-                                      className="absolute cursor-text select-text whitespace-pre"
-                                      style={{
-                                        left: `${word.left * (renderZoom / 100)}px`,
-                                        top: `${word.top * (renderZoom / 100)}px`,
-                                        width: `${Math.max(6, word.width * (renderZoom / 100))}px`,
-                                        height: `${Math.max(10, word.height * (renderZoom / 100))}px`,
-                                        fontSize: `${Math.max(10, word.height * (renderZoom / 100) * 0.85)}px`,
-                                        lineHeight: `${Math.max(10, word.height * (renderZoom / 100))}px`,
-                                        color: 'rgba(0, 0, 0, 0.01)',
-                                        userSelect: 'text',
-                                        WebkitUserSelect: 'text',
-                                      }}
-                                    >
-                                      {word.trailingSpace ? `${word.text} ` : word.text}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : null}
-                              <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-                                {pageNotePointComments.map((comment) => {
-                                  const isActive = comment.id === selectedCommentId
-                                  const isHovered = comment.id === hoveredCommentId
-                                  const noteColor = comment.color ?? getReaderColorOption('yellow').note
-                                  return (
-                                    <button
-                                      key={comment.id}
-                                      type="button"
-                                      onMouseEnter={() => setHoveredCommentId(comment.id)}
-                                      onMouseLeave={() => setHoveredCommentId((current) => (current === comment.id ? null : current))}
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        handleSelectComment(comment.id, { scrollIntoView: true })
-                                      }}
-                                      onContextMenu={(event) => {
-                                        if (!isNoteDeleteMode) return
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        setIsNoteDeleteMode(false)
-                                      }}
-                                      className={cn(
-                                        'pointer-events-auto absolute flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border border-white text-xs font-semibold text-white shadow-lg transition hover:scale-105',
-                                        isActive && 'z-20 ring-2 ring-foreground/20',
-                                        isHovered && 'z-30 scale-110 ring-4 ring-primary/30 shadow-[0_0_0_6px_rgba(59,130,246,0.14)]',
-                                      )}
-                                      style={{
-                                        left: `${(comment.positionX ?? 0) * pageSize.width}px`,
-                                        top: `${(comment.positionY ?? 0) * pageSize.height}px`,
-                                        backgroundColor: noteColor,
-                                      }}
-                                      aria-label={`Select ${buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)}`}
-                                      title={
-                                        isNoteDeleteMode
-                                          ? 'Click to delete'
-                                          : buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)
-                                      }
-                                    >
-                                      {comment.commentNumber}
-                                      <span
-                                        className="absolute left-1/2 top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border-r border-b border-white"
-                                        style={{ backgroundColor: noteColor }}
-                                        aria-hidden="true"
-                                      />
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                              <div className="pointer-events-none absolute inset-0 z-10 overflow-visible">
-                                {pageNoteAreaComments.map((comment) => {
-                                  const isActive = comment.id === selectedCommentId
-                                  const isHovered = comment.id === hoveredCommentId
-                                  if (!comment.areaRect) return null
-                                  const noteColor = comment.color ?? getReaderColorOption('yellow').note
-
-                                  return (
-                                    <button
-                                      key={comment.id}
-                                      type="button"
-                                      onMouseEnter={() => setHoveredCommentId(comment.id)}
-                                      onMouseLeave={() => setHoveredCommentId((current) => (current === comment.id ? null : current))}
-                                      onClick={(event) => {
-                                        event.stopPropagation()
-                                        handleSelectComment(comment.id, { scrollIntoView: true })
-                                      }}
-                                      onContextMenu={(event) => {
-                                        if (!isNoteDeleteMode) return
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        setIsNoteDeleteMode(false)
-                                      }}
-                                      className={cn(
-                                        'pointer-events-auto absolute rounded-sm transition',
-                                        isActive && 'ring-2 ring-foreground/20',
-                                        isHovered && 'z-30 ring-4 ring-primary/35 shadow-[0_0_0_6px_rgba(59,130,246,0.12)]',
-                                      )}
-                                      style={{
-                                        left: `${comment.areaRect.x * pageSize.width}px`,
-                                        top: `${comment.areaRect.y * pageSize.height}px`,
-                                        width: `${comment.areaRect.width * pageSize.width}px`,
-                                        height: `${comment.areaRect.height * pageSize.height}px`,
-                                        backgroundColor: hexToRgba(noteColor, isHovered ? 0.34 : isActive ? 0.34 : 0.26),
-                                      }}
-                                      aria-label={`Select ${buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)}`}
-                                      title={
-                                        isNoteDeleteMode
-                                          ? 'Click to delete'
-                                          : buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)
-                                      }
-                                    >
-                                      <span
-                                        className="absolute left-0 top-0 flex h-6 min-w-6 -translate-x-[calc(100%+0.375rem)] items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white shadow-sm"
-                                        style={{ backgroundColor: noteColor }}
-                                      >
-                                        {comment.commentNumber}
-                                      </span>
-                                    </button>
-                                  )
-                                })}
-                                {isActivePage && draftNotePreview?.areaRect && !isSelectingCommentPosition ? (
-                                  <div
-                                    className="pointer-events-none absolute rounded-sm ring-2 ring-dashed"
-                                    style={{
-                                      left: `${draftNotePreview.areaRect.x * pageSize.width}px`,
-                                      top: `${draftNotePreview.areaRect.y * pageSize.height}px`,
-                                      width: `${draftNotePreview.areaRect.width * pageSize.width}px`,
-                                      height: `${draftNotePreview.areaRect.height * pageSize.height}px`,
-                                      backgroundColor: hexToRgba(selectedNoteColor.note, 0.3),
-                                      borderColor: hexToRgba(selectedNoteColor.note, 0.55),
-                                    }}
-                                  >
-                                    <span
-                                      className="absolute left-0 top-0 flex h-6 min-w-6 -translate-x-[calc(100%+0.375rem)] items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white shadow-sm"
-                                      style={{ backgroundColor: selectedNoteColor.note }}
-                                    >
-                                      {draftNotePreview.commentNumber}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </div>
-                              <div className="pointer-events-none absolute inset-0">
-                                {pageHighlights.flatMap((occurrence) =>
-                                  (occurrence.rects ?? []).map((rect, rectIndex) => {
-                                    const isActive = activeOccurrenceGroupIndexes.has(occurrence.index)
-                                    return (
-                                      <div
-                                        key={`${occurrence.index}-${rectIndex}`}
-                                        ref={isActive && occurrence.index === activeOccurrenceIndex && rectIndex === 0 ? activeOccurrenceHighlightRef : null}
-                                        className={`absolute mix-blend-multiply ${
-                                          isActive ? 'bg-amber-300/52' : 'bg-sky-300/28'
-                                        }`}
-                                        style={{
-                                          left: `${rect.left * (zoom / 100)}px`,
-                                          top: `${rect.top * (zoom / 100)}px`,
-                                          width: `${rect.width * (zoom / 100)}px`,
-                                          height: `${Math.max(10, rect.height * (zoom / 100))}px`,
-                                        }}
-                                      />
-                                    )
-                                  }),
-                                )}
-                              </div>
-                              {isActivePage && draftNotePreview?.position && !draftNotePreview.areaRect && !isSelectingCommentPosition ? (
-                                <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-                                  <div
-                                    className="absolute flex h-8 w-8 -translate-x-1/2 -translate-y-full items-center justify-center rounded-full border border-white text-xs font-semibold text-white shadow-lg opacity-85"
-                                    style={{
-                                      left: `${draftNotePreview.position.x * pageSize.width}px`,
-                                      top: `${draftNotePreview.position.y * pageSize.height}px`,
-                                      backgroundColor: selectedNoteColor.note,
-                                    }}
-                                  >
-                                    {draftNotePreview.commentNumber}
-                                    <span
-                                      className="absolute left-1/2 top-full h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 border-r border-b border-white"
-                                      style={{ backgroundColor: selectedNoteColor.note }}
-                                      aria-hidden="true"
-                                    />
-                                  </div>
-                                </div>
-                              ) : null}
-                              <div
-                                className={cn(
-                                  'absolute inset-0 z-20',
-                                  isActivePage && isSelectingCommentPosition ? 'pointer-events-auto' : 'pointer-events-none',
-                                )}
-                                onPointerDown={isActivePage ? handleNotePlacementPointerDown : undefined}
-                                onPointerMove={isActivePage ? handleNotePlacementPointerMove : undefined}
-                                onPointerUp={isActivePage ? handleNotePlacementPointerEnd : undefined}
-                                onPointerCancel={() => {
-                                  if (!isActivePage) return
-                                  notePlacementStartRef.current = null
-                                  setNotePlacementCursor(null)
-                                  setCommentDraftAreaRect(null)
-                                }}
-                                onPointerLeave={() => {
-                                  if (!isActivePage) return
-                                  if (!notePlacementStartRef.current) {
-                                    setNotePlacementCursor(null)
-                                  }
-                                }}
-                              >
-                                {isActivePage && isSelectingCommentPosition && notePlacementCursor && !notePlacementStartRef.current ? (
-                                  <div
-                                    className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] rounded-full border border-primary/25 bg-background/75 px-3 py-1.5 text-center text-xs font-medium leading-tight text-foreground/85 shadow-md"
-                                    style={getFloatingHintStyle(notePlacementCursor, pageSize, 280)}
-                                  >
-                                    {t('readerView.clickOrDrawNote')}
-                                  </div>
-                                ) : null}
-                                {isActivePage && isSelectingCommentPosition && commentDraftAreaRect ? (
-                                  <div
-                                    className="pointer-events-none absolute rounded-sm"
-                                    style={{
-                                      left: `${commentDraftAreaRect.x * pageSize.width}px`,
-                                      top: `${commentDraftAreaRect.y * pageSize.height}px`,
-                                      width: `${commentDraftAreaRect.width * pageSize.width}px`,
-                                      height: `${commentDraftAreaRect.height * pageSize.height}px`,
-                                      backgroundColor: hexToRgba(selectedNoteColor.note, 0.26),
-                                    }}
-                                  >
-                                    <span
-                                      className="absolute left-0 top-0 flex h-6 min-w-6 -translate-x-[calc(100%+0.375rem)] items-center justify-center rounded-full px-1.5 text-[11px] font-semibold text-white shadow-sm"
-                                      style={{ backgroundColor: selectedNoteColor.note }}
-                                    >
-                                      {selectedComment?.commentNumber ?? nextCommentNumber}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </div>
-                              <div
-                                className={cn(
-                                  'absolute inset-0 z-20',
-                                  isActivePage && isHighlightMode ? 'pointer-events-auto' : 'pointer-events-none',
-                                )}
-                                onPointerDown={isActivePage ? handleHighlightPointerDown : undefined}
-                                onPointerMove={isActivePage ? handleHighlightPointerMove : undefined}
-                                onPointerUp={isActivePage ? (event) => {
-                                  void handleHighlightPointerEnd(event)
-                                } : undefined}
-                                onPointerCancel={() => {
-                                  if (!isActivePage) return
-                                  highlightDragStartRef.current = null
-                                  setHighlightPlacementCursor(null)
-                                  setDraftHighlightRect(null)
-                                }}
-                                onPointerLeave={() => {
-                                  if (!isActivePage) return
-                                  if (!highlightDragStartRef.current) {
-                                    setHighlightPlacementCursor(null)
-                                  }
-                                }}
-                              >
-                                {isActivePage && isHighlightMode && highlightPlacementCursor && !highlightDragStartRef.current ? (
-                                  <div
-                                    className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-[calc(100%+0.75rem)] rounded-full border border-primary/25 bg-background/75 px-3 py-1.5 text-center text-xs font-medium leading-tight text-foreground/85 shadow-md"
-                                    style={getFloatingHintStyle(highlightPlacementCursor, pageSize, 220)}
-                                  >
-                                    {t('readerView.drawHighlight')}
-                                  </div>
-                                ) : null}
-                                {pageAreaHighlights.map((highlight) => (
-                                  <button
-                                    key={highlight.id}
-                                    type="button"
-                                    className="pointer-events-auto absolute rounded-sm mix-blend-multiply transition"
-                                    style={{
-                                      left: `${highlight.rect.x * pageSize.width}px`,
-                                      top: `${highlight.rect.y * pageSize.height}px`,
-                                      width: `${highlight.rect.width * pageSize.width}px`,
-                                      height: `${highlight.rect.height * pageSize.height}px`,
-                                      backgroundColor: hexToRgba(highlight.color, 0.24),
-                                    }}
-                                    onClick={(event) => {
-                                      if (!isHighlightDeleteMode) return
-                                      event.preventDefault()
-                                      event.stopPropagation()
-                                      void handleDeleteAreaHighlight(highlight.id)
-                                    }}
-                                    onContextMenu={(event) => {
-                                      if (!isHighlightDeleteMode) return
-                                      event.preventDefault()
-                                      event.stopPropagation()
-                                      setIsHighlightDeleteMode(false)
-                                    }}
-                                    title={
-                                      isHighlightDeleteMode
-                                        ? 'Click to delete'
-                                        : 'Highlight'
-                                    }
-                                  />
-                                ))}
-                                {isActivePage && draftHighlightRect ? (
-                                  <div
-                                    className="pointer-events-none absolute rounded-sm mix-blend-multiply"
-                                    style={{
-                                      left: `${draftHighlightRect.x * pageSize.width}px`,
-                                      top: `${draftHighlightRect.y * pageSize.height}px`,
-                                      width: `${draftHighlightRect.width * pageSize.width}px`,
-                                      height: `${draftHighlightRect.height * pageSize.height}px`,
-                                      backgroundColor: hexToRgba(selectedHighlightColor.highlight, 0.26),
-                                    }}
-                                  />
-                                ) : null}
-                              </div>
-                            </div>
+                            <ReaderPageOverlays
+                              isActivePage={isActivePage}
+                              pageSize={pageSize}
+                              zoom={zoom}
+                              renderZoom={renderZoom}
+                              isOverlayZoomTransitioning={isOverlayZoomTransitioning}
+                              isTextSelectionLayerVisible={isTextSelectionLayerVisible}
+                              pageWords={pageWords}
+                              pageNotePointComments={pageNotePointComments}
+                              pageNoteAreaComments={pageNoteAreaComments}
+                              selectedCommentId={selectedCommentId}
+                              hoveredCommentId={hoveredCommentId}
+                              defaultNoteColor={getReaderColorOption('yellow').note}
+                              selectedNoteColor={selectedNoteColor}
+                              nextCommentNumber={nextCommentNumber}
+                              draftCommentNumber={selectedComment?.commentNumber ?? nextCommentNumber}
+                              isNoteDeleteMode={isNoteDeleteMode}
+                              isSelectingCommentPosition={isSelectingCommentPosition}
+                              draftNotePreview={draftNotePreview}
+                              commentDraftAreaRect={commentDraftAreaRect}
+                              notePlacementCursor={notePlacementCursor}
+                              isNotePlacementDragging={Boolean(notePlacementStartRef.current)}
+                              onSelectComment={(commentId) => handleSelectComment(commentId, { scrollIntoView: true })}
+                              onHoveredCommentChange={setHoveredCommentId}
+                              onDisableNoteDeleteMode={() => setIsNoteDeleteMode(false)}
+                              onNotePlacementPointerDown={isActivePage ? handleNotePlacementPointerDown : undefined}
+                              onNotePlacementPointerMove={isActivePage ? handleNotePlacementPointerMove : undefined}
+                              onNotePlacementPointerUp={isActivePage ? handleNotePlacementPointerEnd : undefined}
+                              onCancelNotePlacementPointer={() => {
+                                notePlacementStartRef.current = null
+                                setNotePlacementCursor(null)
+                                setCommentDraftAreaRect(null)
+                              }}
+                              pageHighlights={pageHighlights}
+                              activeOccurrenceGroupIndexes={activeOccurrenceGroupIndexes}
+                              activeOccurrenceIndex={activeOccurrenceIndex}
+                              activeOccurrenceHighlightRef={(element) => {
+                                activeOccurrenceHighlightRef.current = element
+                              }}
+                              pageAreaHighlights={pageAreaHighlights}
+                              isHighlightMode={isHighlightMode}
+                              isHighlightDeleteMode={isHighlightDeleteMode}
+                              highlightPlacementCursor={highlightPlacementCursor}
+                              isHighlightPlacementDragging={Boolean(highlightDragStartRef.current)}
+                              draftHighlightRect={draftHighlightRect}
+                              selectedHighlightColor={selectedHighlightColor}
+                              onHighlightPointerDown={isActivePage ? handleHighlightPointerDown : undefined}
+                              onHighlightPointerMove={isActivePage ? handleHighlightPointerMove : undefined}
+                              onHighlightPointerUp={isActivePage ? (event) => {
+                                void handleHighlightPointerEnd(event)
+                              } : undefined}
+                              onCancelHighlightPointer={() => {
+                                highlightDragStartRef.current = null
+                                setHighlightPlacementCursor(null)
+                                setDraftHighlightRect(null)
+                              }}
+                              onDeleteAreaHighlight={(highlightId) => {
+                                void handleDeleteAreaHighlight(highlightId)
+                              }}
+                              onDisableHighlightDeleteMode={() => setIsHighlightDeleteMode(false)}
+                            />
                           )}
                         </div>
                       </div>
@@ -3332,245 +2738,52 @@ function RealReaderViewPage() {
       <ResizablePanel defaultSize={26} minSize={18} maxSize={45}>
         <div className="flex h-full flex-col border-l">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-          <div className="space-y-2 rounded-lg border p-3" data-tour-id="reader-search">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Search className="h-4 w-4" />
-             {t('readerView.search')}
-            </div>
-          <div className="space-y-2">
-            <Input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={t('readerView.keywordOrPhrase')} />
-            {searchQuery.trim() ? (
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{groupedSearchOccurrences.length} occurrence{groupedSearchOccurrences.length === 1 ? '' : 's'}</span>
-                {groupedSearchOccurrences.length > 0 && <span>Selected {activeOccurrenceGroupIndex + 1}</span>}
-              </div>
-            ) : null}
-            {searchQuery.trim() ? (
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => rotateOccurrence('prev')}
-                  disabled={searchOccurrences.length === 0}
-                >
-                  <ChevronLeft className="mr-2 h-4 w-4" />
-                  {t('readerView.previous')}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => rotateOccurrence('next')}
-                  disabled={searchOccurrences.length === 0}
-                >
-                  {t('readerView.next')}
-                  <ChevronRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            ) : null}
-            {searchOccurrences.length > 0 ? (
-              <div className="max-h-72 space-y-2 overflow-auto pr-1">
-                {groupedSearchOccurrences.map(({ occurrence, occurrenceIndexes }, groupIndex) => (
-                  <button
-                    key={`${occurrence.start}-${occurrenceIndexes.join('-')}`}
-                    ref={(element) => {
-                      occurrenceRefs.current[groupIndex] = element
-                    }}
-                    type="button"
-                    onClick={() => {
-                      selectOccurrence(occurrenceIndexes[0] ?? 0, { jumpToPage: true })
-                    }}
-                    className={`w-full rounded-md border p-2 text-left text-sm transition ${
-                      occurrenceIndexes.includes(activeOccurrenceIndex) ? 'border-primary bg-primary/8' : 'border-border bg-muted/40 hover:bg-muted/70'
-                    }`}
-                  >
-                    <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>
-                        {occurrenceIndexes.length === 1
-                          ? t('readerView.occurrence', { index: (occurrenceIndexes[0] ?? 0) + 1 })
-                          : `Occurrences ${occurrenceIndexes.map((value) => value + 1).join(', ')}`}
-                      </span>
-                      <span>{occurrence.rects?.length ? 'Page' : t('readerView.approxPage')} {occurrence.estimatedPage}</span>
-                    </div>
-                    {!occurrence.rects?.length ? (
-                      <Badge variant="outline" className="mb-2">
-                        {t('readerView.pageFallback')}
-                      </Badge>
-                    ) : null}
-                    <div className="leading-6">{highlightText(occurrence.snippet, searchQuery)}</div>
-                  </button>
-                ))}
-              </div>
-            ) : searchQuery.trim() ? (
-              <div className="rounded-md bg-muted/50 p-2 text-sm text-muted-foreground">
-                {t('readerView.noMatchesKeyword')}
-              </div>
-            ) : null}
-          </div>
-          </div>
+          <ReaderSearchPanel
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            groupedSearchOccurrences={groupedSearchOccurrences}
+            searchOccurrencesLength={searchOccurrences.length}
+            activeOccurrenceIndex={activeOccurrenceIndex}
+            activeOccurrenceGroupIndex={activeOccurrenceGroupIndex}
+            onRotateOccurrence={rotateOccurrence}
+            onSelectOccurrence={(occurrenceIndex) => {
+              selectOccurrence(occurrenceIndex, { jumpToPage: true })
+            }}
+            setOccurrenceRef={(groupIndex, element) => {
+              occurrenceRefs.current[groupIndex] = element
+            }}
+            renderHighlightedSnippet={(snippet) => highlightText(snippet, searchQuery)}
+          />
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <StickyNote className="h-4 w-4" />
-                 {t('readerView.notes')}
-                </div>
-              {isSelectingCommentPosition ? (
-                <Button variant="outline" size="sm" onClick={handleCancelCommentEditor}>
-                  {t('readerView.cancel')}
-                </Button>
-              ) : !isNoteEditorOpen ? (
-                <Button size="sm" onClick={handleStartNewComment} disabled={!canUsePreciseViewer}>
-                  {t('readerView.newNote')}
-                </Button>
-              ) : null
-              }
-            </div>
-
-            {isNoteEditorOpen ? (
-              <div className="rounded-lg border p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">
-                        {selectedComment
-                          ? buildDocumentCommentTitle(selectedComment.commentNumber ?? nextCommentNumber)
-                          : buildDocumentCommentTitle(nextCommentNumber)}
-                      </Badge>
-                    </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsSelectingCommentPosition(true)}
-                    disabled={!canUsePreciseViewer}
-                  >
-                    <MapPin className="mr-2 h-4 w-4" />
-                    {commentDraftPosition ? t('readerView.moveBalloon') : t('readerView.choosePosition')}
-                  </Button>
-                </div>
-                <Textarea
-                  ref={noteEditorTextareaRef}
-                  value={commentDraftContent}
-                  onChange={(event) => setCommentDraftContent(event.target.value)}
-                  placeholder={t('readerView.writeNote')}
-                  className="mt-3 min-h-32"
-                />
-                <div className="mt-3 flex items-center justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={handleCancelCommentEditor}>
-                    {t('readerView.cancel')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => void handleSaveComment()}
-                    disabled={!isDesktopApp || !commentDraftContent.trim() || !commentDraftPosition || isSavingComment}
-                  >
-                    {isSavingComment
-                      ? t('readerView.saving')
-                      : selectedComment
-                        ? t('readerView.saveNote')
-                        : t('readerView.createNote')}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>{t('readerView.notesOnPage', { count: currentPageComments.length, suffix: currentPageComments.length === 1 ? '' : 's' })}</span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 rounded-full"
-                    onClick={() => handleStepComment('prev')}
-                    disabled={documentComments.length === 0}
-                    aria-label="Previous note"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 rounded-full"
-                    onClick={() => handleStepComment('next')}
-                    disabled={documentComments.length === 0}
-                    aria-label="Next note"
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-              {currentPageComments.length > 0 ? (
-                <div className="space-y-2">
-                  {currentPageComments.map((comment) => {
-                    const isActive = comment.id === selectedCommentId
-                    const isHovered = comment.id === hoveredCommentId
-                    const hasMarker = typeof comment.positionX === 'number' && typeof comment.positionY === 'number'
-
-                    return (
-                      <div
-                        key={comment.id}
-                        ref={(element) => {
-                          commentCardRefs.current[comment.id] = element
-                        }}
-                        onMouseEnter={() => setHoveredCommentId(comment.id)}
-                        onMouseLeave={() => setHoveredCommentId((current) => (current === comment.id ? null : current))}
-                        className={cn(
-                          'rounded-md border p-3 transition hover:-translate-y-0.5 hover:border-primary/40 hover:bg-primary/[0.04] hover:shadow-sm',
-                          isActive ? 'border-primary bg-primary/5' : 'border-border bg-muted/30',
-                          isHovered && 'border-primary/50 bg-primary/[0.06] shadow-sm ring-1 ring-primary/15',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => handleSelectComment(comment.id)}
-                          className="w-full text-left"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <Badge variant={isActive ? 'default' : 'secondary'}>
-                                {buildDocumentCommentTitle(comment.commentNumber ?? nextCommentNumber)}
-                              </Badge>
-                            </div>
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(comment.updatedAt).toLocaleString()}
-                            </span>
-                          </div>
-                          <div className="mt-2 text-sm leading-6 text-foreground">
-                            {comment.content || t('readerView.noNoteText')}
-                          </div>
-                        </button>
-                        {isActive ? (
-                          <div className="mt-3 flex items-center justify-end gap-2 border-t pt-3">
-                            <Button variant="outline" size="sm" onClick={handleOpenCommentEditor}>
-                              {t('readerView.edit')}
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => setIsDeleteCommentDialogOpen(true)}
-                              disabled={!isDesktopApp || isSavingComment}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              {t('readerView.delete')}
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-                    )
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-md bg-muted/50 p-3 text-sm text-muted-foreground">
-                  {t('readerView.noNotesPage')}
-                </div>
-              )}
-            </div>
-          </div>
+          <ReaderNotesPanel
+            canUsePreciseViewer={canUsePreciseViewer}
+            isSelectingCommentPosition={isSelectingCommentPosition}
+            isNoteEditorOpen={isNoteEditorOpen}
+            isDesktopApp={isDesktopApp}
+            isSavingComment={isSavingComment}
+            commentDraftPosition={commentDraftPosition}
+            commentDraftContent={commentDraftContent}
+            onCommentDraftContentChange={setCommentDraftContent}
+            noteEditorTextareaRef={noteEditorTextareaRef}
+            currentPageComments={currentPageComments}
+            documentCommentsLength={documentComments.length}
+            selectedComment={selectedComment}
+            selectedCommentId={selectedCommentId}
+            hoveredCommentId={hoveredCommentId}
+            nextCommentNumber={nextCommentNumber}
+            onStartNewComment={handleStartNewComment}
+            onCancelCommentEditor={handleCancelCommentEditor}
+            onStartChoosingPosition={() => setIsSelectingCommentPosition(true)}
+            onSaveComment={() => void handleSaveComment()}
+            onStepComment={handleStepComment}
+            onSelectComment={(commentId) => handleSelectComment(commentId)}
+            onOpenCommentEditor={handleOpenCommentEditor}
+            onRequestDeleteComment={() => setIsDeleteCommentDialogOpen(true)}
+            setCommentCardRef={(commentId, element) => {
+              commentCardRefs.current[commentId] = element
+            }}
+            onHoveredCommentChange={setHoveredCommentId}
+          />
         </div>
         </div>
       </ResizablePanel>
@@ -3601,5 +2814,12 @@ function RealReaderViewPage() {
 }
 
 export default function ReaderViewPage() {
+  const params = useSearchParams()
+  if (params.get('tour') === '1') {
+    return <ReaderViewTourDemo />
+  }
+
   return <RealReaderViewPage />
 }
+
+

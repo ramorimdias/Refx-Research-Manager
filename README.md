@@ -168,6 +168,10 @@ refx-research-app/
 - `app/layout.tsx`: global app shell bootstrap
 - `app/page.tsx`: home page
 
+### Engineering Roadmap
+
+- Contributor-focused technical debt and architecture roadmap: [docs/tech-debt.md](docs/tech-debt.md)
+
 ---
 
 ## Philosophy

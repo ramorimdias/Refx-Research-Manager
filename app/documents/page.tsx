@@ -2549,6 +2549,10 @@ function RealDocumentDetailPage({
 
 export default function DocumentDetailPage() {
   const params = useSearchParams()
+  if (params.get('tour') === '1') {
+    return <DocumentDetailTourDemo />
+  }
+
   const id = params.get('id')
   const metadataMode = params.get('metadata')
   const autoSearchMetadata = params.get('autoSearchMetadata') === '1'

@@ -296,7 +296,7 @@ function DiscoverPageContent() {
 
   if (viewMode === 'home') {
     return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
+      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
         <PageHeader
           icon={<Telescope className="h-6 w-6" />}
           title={t('discoverPage.title')}
@@ -458,7 +458,7 @@ function DiscoverPageContent() {
 
   if (viewMode === 'seed' && sourceWork && !activeJourney) {
     return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
+      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
         <PageHeader
           icon={<Telescope className="h-6 w-6" />}
           title={t('discoverPage.title')}
@@ -501,7 +501,7 @@ function DiscoverPageContent() {
   }
 
   return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6">
+      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
       <PageHeader
         icon={<Telescope className="h-6 w-6" />}
         title={isEditingJourneyName ? (

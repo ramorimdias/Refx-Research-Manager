@@ -41,6 +41,7 @@ import * as repo from '@/lib/repositories/local-db'
 import { useTheme } from 'next-themes'
 import { cn } from '@/lib/utils'
 import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
+import { useAppTour } from '@/components/refx/app-tour-provider'
 import { PageHeader } from '@/components/refx/page-header'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
 import { isUsageTelemetryConfigured } from '@/lib/services/usage-telemetry-service'
@@ -62,6 +63,7 @@ export default function SettingsPage() {
   const { locale } = useLocale()
   const router = useRouter()
   const { setTheme } = useTheme()
+  const { isGlobalTourRunning, startGlobalAppTour } = useAppTour()
   const documents = useDocumentStore((state) => state.documents)
   const { scanDocumentsOcr, classifyDocuments } = useDocumentActions()
   const { clearLocalData, refreshData } = useRuntimeActions()
@@ -1075,6 +1077,21 @@ export default function SettingsPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                    <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+                      <p className="text-sm font-medium">{t('settings.seeAppTour')}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t('settings.appTourDescription')}
+                      </p>
+                      <Button
+                        variant="outline"
+                        className="mt-3"
+                        onClick={() => startGlobalAppTour()}
+                        disabled={isGlobalTourRunning}
+                      >
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        {t('settings.replayAppTour')}
+                      </Button>
                     </div>
                     <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
                       <p className="text-sm font-medium">{t('settings.pageGuides')}</p>
