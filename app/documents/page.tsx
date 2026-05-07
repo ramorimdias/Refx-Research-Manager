@@ -112,7 +112,23 @@ type PreviewPdfDocument = {
   destroy?: () => Promise<void>
 }
 
-function DocumentPdfPreview({ document }: { document: RefxDocument }) {
+type DocumentPdfPreviewProps = {
+  document: RefxDocument
+  initialMode?: 'manual' | 'auto'
+  fixedPage?: number
+  showPageControls?: boolean
+  showZoomControls?: boolean
+  viewportClassName?: string
+}
+
+function DocumentPdfPreview({
+  document,
+  initialMode = 'manual',
+  fixedPage,
+  showPageControls = true,
+  showZoomControls = true,
+  viewportClassName,
+}: DocumentPdfPreviewProps) {
   const t = useT()
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -126,16 +142,25 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
   const [pdfDocument, setPdfDocument] = useState<PreviewPdfDocument | null>(null)
   const [page, setPage] = useState(1)
   const [zoom, setZoom] = useState(100)
+  const [isPreviewEnabled, setIsPreviewEnabled] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isRendering, setIsRendering] = useState(false)
   const [error, setError] = useState('')
   const [renderedPageSize, setRenderedPageSize] = useState({ width: 0, height: 0 })
   const [isPanning, setIsPanning] = useState(false)
+  const isAutoPreview = initialMode === 'auto'
 
   useEffect(() => {
-    setPage(1)
+    setPage(fixedPage ?? 1)
     setZoom(100)
-  }, [document.id])
+    setIsPreviewEnabled(isAutoPreview)
+  }, [document.id, fixedPage, isAutoPreview])
+
+  useEffect(() => {
+    if (!isAutoPreview) return
+    setIsPreviewEnabled(true)
+    setPage(fixedPage ?? 1)
+  }, [fixedPage, isAutoPreview])
 
   useEffect(() => {
     dragStateRef.current = null
@@ -147,7 +172,7 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
     let loadedPdf: PreviewPdfDocument | null = null
 
     const loadDocument = async () => {
-      if (!document.filePath || !isTauri()) return
+      if (!isPreviewEnabled || !document.filePath || !isTauri()) return
       setIsLoading(true)
       setError('')
 
@@ -192,7 +217,7 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
       setPdfDocument(null)
       void loadedPdf?.destroy?.()
     }
-  }, [document.filePath, document.id])
+  }, [document.filePath, document.id, isPreviewEnabled])
 
   useEffect(() => {
     let cancelled = false
@@ -253,7 +278,7 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
 
   const handleViewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current
-    if (!viewport || !pdfDocument || event.button !== 0) return
+    if (!viewport || !pdfDocument || event.button !== 0 || !showPageControls) return
 
     const canPanHorizontally = viewport.scrollWidth > viewport.clientWidth
     const canPanVertically = viewport.scrollHeight > viewport.clientHeight
@@ -296,22 +321,30 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={!pdfDocument || page <= 1}>
-            <ChevronLeft className="mr-1 h-4 w-4" />
-            {t('common.previous')}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={() => setPage((current) => Math.min(pdfDocument?.numPages ?? current, current + 1))} disabled={!pdfDocument || page >= (pdfDocument?.numPages ?? 1)}>
-            {t('common.next')}
-            <ChevronRight className="ml-1 h-4 w-4" />
-          </Button>
+          {showPageControls ? (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={!pdfDocument || page <= 1}>
+                <ChevronLeft className="mr-1 h-4 w-4" />
+                {t('common.previous')}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => setPage((current) => Math.min(pdfDocument?.numPages ?? current, current + 1))} disabled={!pdfDocument || page >= (pdfDocument?.numPages ?? 1)}>
+                {t('common.next')}
+                <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </>
+          ) : null}
           <div className="ml-auto flex items-center gap-2">
-            <Button type="button" variant="outline" size="icon" onClick={() => setZoom((current) => Math.max(50, current - 10))} disabled={!pdfDocument}>
-              <Minus className="h-4 w-4" />
-            </Button>
-            <span className="w-14 text-center text-sm text-muted-foreground">{zoom}%</span>
-            <Button type="button" variant="outline" size="icon" onClick={() => setZoom((current) => Math.min(200, current + 10))} disabled={!pdfDocument}>
-              <Plus className="h-4 w-4" />
-            </Button>
+            {showZoomControls ? (
+              <>
+                <Button type="button" variant="outline" size="icon" onClick={() => setZoom((current) => Math.max(50, current - 10))} disabled={!pdfDocument}>
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <span className="w-14 text-center text-sm text-muted-foreground">{zoom}%</span>
+                <Button type="button" variant="outline" size="icon" onClick={() => setZoom((current) => Math.min(200, current + 10))} disabled={!pdfDocument}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </>
+            ) : null}
           </div>
         </div>
       </CardHeader>
@@ -321,6 +354,8 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
           className={cn(
             'max-h-[72vh] min-h-[420px] overflow-auto rounded-lg border bg-muted/20 p-4',
             pdfDocument ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : undefined,
+            !showPageControls && 'min-h-[280px]',
+            viewportClassName,
           )}
           onPointerDown={handleViewportPointerDown}
           onPointerMove={handleViewportPointerMove}
@@ -330,7 +365,13 @@ function DocumentPdfPreview({ document }: { document: RefxDocument }) {
             if (!isPanning) return
           }}
         >
-          {error ? (
+          {!isPreviewEnabled ? (
+            <div className="flex min-h-full items-center justify-center">
+              <Button type="button" variant="outline" size="sm" onClick={() => setIsPreviewEnabled(true)}>
+                Load preview
+              </Button>
+            </div>
+          ) : error ? (
             <p className="text-sm text-muted-foreground">{error}</p>
           ) : isLoading ? (
             <p className="text-sm text-muted-foreground">Loading previewâ€¦</p>
@@ -593,6 +634,7 @@ function RealDocumentDetailPage({
   const [metadataSearchField, setMetadataSearchField] = useState<'title' | 'doi' | 'title_author'>('title_author')
   const [metadataSearchValue, setMetadataSearchValue] = useState('')
   const [metadataSearchAuthorValue, setMetadataSearchAuthorValue] = useState('')
+  const [pdfPreviewMode, setPdfPreviewMode] = useState<'manual' | 'auto'>('manual')
   const [bibtexInput, setBibtexInput] = useState('')
   const [metadataProviders, setMetadataProviders] = useState<MetadataCandidateProvider[]>([
     'semantic_scholar',
@@ -658,6 +700,7 @@ function RealDocumentDetailPage({
     setMetadataSearchValue(document.title || '')
     setMetadataSearchAuthorValue(document.authors[0] ?? '')
     setMetadataDoiSearchFailed(false)
+    setPdfPreviewMode('manual')
     setBibtexInput('')
     setBibtexExpanded(false)
     setBookCoverPhoneSession(null)
@@ -1281,6 +1324,9 @@ function RealDocumentDetailPage({
 
   const handleFetchOnlineMetadata = async () => {
     if (!document) return
+    if (document.documentType === 'pdf' && document.filePath && isTauri()) {
+      setPdfPreviewMode('auto')
+    }
     const hasDoi = doi.trim().length > 0
     const nextMode = hasDoi ? 'doi' : 'title_author'
     const nextSearchValue = hasDoi ? doi.trim() : title.trim()
@@ -1727,7 +1773,11 @@ function RealDocumentDetailPage({
         >
           {showPdfPreview ? (
             <div className="xl:sticky xl:top-6 xl:self-start">
-              <DocumentPdfPreview document={document} />
+              <DocumentPdfPreview
+                document={document}
+                initialMode={pdfPreviewMode}
+                fixedPage={pdfPreviewMode === 'auto' ? 1 : undefined}
+              />
             </div>
           ) : null}
 

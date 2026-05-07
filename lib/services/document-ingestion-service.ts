@@ -501,7 +501,7 @@ async function runKeywordExtractionStage(
       return stageCompleted(stage, startedAt, 'Generated local keywords with the built-in extractor.')
     }
 
-    if (result.source === 'gemini_page1') {
+    if (result.source === 'google_page1' || result.source === 'openai_page1' || result.source === 'anthropic_page1') {
       return stageCompleted(stage, startedAt, 'Generated AI keywords from the first page.')
     }
 

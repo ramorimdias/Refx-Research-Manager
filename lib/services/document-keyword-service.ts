@@ -1,8 +1,9 @@
 'use client'
 
-import { GEMINI_MODEL_OPTIONS, getResolvedGeminiApiKey, loadAppSettings } from '@/lib/app-settings'
+import { getResolvedAiApiKey, loadAppSettings, type AiProvider } from '@/lib/app-settings'
 import * as repo from '@/lib/repositories/local-db'
 import { classifyDocumentSemantics, coerceIncomingDocumentClassification, serializeDocumentClassification, type IncomingDocumentClassification } from '@/lib/services/document-classification-service'
+import { extractDocumentInsights, type RemoteAiProvider } from '@/lib/services/document-ai-service'
 import { serializeSuggestedTags } from '@/lib/services/document-tag-suggestion-service'
 import { getDocumentPlainText, readPersistedDocumentText } from '@/lib/services/document-text-service'
 
@@ -30,7 +31,15 @@ export type DetectedDocumentKeywordsResult = {
   documentId: string
   keywords: string[]
   summary?: string
-  source: 'author_list' | 'local_heuristic' | 'gemini_page1' | 'gemini_full'
+  source:
+    | 'author_list'
+    | 'local_heuristic'
+    | 'google_page1'
+    | 'google_full'
+    | 'openai_page1'
+    | 'openai_full'
+    | 'anthropic_page1'
+    | 'anthropic_full'
   classificationStored?: boolean
 }
 
@@ -339,7 +348,7 @@ async function updateDocumentKeywordSuggestions(
 async function persistAiClassification(
   document: repo.DbDocument,
   classification: IncomingDocumentClassification | undefined,
-  source: 'gemini_page1' | 'gemini_full',
+  source: Exclude<DetectedDocumentKeywordsResult['source'], 'author_list' | 'local_heuristic'>,
   model: string,
 ) {
   const normalizedClassification = coerceIncomingDocumentClassification(classification, {
@@ -361,6 +370,19 @@ async function persistAiClassification(
 
   await classifyDocumentSemantics(document.id, { mode: 'local_heuristic' })
   return true
+}
+
+function getRemoteSource(provider: RemoteAiProvider, mode: 'page1' | 'full') {
+  switch (provider) {
+    case 'google':
+      return mode === 'full' ? 'google_full' : 'google_page1'
+    case 'openai':
+      return mode === 'full' ? 'openai_full' : 'openai_page1'
+    case 'anthropic':
+      return mode === 'full' ? 'anthropic_full' : 'anthropic_page1'
+    default:
+      return mode === 'full' ? 'google_full' : 'google_page1'
+  }
 }
 
 function getDailyAiCounterKey() {
@@ -405,7 +427,7 @@ async function storeKeywords(
   await repo.replaceDocumentKeywords(document.id, normalizedRows)
   await updateDocumentKeywordSuggestions(document, normalizedRows, source)
   const classificationStored =
-    (source === 'gemini_page1' || source === 'gemini_full')
+    source !== 'author_list' && source !== 'local_heuristic'
       ? await persistAiClassification(document, options?.classification, source, options?.model ?? 'gemini')
       : false
 
@@ -457,43 +479,51 @@ export async function detectAndStoreDocumentKeywords(
   }
 
   const keywordInput = buildKeywordInput(document, firstPageText)
-  const shouldUseGemini =
+  const aiProvider: AiProvider = settings.aiProvider
+  const remoteProvider = aiProvider === 'local' ? null : aiProvider as RemoteAiProvider
+  const shouldUseRemoteAi =
     options?.forceAi
     || (
-      settings.keywordEngine === 'gemini'
+      remoteProvider !== null
       && settings.autoGeminiOnImport
       && options?.autoMode
       && await isUnderDailyAiLimit(settings.dailyAiAutoLimit)
     )
 
-  if (!options?.forceAi && (options?.forceLocal || settings.keywordEngine === 'local_heuristic' || !shouldUseGemini)) {
+  if (!options?.forceAi && (options?.forceLocal || remoteProvider === null || !shouldUseRemoteAi)) {
     const localKeywords = await extractKeywordsWithKeyBert(keywordInput)
     return storeKeywords(document, localKeywords, 'local_heuristic', undefined, 'local')
   }
 
-  const apiKey = getResolvedGeminiApiKey(settings).trim()
+  if (!remoteProvider) {
+    throw new Error('Select a remote AI provider in Settings to run manual AI extraction.')
+  }
+
+  const apiKey = getResolvedAiApiKey(remoteProvider, settings).trim()
   if (!apiKey) {
     if (options?.forceAi) {
-      throw new Error('Gemini API key is not configured.')
+      const providerLabel = remoteProvider === 'google'
+        ? 'Google AI'
+        : remoteProvider === 'openai'
+          ? 'OpenAI'
+          : 'Anthropic'
+      throw new Error(`${providerLabel} API key is not configured.`)
     }
     const fallbackKeywords = await extractKeywordsWithKeyBert(keywordInput)
     return storeKeywords(document, fallbackKeywords, 'local_heuristic', undefined, 'local')
   }
 
-  const selectedModel = GEMINI_MODEL_OPTIONS.find((option) => option.value === settings.geminiModel)?.value
-  if (!selectedModel) {
-    throw new Error('The selected Gemini model is not supported.')
-  }
-
   const extractionMode = settings.keywordExtractionMode
-  const textForGemini = extractionMode === 'full'
+  const textForProvider = extractionMode === 'full'
     ? normalizeWhitespace(plainText.slice(0, 12_000))
     : normalizeWhitespace(firstPageText.slice(0, 4_000))
-  const source = extractionMode === 'full' ? 'gemini_full' : 'gemini_page1'
-  const extracted = await extractKeywordsWithGemini({
-    text: textForGemini,
+  const source = getRemoteSource(remoteProvider, extractionMode)
+  const extracted = await extractDocumentInsights({
+    provider: remoteProvider,
+    mode: extractionMode,
+    text: textForProvider,
     apiKey,
-    model: selectedModel,
+    model: settings.aiModel,
   })
 
   if (options?.autoMode) {
@@ -508,7 +538,7 @@ export async function detectAndStoreDocumentKeywords(
     options?.autoMode ? 'auto_ai' : 'manual_ai',
     {
       classification: extracted.classification,
-      model: selectedModel,
+      model: settings.aiModel,
     },
   )
 }

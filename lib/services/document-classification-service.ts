@@ -409,6 +409,12 @@ export function parseDocumentClassification(document: ClassificationSource) {
     provider:
       candidate.provider === 'gemini_page1'
       || candidate.provider === 'gemini_full'
+      || candidate.provider === 'google_page1'
+      || candidate.provider === 'google_full'
+      || candidate.provider === 'openai_page1'
+      || candidate.provider === 'openai_full'
+      || candidate.provider === 'anthropic_page1'
+      || candidate.provider === 'anthropic_full'
       || candidate.provider === 'local_heuristic'
         ? candidate.provider
         : 'local_heuristic',

@@ -25,7 +25,16 @@ export type IndexingStatus = ProcessingStatus
 export type TagSuggestionStatus = ProcessingStatus
 export type ClassificationStatus = ProcessingStatus
 export type SemanticClassificationMode = 'off' | 'local_heuristic'
-export type SemanticClassificationProvider = 'local_heuristic' | 'gemini_page1' | 'gemini_full'
+export type SemanticClassificationProvider =
+  | 'local_heuristic'
+  | 'google_page1'
+  | 'google_full'
+  | 'openai_page1'
+  | 'openai_full'
+  | 'anthropic_page1'
+  | 'anthropic_full'
+  | 'gemini_page1'
+  | 'gemini_full'
 export type DocumentMetadataField = 'title' | 'authors' | 'year' | 'doi' | 'pageCount'
 export type EditableMetadataField = 'title' | 'authors' | 'year' | 'doi' | 'abstract' | 'isbn' | 'publisher' | 'citationKey'
 export type MetadataFieldSource =

@@ -132,7 +132,55 @@ The next non-extraction engineering step should be a service-layer testing pass.
 - Service-layer regressions are caught without running the full app.
 - New refactors in search/metadata/citation flows have basic safety coverage.
 
-### 5. Audit PDF Preview Performance and Lifecycle Safety
+### 5. Expand AI Provider Compatibility
+
+**Status**  
+Planned. The current AI surface is centered on local heuristics plus Gemini-specific keyword extraction/classification. The next step is to make document AI provider-compatible without rewriting ingestion, search, or offline fallbacks.
+
+**Problem statement**  
+Current AI-powered document workflows assume one remote provider shape in the service layer and settings model, which makes future provider support awkward and increases the risk of feature-specific duplication.
+
+**Why it matters**  
+AI-assisted document workflows are already part of the product, but they are wired too narrowly for broader compatibility. A small provider-agnostic layer will make it easier to support additional APIs while preserving the current local-first architecture.
+
+**Recommended direction**  
+Treat this as a document-AI compatibility project first, not a general assistant framework. Standardize the existing keyword extraction, summary, and semantic classification flows behind a typed provider-neutral boundary, while keeping local heuristics as a first-class path.
+
+**Concrete first step**  
+Implement the compatibility foundation in this order:
+1. Add a provider-neutral document-AI service boundary for:
+   - keyword extraction
+   - short summary generation
+   - semantic classification
+   - future note/comment assistance
+2. Expand settings from Gemini-specific fields toward a provider-based model with:
+   - `aiProvider`
+   - `aiModel`
+   - provider-specific API key storage where needed
+3. Migrate the existing Gemini path in `document-keyword-service` onto the new abstraction before adding any broader AI UI.
+4. Add initial provider targets for:
+   - Google
+   - OpenAI
+   - Anthropic
+5. Keep local heuristics as the default unlimited option and fallback where current behavior already falls back.
+
+**Implementation guardrails**
+- Keep task contracts narrow and typed, for example a shared `extractDocumentInsights(...)` style result.
+- Normalize all provider outputs into one internal shape before persistence.
+- Require JSON-only structured output for remote providers.
+- Do not introduce a general chat SDK in phase 1.
+- Preserve compatibility for existing Gemini-configured users through settings migration rather than breaking changes.
+
+**Suggested success criteria**
+- Existing Gemini users continue to work without reconfiguration.
+- Local heuristic mode remains the default and fallback path.
+- OpenAI, Anthropic, and Google can drive the same document-AI workflow shape.
+- Provider/model validation is centralized instead of being scattered across UI and services.
+- Follow-up AI features can build on the same provider-neutral boundary instead of adding new vendor-specific codepaths.
+
+### 6. Audit PDF Preview Performance and Lifecycle Safety
+
+In progress. `DocumentPdfPreview` now defers PDF.js/document loading until the user explicitly requests the preview from the document detail page, which removes the eager preview cost from every PDF detail visit. The next pass should stay focused on cancellation paths and reader-side lifecycle auditing.
 
 **Problem statement**  
 PDF preview and reader flows are performance-sensitive and memory-sensitive, especially around loading, cancellation, and cleanup.
@@ -154,7 +202,7 @@ Review `DocumentPdfPreview` and related PDF.js loading paths to confirm:
 - Preview loading only happens when the user opens the preview surface.
 - Performance changes are targeted, not speculative.
 
-### 6. Strengthen Type Safety in Error-Prone Flows
+### 7. Strengthen Type Safety in Error-Prone Flows
 
 **Problem statement**  
 TypeScript usage is solid overall, but some boot/runtime and service flows still rely on looser patterns.
@@ -179,7 +227,7 @@ Use typed result objects where they remove ambiguity in high-value paths, especi
 
 ## Lower Priority / UX
 
-### 7. Complete Planned Reader and Note Features
+### 8. Complete Planned Reader and Note Features
 
 **Problem statement**  
 The roadmap already calls out annotations, richer notes, and deeper metadata work, but the current UI surface is still partial.
@@ -200,7 +248,7 @@ Prioritize the smallest end-to-end completion slices:
 - Existing infrastructure becomes meaningfully usable from the UI.
 - Planned README features align more closely with real product behavior.
 
-### 8. Improve Production Error UX
+### 9. Improve Production Error UX
 
 **Problem statement**  
 Startup and fallback failures can currently surface as low-level diagnostics that are more useful for developers than end users.
@@ -221,7 +269,7 @@ Create friendlier messaging for cases such as:
 - Production users see actionable next steps instead of raw diagnostics.
 - Developer diagnostics remain available where needed.
 
-### 9. Simplify CI Workflow Topology
+### 10. Simplify CI Workflow Topology
 
 **Problem statement**  
 The release/build workflow set is more fragmented than necessary.
@@ -243,14 +291,16 @@ Audit the current GitHub Actions set and identify repeated Windows/macOS build l
 
 1. Validate the global app tour in packaged desktop builds
 2. Add service-layer tests
-3. Continue extracting the remaining maps/documents page sections
-4. Continue store boundary cleanup
-5. Audit PDF performance and tighten type safety
-6. Improve UX error handling
-7. Simplify CI
+3. Add AI provider compatibility foundation
+4. Continue extracting the remaining maps/documents page sections
+5. Continue store boundary cleanup
+6. Audit PDF performance and tighten type safety
+7. Improve UX error handling
+8. Simplify CI
 
 ## Notes for Contributors
 
 - Keep this document implementation-oriented and repo-specific.
 - Prefer small, verified refactors over broad rewrites.
 - When in doubt, reduce architectural ambiguity before adding new feature surface.
+- For AI work, keep phase 1 focused on document workflows and provider compatibility before introducing broader assistant surfaces.

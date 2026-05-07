@@ -5,19 +5,16 @@ import type { AppLocale } from '@/lib/localization'
 
 const ENV_SEMANTIC_SCHOLAR_API_KEY = process.env.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY ?? ''
 const ENV_GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? process.env.GEMINI_API_KEY ?? ''
+const ENV_OPENAI_API_KEY = process.env.NEXT_PUBLIC_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
+const ENV_ANTHROPIC_API_KEY = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? ''
 
-export const GEMINI_MODEL_OPTIONS = [
-  {
-    value: 'gemini-2.5-flash',
-    label: 'Gemini 2.5 Flash',
-    description: 'Best balance (recommended)',
-    recommended: true,
-  },
-  {
-    value: 'gemini-3-flash',
-    label: 'Gemini 3 Flash',
-    description: 'Newer model, slightly better reasoning',
-  },
+export type AiProvider = 'local' | 'google' | 'openai' | 'anthropic'
+
+export const AI_PROVIDER_OPTIONS = [
+  { value: 'local', label: 'Local heuristic' },
+  { value: 'google', label: 'Google' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'anthropic', label: 'Anthropic' },
 ] as const
 
 export type StoredAppSettings = {
@@ -51,6 +48,11 @@ export type StoredAppSettings = {
   crossrefContactEmail: string
   semanticScholarApiMode: 'builtin' | 'custom'
   semanticScholarApiKey: string
+  aiProvider: AiProvider
+  aiModel: string
+  googleApiKey: string
+  openaiApiKey: string
+  anthropicApiKey: string
   keywordEngine: 'local_heuristic' | 'gemini'
   autoKeywordExtractionOnImport: boolean
   autoGeminiOnImport: boolean
@@ -89,6 +91,11 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   crossrefContactEmail: '',
   semanticScholarApiMode: 'builtin',
   semanticScholarApiKey: '',
+  aiProvider: 'local',
+  aiModel: '',
+  googleApiKey: '',
+  openaiApiKey: '',
+  anthropicApiKey: '',
   keywordEngine: 'local_heuristic',
   autoKeywordExtractionOnImport: true,
   autoGeminiOnImport: false,
@@ -107,6 +114,33 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
 
 function normalizeKeywordEngine(value: StoredAppSettings['keywordEngine'] | 'local_keybert' | undefined) {
   return value === 'local_keybert' ? 'local_heuristic' : (value ?? DEFAULT_APP_SETTINGS.keywordEngine)
+}
+
+function normalizeAiProvider(value: string | undefined, fallbackKeywordEngine?: StoredAppSettings['keywordEngine'] | 'local_keybert') {
+  if (value === 'local' || value === 'google' || value === 'openai' || value === 'anthropic') return value
+  return normalizeKeywordEngine(fallbackKeywordEngine) === 'gemini' ? 'google' : 'local'
+}
+
+export function getAiModelOptions(provider: Exclude<AiProvider, 'local'>) {
+  switch (provider) {
+    case 'google':
+      return [{ value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Default fallback model' }]
+    case 'openai':
+      return [{ value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', description: 'Default fallback model' }]
+    case 'anthropic':
+      return [{ value: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku', description: 'Default fallback model' }]
+  }
+}
+
+export function getDefaultAiModel(provider: AiProvider) {
+  if (provider === 'local') return ''
+  return getAiModelOptions(provider)[0]?.value ?? ''
+}
+
+export function validateAiModel(provider: AiProvider, model: string | undefined) {
+  if (provider === 'local') return ''
+  const normalizedModel = (model ?? '').trim()
+  return normalizedModel || getDefaultAiModel(provider)
 }
 
 export function getBaseThemeMode(theme: StoredAppSettings['theme']): 'light' | 'dark' | 'system' {
@@ -201,6 +235,23 @@ export function getResolvedGeminiApiKey(settings: Pick<StoredAppSettings, 'gemin
   return settings.geminiApiKey.trim() || ENV_GEMINI_API_KEY
 }
 
+export function getResolvedAiApiKey(
+  provider: AiProvider,
+  settings: Pick<StoredAppSettings, 'googleApiKey' | 'openaiApiKey' | 'anthropicApiKey' | 'geminiApiKey'>,
+) {
+  switch (provider) {
+    case 'google':
+      return settings.googleApiKey.trim() || settings.geminiApiKey.trim() || ENV_GEMINI_API_KEY
+    case 'openai':
+      return settings.openaiApiKey.trim() || ENV_OPENAI_API_KEY
+    case 'anthropic':
+      return settings.anthropicApiKey.trim() || ENV_ANTHROPIC_API_KEY
+    case 'local':
+    default:
+      return ''
+  }
+}
+
 export function getResolvedSemanticScholarApiKey(
   settings: Pick<StoredAppSettings, 'semanticScholarApiMode' | 'semanticScholarApiKey'>,
 ) {
@@ -215,6 +266,9 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
     if (!raw) return DEFAULT_APP_SETTINGS
     const parsed = parseValue<Partial<StoredAppSettings> & { autoFetchTagsWithAiOnImport?: boolean }>(raw, {})
+    const normalizedKeywordEngine = normalizeKeywordEngine(parsed.keywordEngine as StoredAppSettings['keywordEngine'] | 'local_keybert' | undefined)
+    const aiProvider = normalizeAiProvider(typeof parsed.aiProvider === 'string' ? parsed.aiProvider : undefined, normalizedKeywordEngine)
+    const googleApiKey = parsed.googleApiKey?.trim() ?? parsed.geminiApiKey?.trim() ?? DEFAULT_APP_SETTINGS.googleApiKey
     return {
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
@@ -228,7 +282,12 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
         typeof parsed.semanticScholarApiKey === 'string' ? parsed.semanticScholarApiKey : undefined,
       ),
       semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() ?? DEFAULT_APP_SETTINGS.semanticScholarApiKey,
-      keywordEngine: normalizeKeywordEngine(parsed.keywordEngine as StoredAppSettings['keywordEngine'] | 'local_keybert' | undefined),
+      aiProvider,
+      aiModel: validateAiModel(aiProvider, typeof parsed.aiModel === 'string' ? parsed.aiModel : parsed.geminiModel),
+      googleApiKey,
+      openaiApiKey: parsed.openaiApiKey?.trim() ?? DEFAULT_APP_SETTINGS.openaiApiKey,
+      anthropicApiKey: parsed.anthropicApiKey?.trim() ?? DEFAULT_APP_SETTINGS.anthropicApiKey,
+      keywordEngine: normalizedKeywordEngine,
       autoKeywordExtractionOnImport:
         parsed.autoKeywordExtractionOnImport ?? DEFAULT_APP_SETTINGS.autoKeywordExtractionOnImport,
       autoGeminiOnImport: parsed.autoGeminiOnImport ?? parsed.autoFetchTagsWithAiOnImport ?? DEFAULT_APP_SETTINGS.autoGeminiOnImport,
@@ -248,6 +307,9 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
 
   const stored = await repo.getSettings()
   const legacyAutoGeminiValue = stored.autoGeminiOnImport ?? stored.autoFetchTagsWithAiOnImport
+  const normalizedKeywordEngine = normalizeKeywordEngine(parseValue(stored.keywordEngine, DEFAULT_APP_SETTINGS.keywordEngine) as StoredAppSettings['keywordEngine'] | 'local_keybert')
+  const aiProvider = normalizeAiProvider(parseValue(stored.aiProvider, ''), normalizedKeywordEngine)
+  const googleApiKey = parseValue(stored.googleApiKey, '').trim() || parseValue(stored.geminiApiKey, DEFAULT_APP_SETTINGS.geminiApiKey).trim()
   return {
     userName: parseValue(stored.userName, DEFAULT_APP_SETTINGS.userName),
     skipNamePrompt: parseValue(stored.skipNamePrompt, DEFAULT_APP_SETTINGS.skipNamePrompt),
@@ -279,7 +341,12 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     crossrefContactEmail: parseValue(stored.crossrefContactEmail, DEFAULT_APP_SETTINGS.crossrefContactEmail),
     semanticScholarApiMode: resolveSemanticScholarApiMode(stored.semanticScholarApiMode, stored.semanticScholarApiKey),
     semanticScholarApiKey: parseStoredSemanticScholarApiKey(stored.semanticScholarApiKey),
-    keywordEngine: normalizeKeywordEngine(parseValue(stored.keywordEngine, DEFAULT_APP_SETTINGS.keywordEngine) as StoredAppSettings['keywordEngine'] | 'local_keybert'),
+    aiProvider,
+    aiModel: validateAiModel(aiProvider, parseValue(stored.aiModel, parseValue(stored.geminiModel, DEFAULT_APP_SETTINGS.geminiModel))),
+    googleApiKey,
+    openaiApiKey: parseValue(stored.openaiApiKey, DEFAULT_APP_SETTINGS.openaiApiKey).trim(),
+    anthropicApiKey: parseValue(stored.anthropicApiKey, DEFAULT_APP_SETTINGS.anthropicApiKey).trim(),
+    keywordEngine: normalizedKeywordEngine,
     autoKeywordExtractionOnImport: parseValue(
       stored.autoKeywordExtractionOnImport,
       DEFAULT_APP_SETTINGS.autoKeywordExtractionOnImport,
@@ -337,6 +404,11 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     crossrefContactEmail: JSON.stringify(settings.crossrefContactEmail),
     semanticScholarApiMode: JSON.stringify(settings.semanticScholarApiMode),
     semanticScholarApiKey: JSON.stringify(settings.semanticScholarApiKey),
+    aiProvider: JSON.stringify(settings.aiProvider),
+    aiModel: JSON.stringify(settings.aiModel),
+    googleApiKey: JSON.stringify(settings.googleApiKey),
+    openaiApiKey: JSON.stringify(settings.openaiApiKey),
+    anthropicApiKey: JSON.stringify(settings.anthropicApiKey),
     keywordEngine: JSON.stringify(settings.keywordEngine),
     autoKeywordExtractionOnImport: JSON.stringify(settings.autoKeywordExtractionOnImport),
     autoGeminiOnImport: JSON.stringify(settings.autoGeminiOnImport),

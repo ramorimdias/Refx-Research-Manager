@@ -29,10 +29,12 @@ import {
 } from '@/components/ui/select'
 import { open, save } from '@/lib/tauri/client'
 import {
+  AI_PROVIDER_OPTIONS,
   DEFAULT_APP_SETTINGS,
   getBaseThemeMode,
+  getDefaultAiModel,
+  getResolvedAiApiKey,
   getThemeAccentVariant,
-  GEMINI_MODEL_OPTIONS,
   loadAppSettings,
   saveAppSettings,
   type StoredAppSettings,
@@ -44,6 +46,7 @@ import { AppUpdateDialog } from '@/components/refx/app-update-dialog'
 import { useAppTour } from '@/components/refx/app-tour-provider'
 import { PageHeader } from '@/components/refx/page-header'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
+import { fetchAvailableAiModels, type AiModelOption } from '@/lib/services/document-ai-service'
 import { isUsageTelemetryConfigured } from '@/lib/services/usage-telemetry-service'
 import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
 import { getRemoteVaultDisplayMessage, getRemoteVaultModeLabel } from '@/lib/remote-vault-copy'
@@ -92,6 +95,9 @@ export default function SettingsPage() {
   const [remoteVaultStatus, setRemoteVaultStatus] = useState<repo.DbRemoteVaultStatus | null>(null)
   const [remoteVaultMessage, setRemoteVaultMessage] = useState<string | null>(null)
   const [isRemoteVaultBusy, setIsRemoteVaultBusy] = useState(false)
+  const [availableAiModels, setAvailableAiModels] = useState<AiModelOption[]>([])
+  const [isLoadingAiModels, setIsLoadingAiModels] = useState(false)
+  const [aiModelsError, setAiModelsError] = useState<string | null>(null)
   const [restoreTargetPath, setRestoreTargetPath] = useState<string | null>(null)
   const [isRestoreWarningOpen, setIsRestoreWarningOpen] = useState(false)
   const [isClearDataDialogOpen, setIsClearDataDialogOpen] = useState(false)
@@ -502,6 +508,61 @@ export default function SettingsPage() {
   const updateSettings = <K extends keyof StoredAppSettings>(key: K, value: StoredAppSettings[K]) => {
     setSettings((current) => ({ ...current, [key]: value }))
   }
+  const selectedAiProvider = settings.aiProvider
+  const selectedAiModelOptions = selectedAiProvider === 'local' ? [] : availableAiModels
+  const selectedAiModelDescription = selectedAiProvider === 'local'
+    ? 'The built-in extractor runs fully offline.'
+    : selectedAiModelOptions.find((option) => option.value === settings.aiModel)?.description ?? 'Choose the preferred AI model.'
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (selectedAiProvider === 'local') {
+      setAvailableAiModels([])
+      setAiModelsError(null)
+      setIsLoadingAiModels(false)
+      return
+    }
+
+    const resolvedApiKey = getResolvedAiApiKey(selectedAiProvider, settings).trim()
+    if (!resolvedApiKey) {
+      setAvailableAiModels([])
+      setAiModelsError('Add an API key to load models from this provider.')
+      setIsLoadingAiModels(false)
+      return
+    }
+
+    void (async () => {
+      setIsLoadingAiModels(true)
+      setAiModelsError(null)
+      try {
+        const models = await fetchAvailableAiModels(selectedAiProvider, resolvedApiKey)
+        if (cancelled) return
+        setAvailableAiModels(models)
+        if (models.length > 0 && !models.some((option) => option.value === settings.aiModel)) {
+          updateSettings('aiModel', models[0]?.value ?? getDefaultAiModel(selectedAiProvider))
+        }
+      } catch (error) {
+        if (cancelled) return
+        setAvailableAiModels([])
+        setAiModelsError(error instanceof Error ? error.message : 'Could not load models from this provider.')
+      } finally {
+        if (!cancelled) {
+          setIsLoadingAiModels(false)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    selectedAiProvider,
+    settings.googleApiKey,
+    settings.openaiApiKey,
+    settings.anthropicApiKey,
+    settings.geminiApiKey,
+  ])
 
   useEffect(() => {
     if (!hasLoadedSettingsRef.current) return
@@ -1277,18 +1338,31 @@ export default function SettingsPage() {
                     ) : null}
 
                     <div>
-                      <Label className="text-sm font-medium">{settingsUiCopy.keywordEngine}</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.keywordEngineDescription}</p>
+                      <Label className="text-sm font-medium">AI Provider</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Choose which provider powers keyword extraction, summary generation, and AI classification. Local heuristic stays fully offline.
+                      </p>
                       <Select
-                        value={settings.keywordEngine}
-                        onValueChange={(value) => updateSettings('keywordEngine', value as StoredAppSettings['keywordEngine'])}
+                        value={settings.aiProvider}
+                        onValueChange={(value) => {
+                          const nextProvider = value as StoredAppSettings['aiProvider']
+                          updateSettings('aiProvider', nextProvider)
+                          updateSettings('keywordEngine', nextProvider === 'local' ? 'local_heuristic' : 'gemini')
+                          updateSettings('aiModel', getDefaultAiModel(nextProvider))
+                          if (nextProvider === 'google') {
+                            updateSettings('geminiModel', getDefaultAiModel('google'))
+                          }
+                        }}
                       >
                         <SelectTrigger className="mt-2">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="local_heuristic">Local heuristic</SelectItem>
-                          <SelectItem value="gemini">Gemini</SelectItem>
+                          {AI_PROVIDER_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1306,8 +1380,10 @@ export default function SettingsPage() {
 
                     <div className="flex items-center justify-between">
                       <div>
-                        <Label className="text-sm font-medium">{settingsUiCopy.autoRequestGeminiOnImport}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoRequestGeminiOnImportDescription}</p>
+                        <Label className="text-sm font-medium">Auto request remote AI on import</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Use the selected remote provider automatically on import when the daily limit allows it. Local heuristic remains the fallback.
+                        </p>
                       </div>
                       <Checkbox
                         checked={settings.autoGeminiOnImport}
@@ -1315,54 +1391,84 @@ export default function SettingsPage() {
                       />
                     </div>
 
-                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_heuristic' ? 'bg-muted/20' : 'bg-background')}>
-                      <Label className="text-sm font-medium">Gemini API Key</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">Optional. Add your own Gemini key for AI keyword extraction.</p>
-                      <p className="text-xs text-muted-foreground">
-                        Request one in{' '}
-                        <a
-                          href="https://aistudio.google.com/app/apikey"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-medium text-primary underline underline-offset-4"
-                        >
-                          Gemini Studio
-                        </a>
-                        {' '}and paste the generated API key here.
-                      </p>
-                      <Input
-                        type="password"
-                        value={settings.geminiApiKey}
-                        onChange={(event) => updateSettings('geminiApiKey', event.target.value)}
-                        className="mt-2"
-                        placeholder="Leave blank to keep Gemini disabled."
-                      />
-                    </div>
-
-                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_heuristic' ? 'bg-muted/20' : 'bg-background')}>
-                      <Label className="text-sm font-medium">Gemini Model</Label>
-                      <Select
-                        value={settings.geminiModel}
-                        onValueChange={(value) => updateSettings('geminiModel', value)}
-                      >
-                        <SelectTrigger className="mt-2">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {GEMINI_MODEL_OPTIONS.map((option) => (
-                            <SelectItem key={option.value} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
+                      <Label className="text-sm font-medium">AI API Key</Label>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {GEMINI_MODEL_OPTIONS.find((option) => option.value === settings.geminiModel)?.description ?? 'Choose the preferred Gemini model.'}
+                        {settings.aiProvider === 'local'
+                          ? 'No API key is required for the local heuristic extractor.'
+                          : settings.aiProvider === 'google'
+                            ? 'Optional. Add your Google AI Studio key for document AI.'
+                            : settings.aiProvider === 'openai'
+                              ? 'Optional. Add your OpenAI API key for document AI.'
+                              : 'Optional. Add your Anthropic API key for document AI.'}
                       </p>
+                      {settings.aiProvider === 'local' ? null : (
+                        <Input
+                          type="password"
+                          value={
+                            settings.aiProvider === 'google'
+                              ? settings.googleApiKey
+                              : settings.aiProvider === 'openai'
+                                ? settings.openaiApiKey
+                                : settings.anthropicApiKey
+                          }
+                          onChange={(event) => {
+                            if (settings.aiProvider === 'google') {
+                              updateSettings('googleApiKey', event.target.value)
+                              updateSettings('geminiApiKey', event.target.value)
+                              return
+                            }
+                            if (settings.aiProvider === 'openai') {
+                              updateSettings('openaiApiKey', event.target.value)
+                              return
+                            }
+                            updateSettings('anthropicApiKey', event.target.value)
+                          }}
+                          className="mt-2"
+                          placeholder="Leave blank to keep remote AI disabled."
+                        />
+                      )}
                     </div>
 
-                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_heuristic' ? 'bg-muted/20' : 'bg-background')}>
-                      <Label className="text-sm font-medium">Gemini Extraction Scope</Label>
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
+                      <Label className="text-sm font-medium">AI Model</Label>
+                      {settings.aiProvider === 'local' ? (
+                        <p className="text-xs text-muted-foreground">The local heuristic extractor does not require a remote model.</p>
+                      ) : (
+                        <>
+                          <Select
+                            value={settings.aiModel}
+                            disabled={isLoadingAiModels || selectedAiModelOptions.length === 0}
+                            onValueChange={(value) => {
+                              updateSettings('aiModel', value)
+                              if (settings.aiProvider === 'google') {
+                                updateSettings('geminiModel', value)
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="mt-2">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {selectedAiModelOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {isLoadingAiModels ? (
+                            <p className="mt-1 text-xs text-muted-foreground">Loading provider models...</p>
+                          ) : aiModelsError ? (
+                            <p className="mt-1 text-xs text-destructive">{aiModelsError}</p>
+                          ) : null}
+                          <p className="mt-1 text-xs text-muted-foreground">{selectedAiModelDescription}</p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
+                      <Label className="text-sm font-medium">AI Extraction Scope</Label>
                       <Select
                         value={settings.keywordExtractionMode}
                         onValueChange={(value) => updateSettings('keywordExtractionMode', value as StoredAppSettings['keywordExtractionMode'])}
@@ -1377,7 +1483,7 @@ export default function SettingsPage() {
                       </Select>
                     </div>
 
-                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.keywordEngine === 'local_heuristic' ? 'bg-muted/20' : 'bg-background')}>
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
                       <Label className="text-sm font-medium">Daily AI auto limit</Label>
                       <Input
                         type="number"
