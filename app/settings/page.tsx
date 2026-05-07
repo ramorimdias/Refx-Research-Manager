@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Cloud, Database, Download, FolderOpen, HardDrive, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
+import { ChevronDown, CircleHelp, Cloud, Database, Download, FolderOpen, HardDrive, Loader2, Palette, RefreshCw, RotateCcw, Settings, ShieldAlert, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -27,6 +27,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { open, save } from '@/lib/tauri/client'
 import {
   AI_PROVIDER_OPTIONS,
@@ -54,12 +56,27 @@ import { APP_VERSION, getAppVersion } from '@/lib/app-version'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
 import { useRuntimeActions, useRuntimeState } from '@/lib/stores/runtime-store'
 
-type SettingsSection = 'general' | 'display' | 'processing' | 'data' | 'about'
+type SettingsSection = 'profile' | 'appearance' | 'research_ai' | 'storage_sync' | 'app_diagnostics'
 type SettingsBackupMetadata = repo.DbBackupFileMetadata | repo.DbRemoteVaultBackupMetadata
 
 const isRemoteVaultBackup = (backup: SettingsBackupMetadata): backup is repo.DbRemoteVaultBackupMetadata => (
   'revision' in backup
 )
+
+function SettingsHelp({ content }: { content: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="text-muted-foreground transition-colors hover:text-foreground" aria-label="Help">
+          <CircleHelp className="h-3.5 w-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-xs text-xs">
+        {content}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
 
 export default function SettingsPage() {
   const t = useT()
@@ -71,7 +88,7 @@ export default function SettingsPage() {
   const { scanDocumentsOcr, classifyDocuments } = useDocumentActions()
   const { clearLocalData, refreshData } = useRuntimeActions()
   const { isDesktopApp } = useRuntimeState()
-  const [activeSection, setActiveSection] = useState<SettingsSection>('general')
+  const [activeSection, setActiveSection] = useState<SettingsSection>('profile')
   const [isClearing, setIsClearing] = useState(false)
   const [isScanningOcr, setIsScanningOcr] = useState(false)
   const [isCreatingBackup, setIsCreatingBackup] = useState(false)
@@ -103,6 +120,9 @@ export default function SettingsPage() {
   const [isClearDataDialogOpen, setIsClearDataDialogOpen] = useState(false)
   const [backupDeleteTargetPath, setBackupDeleteTargetPath] = useState<string | null>(null)
   const [isJoinAnotherVaultDialogOpen, setIsJoinAnotherVaultDialogOpen] = useState(false)
+  const [isAdvancedProcessingOpen, setIsAdvancedProcessingOpen] = useState(false)
+  const [isRemoteVaultMaintenanceOpen, setIsRemoteVaultMaintenanceOpen] = useState(false)
+  const [isDangerZoneOpen, setIsDangerZoneOpen] = useState(false)
   const hasLoadedSettingsRef = useRef(false)
   const [isSettingsLoaded, setIsSettingsLoaded] = useState(false)
   const isDevSplashPreviewAvailable = process.env.NODE_ENV === 'development'
@@ -494,11 +514,11 @@ export default function SettingsPage() {
   }, [isDesktopApp])
 
   const sections: Array<{ id: SettingsSection; label: string; icon: typeof Settings }> = [
-    { id: 'general', label: t('settings.general'), icon: Settings },
-    { id: 'display', label: t('settings.display'), icon: Palette },
-    { id: 'processing', label: t('settings.processing'), icon: Sparkles },
-    { id: 'data', label: t('settings.data'), icon: Database },
-    { id: 'about', label: t('settings.about'), icon: HardDrive },
+    { id: 'profile', label: 'Profile', icon: Settings },
+    { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'research_ai', label: 'Research & AI', icon: Sparkles },
+    { id: 'storage_sync', label: 'Storage & Sync', icon: Database },
+    { id: 'app_diagnostics', label: 'App & Diagnostics', icon: HardDrive },
   ]
 
   const activeMeta = useMemo(
@@ -1101,29 +1121,29 @@ export default function SettingsPage() {
           <div className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
             <div>
               <h2 className="text-lg font-semibold tracking-tight">{activeMeta.label}</h2>
-              <p className="text-sm text-muted-foreground">{t('settings.adjustLocalBehavior')}</p>
             </div>
 
-            {activeSection === 'general' && (
+            {activeSection === 'profile' && (
               <>
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">{t('settings.profileTitle')}</CardTitle>
-                    <CardDescription>{t('settings.profileDescription')}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
-                      <Label className="text-sm font-medium">{t('settings.yourName')}</Label>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">{t('settings.yourName')}</Label>
+                        <SettingsHelp content={t('settings.yourNameHelp')} />
+                      </div>
                       <Input
                         value={settings.userName}
                         onChange={(event) => updateSettings('userName', event.target.value)}
-                        className="mt-2"
+                        className="mt-1.5"
                         placeholder={t('settings.yourNamePlaceholder')}
                       />
-                      <p className="text-xs text-muted-foreground">
-                        {t('settings.yourNameHelp')}
-                      </p>
                     </div>
+                    <Separator />
+
                     <div>
                       <Label className="text-sm font-medium">{t('settings.language')}</Label>
                       <Select value={settings.locale} onValueChange={(value) => updateSettings('locale', value as StoredAppSettings['locale'])}>
@@ -1139,53 +1159,40 @@ export default function SettingsPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-                      <p className="text-sm font-medium">{t('settings.seeAppTour')}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t('settings.appTourDescription')}
-                      </p>
-                      <Button
-                        variant="outline"
-                        className="mt-3"
-                        onClick={() => startGlobalAppTour()}
-                        disabled={isGlobalTourRunning}
-                      >
-                        <Sparkles className="mr-2 h-4 w-4" />
-                        {t('settings.replayAppTour')}
-                      </Button>
-                    </div>
-                    <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-                      <p className="text-sm font-medium">{t('settings.pageGuides')}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t('settings.pageGuidesDescription')}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Workspace Mode</CardTitle>
-                    <CardDescription>Everything stays local in this build.</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center justify-between rounded-lg bg-muted p-3">
-                      <div>
-                        <p className="text-sm font-medium">Local Workspace</p>
-                        <p className="mt-1 text-xs text-muted-foreground">All content stays on this device.</p>
+                    <Separator />
+
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium">Help & onboarding</p>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm">{t('settings.seeAppTour')}</p>
+                          <SettingsHelp content={t('settings.appTourDescription')} />
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => startGlobalAppTour()}
+                          disabled={isGlobalTourRunning}
+                        >
+                          <Sparkles className="mr-2 h-4 w-4" />
+                          {t('settings.replayAppTour')}
+                        </Button>
                       </div>
-                      <Badge>Offline</Badge>
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
+                        <p className="text-sm">{t('settings.pageGuides')}</p>
+                        <SettingsHelp content={t('settings.pageGuidesDescription')} />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
               </>
             )}
 
-            {activeSection === 'display' && (
+            {activeSection === 'appearance' && (
               <Card>
                 <CardHeader>
-                    <CardTitle className="text-base">{t('settings.appearanceTitle')}</CardTitle>
-                    <CardDescription>{t('settings.appearanceDescription')}</CardDescription>
+                  <CardTitle className="text-base">{t('settings.appearanceTitle')}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
@@ -1225,18 +1232,17 @@ export default function SettingsPage() {
               </Card>
             )}
 
-            {activeSection === 'processing' && (
+            {activeSection === 'research_ai' && (
               <>
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">{settingsUiCopy.automaticProcessingTitle}</CardTitle>
-                    <CardDescription>{settingsUiCopy.automaticProcessingDescription}</CardDescription>
+                    <CardTitle className="text-base">Automation</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <div>
+                      <div className="flex items-center gap-2">
                         <Label className="text-sm font-medium">{settingsUiCopy.autoOcr}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoOcrDescription}</p>
+                        <SettingsHelp content={settingsUiCopy.autoOcrDescription} />
                       </div>
                       <Checkbox checked={settings.autoOcr} onCheckedChange={(checked) => updateSettings('autoOcr', !!checked)} />
                     </div>
@@ -1244,9 +1250,9 @@ export default function SettingsPage() {
                     <Separator />
 
                     <div className="flex items-center justify-between">
-                      <div>
+                      <div className="flex items-center gap-2">
                         <Label className="text-sm font-medium">{settingsUiCopy.autoMetadataExtraction}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoMetadataExtractionDescription}</p>
+                        <SettingsHelp content={settingsUiCopy.autoMetadataExtractionDescription} />
                       </div>
                       <Checkbox
                         checked={settings.autoMetadata}
@@ -1257,9 +1263,9 @@ export default function SettingsPage() {
                     <Separator />
 
                     <div className="flex items-center justify-between">
-                      <div>
+                      <div className="flex items-center gap-2">
                         <Label className="text-sm font-medium">{settingsUiCopy.autoOnlineMetadataEnrichment}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoOnlineMetadataEnrichmentDescription}</p>
+                        <SettingsHelp content={settingsUiCopy.autoOnlineMetadataEnrichmentDescription} />
                       </div>
                       <Checkbox
                         checked={settings.autoOnlineMetadataEnrichment}
@@ -1270,8 +1276,10 @@ export default function SettingsPage() {
                     <Separator />
 
                     <div>
-                      <Label className="text-sm font-medium">{processingCopy.advancedClassification}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{processingCopy.advancedClassificationDescription}</p>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">{processingCopy.advancedClassification}</Label>
+                        <SettingsHelp content={processingCopy.advancedClassificationDescription} />
+                      </div>
                       <Select
                         value={settings.advancedClassificationMode}
                         onValueChange={(value) => updateSettings('advancedClassificationMode', value as StoredAppSettings['advancedClassificationMode'])}
@@ -1290,13 +1298,14 @@ export default function SettingsPage() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">{settingsUiCopy.metadataApiConfiguration}</CardTitle>
-                  <CardDescription>{settingsUiCopy.metadataApiConfigurationDescription}</CardDescription>
+                    <CardTitle className="text-base">Metadata Providers</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
-                      <Label className="text-sm font-medium">{settingsUiCopy.crossrefContactEmail}</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.crossrefContactEmailDescription}</p>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">{settingsUiCopy.crossrefContactEmail}</Label>
+                        <SettingsHelp content={settingsUiCopy.crossrefContactEmailDescription} />
+                      </div>
                       <Input
                         type="email"
                         value={settings.crossrefContactEmail}
@@ -1307,8 +1316,10 @@ export default function SettingsPage() {
                     </div>
 
                     <div>
-                      <Label className="text-sm font-medium">{settingsUiCopy.semanticScholarApi}</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.semanticScholarApiDescription}</p>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">{settingsUiCopy.semanticScholarApi}</Label>
+                        <SettingsHelp content={settingsUiCopy.semanticScholarApiDescription} />
+                      </div>
                       <Select
                         value={settings.semanticScholarApiMode}
                         onValueChange={(value) => updateSettings('semanticScholarApiMode', value as StoredAppSettings['semanticScholarApiMode'])}
@@ -1325,8 +1336,10 @@ export default function SettingsPage() {
 
                     {settings.semanticScholarApiMode === 'custom' ? (
                       <div>
-                        <Label className="text-sm font-medium">{settingsUiCopy.semanticScholarApiKey}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.semanticScholarApiKeyDescription}</p>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm font-medium">{settingsUiCopy.semanticScholarApiKey}</Label>
+                          <SettingsHelp content={settingsUiCopy.semanticScholarApiKeyDescription} />
+                        </div>
                         <Input
                           type="password"
                           value={settings.semanticScholarApiKey}
@@ -1337,11 +1350,19 @@ export default function SettingsPage() {
                       </div>
                     ) : null}
 
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Document AI</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
                     <div>
-                      <Label className="text-sm font-medium">AI Provider</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Choose which provider powers keyword extraction, summary generation, and AI classification. Local heuristic stays fully offline.
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">Provider</Label>
+                        <SettingsHelp content="Choose which provider powers keyword extraction, summary generation, and AI classification." />
+                      </div>
                       <Select
                         value={settings.aiProvider}
                         onValueChange={(value) => {
@@ -1367,73 +1388,13 @@ export default function SettingsPage() {
                       </Select>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-sm font-medium">{settingsUiCopy.autoExtractKeywordsOnImport}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.autoExtractKeywordsOnImportDescription}</p>
-                      </div>
-                      <Checkbox
-                        checked={settings.autoKeywordExtractionOnImport}
-                        onCheckedChange={(checked) => updateSettings('autoKeywordExtractionOnImport', !!checked)}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <Label className="text-sm font-medium">Auto request remote AI on import</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Use the selected remote provider automatically on import when the daily limit allows it. Local heuristic remains the fallback.
-                        </p>
-                      </div>
-                      <Checkbox
-                        checked={settings.autoGeminiOnImport}
-                        onCheckedChange={(checked) => updateSettings('autoGeminiOnImport', !!checked)}
-                      />
-                    </div>
-
                     <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
-                      <Label className="text-sm font-medium">AI API Key</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {settings.aiProvider === 'local'
-                          ? 'No API key is required for the local heuristic extractor.'
-                          : settings.aiProvider === 'google'
-                            ? 'Optional. Add your Google AI Studio key for document AI.'
-                            : settings.aiProvider === 'openai'
-                              ? 'Optional. Add your OpenAI API key for document AI.'
-                              : 'Optional. Add your Anthropic API key for document AI.'}
-                      </p>
-                      {settings.aiProvider === 'local' ? null : (
-                        <Input
-                          type="password"
-                          value={
-                            settings.aiProvider === 'google'
-                              ? settings.googleApiKey
-                              : settings.aiProvider === 'openai'
-                                ? settings.openaiApiKey
-                                : settings.anthropicApiKey
-                          }
-                          onChange={(event) => {
-                            if (settings.aiProvider === 'google') {
-                              updateSettings('googleApiKey', event.target.value)
-                              updateSettings('geminiApiKey', event.target.value)
-                              return
-                            }
-                            if (settings.aiProvider === 'openai') {
-                              updateSettings('openaiApiKey', event.target.value)
-                              return
-                            }
-                            updateSettings('anthropicApiKey', event.target.value)
-                          }}
-                          className="mt-2"
-                          placeholder="Leave blank to keep remote AI disabled."
-                        />
-                      )}
-                    </div>
-
-                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
-                      <Label className="text-sm font-medium">AI Model</Label>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">Model</Label>
+                        <SettingsHelp content="Loaded from the selected provider when an API key is available." />
+                      </div>
                       {settings.aiProvider === 'local' ? (
-                        <p className="text-xs text-muted-foreground">The local heuristic extractor does not require a remote model.</p>
+                        <p className="text-xs text-muted-foreground">The built-in extractor runs fully offline.</p>
                       ) : (
                         <>
                           <Select
@@ -1468,7 +1429,67 @@ export default function SettingsPage() {
                     </div>
 
                     <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
-                      <Label className="text-sm font-medium">AI Extraction Scope</Label>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">API key</Label>
+                        <SettingsHelp content="Only needed for remote providers. Leave blank to keep remote AI disabled." />
+                      </div>
+                      {settings.aiProvider === 'local' ? (
+                        <p className="text-xs text-muted-foreground">No API key is required for the local heuristic extractor.</p>
+                      ) : (
+                        <Input
+                          type="password"
+                          value={
+                            settings.aiProvider === 'google'
+                              ? settings.googleApiKey
+                              : settings.aiProvider === 'openai'
+                                ? settings.openaiApiKey
+                                : settings.anthropicApiKey
+                          }
+                          onChange={(event) => {
+                            if (settings.aiProvider === 'google') {
+                              updateSettings('googleApiKey', event.target.value)
+                              updateSettings('geminiApiKey', event.target.value)
+                              return
+                            }
+                            if (settings.aiProvider === 'openai') {
+                              updateSettings('openaiApiKey', event.target.value)
+                              return
+                            }
+                            updateSettings('anthropicApiKey', event.target.value)
+                          }}
+                          className="mt-2"
+                          placeholder="Leave blank to keep remote AI disabled."
+                        />
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">{settingsUiCopy.autoExtractKeywordsOnImport}</Label>
+                        <SettingsHelp content={settingsUiCopy.autoExtractKeywordsOnImportDescription} />
+                      </div>
+                      <Checkbox
+                        checked={settings.autoKeywordExtractionOnImport}
+                        onCheckedChange={(checked) => updateSettings('autoKeywordExtractionOnImport', !!checked)}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">Auto request remote AI on import</Label>
+                        <SettingsHelp content="Use the selected remote provider automatically on import when the daily limit allows it. Local heuristic remains the fallback." />
+                      </div>
+                      <Checkbox
+                        checked={settings.autoGeminiOnImport}
+                        onCheckedChange={(checked) => updateSettings('autoGeminiOnImport', !!checked)}
+                      />
+                    </div>
+
+                    <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">Extraction scope</Label>
+                        <SettingsHelp content="Choose whether remote AI should use only the first page or the full document text." />
+                      </div>
                       <Select
                         value={settings.keywordExtractionMode}
                         onValueChange={(value) => updateSettings('keywordExtractionMode', value as StoredAppSettings['keywordExtractionMode'])}
@@ -1484,7 +1505,10 @@ export default function SettingsPage() {
                     </div>
 
                     <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
-                      <Label className="text-sm font-medium">Daily AI auto limit</Label>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">Daily AI auto limit</Label>
+                        <SettingsHelp content="Limits how many automatic remote AI requests can run per day." />
+                      </div>
                       <Input
                         type="number"
                         min={0}
@@ -1502,123 +1526,153 @@ export default function SettingsPage() {
                   </CardContent>
                 </Card>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">{processingCopy.ocrScan}</CardTitle>
-                  <CardDescription>{processingCopy.ocrScanDescription}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      {processingCopy.ocrEligible
-                        .replace('{count}', String(eligibleOcrDocuments.length))
-                        .replace('{suffix}', eligibleOcrDocuments.length === 1 ? '' : 's')}
-                    </p>
-                    <Button variant="outline" onClick={() => void handleScanAllOcr()} disabled={isScanningOcr || eligibleOcrDocuments.length === 0}>
-                      {isScanningOcr ? processingCopy.scanning : processingCopy.scanAllOcr}
-                    </Button>
-                    {ocrScanProgress.total > 0 ? (
-                      <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-3">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium">{processingCopy.ocrProgress}</span>
-                          <span className="text-muted-foreground">{ocrScanProgress.finished}/{ocrScanProgress.total}</span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-primary transition-all"
-                            style={{ width: `${Math.max(ocrScanProgress.percent, ocrScanProgress.finished > 0 ? 8 : 0)}%` }}
-                          />
-                        </div>
-                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                          <span>{ocrScanProgress.complete} {processingCopy.completed}</span>
-                          <span>{ocrScanProgress.processing} {processingCopy.processing}</span>
-                          <span>{ocrScanProgress.failed} {processingCopy.failed}</span>
-                        </div>
+                <Collapsible open={isAdvancedProcessingOpen} onOpenChange={setIsAdvancedProcessingOpen}>
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between gap-3">
+                        <CardTitle className="text-base">Advanced Processing</CardTitle>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            {isAdvancedProcessingOpen ? 'Hide' : 'Show'}
+                            <ChevronDown className={cn('ml-2 h-4 w-4 transition-transform', isAdvancedProcessingOpen && 'rotate-180')} />
+                          </Button>
+                        </CollapsibleTrigger>
                       </div>
-                    ) : null}
-                    {ocrScanStatus ? (
-                      <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                        {ocrScanStatus}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
+                    </CardHeader>
+                    <CollapsibleContent>
+                      <CardContent className="space-y-6">
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium">{processingCopy.ocrScan}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {processingCopy.ocrEligible
+                                  .replace('{count}', String(eligibleOcrDocuments.length))
+                                  .replace('{suffix}', eligibleOcrDocuments.length === 1 ? '' : 's')}
+                              </p>
+                            </div>
+                            <Button variant="outline" onClick={() => void handleScanAllOcr()} disabled={isScanningOcr || eligibleOcrDocuments.length === 0}>
+                              {isScanningOcr ? processingCopy.scanning : processingCopy.scanAllOcr}
+                            </Button>
+                          </div>
+                          {ocrScanProgress.total > 0 ? (
+                            <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-3">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="font-medium">{processingCopy.ocrProgress}</span>
+                                <span className="text-muted-foreground">{ocrScanProgress.finished}/{ocrScanProgress.total}</span>
+                              </div>
+                              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-primary transition-all"
+                                  style={{ width: `${Math.max(ocrScanProgress.percent, ocrScanProgress.finished > 0 ? 8 : 0)}%` }}
+                                />
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                <span>{ocrScanProgress.complete} {processingCopy.completed}</span>
+                                <span>{ocrScanProgress.processing} {processingCopy.processing}</span>
+                                <span>{ocrScanProgress.failed} {processingCopy.failed}</span>
+                              </div>
+                            </div>
+                          ) : null}
+                          {ocrScanStatus ? <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">{ocrScanStatus}</div> : null}
+                        </div>
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">{processingCopy.semanticClassificationTitle}</CardTitle>
-                    <CardDescription>{processingCopy.semanticClassificationDescription}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      {settings.advancedClassificationMode === 'off'
-                        ? processingCopy.semanticClassificationDisabled
-                        : processingCopy.classificationEligible
-                          .replace('{count}', String(eligibleClassificationDocuments.length))
-                          .replace('{suffix}', eligibleClassificationDocuments.length === 1 ? '' : 's')}
-                    </p>
-                    <Button
-                      variant="outline"
-                      onClick={() => void handleClassifyAllDocuments()}
-                      disabled={isClassifyingDocuments || settings.advancedClassificationMode === 'off' || eligibleClassificationDocuments.length === 0}
-                    >
-                      {isClassifyingDocuments ? processingCopy.classifying : processingCopy.classifyAll}
-                    </Button>
-                    {classificationProgress.total > 0 ? (
-                      <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-3">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium">{processingCopy.classificationProgress}</span>
-                          <span className="text-muted-foreground">{classificationProgress.finished}/{classificationProgress.total}</span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="h-full rounded-full bg-primary transition-all"
-                            style={{ width: `${Math.max(classificationProgress.percent, classificationProgress.finished > 0 ? 8 : 0)}%` }}
-                          />
-                        </div>
-                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                          <span>{classificationProgress.complete} {processingCopy.completed}</span>
-                          <span>{classificationProgress.processing} {processingCopy.processing}</span>
-                          <span>{classificationProgress.failed} {processingCopy.failed}</span>
-                        </div>
-                      </div>
-                    ) : null}
-                    {classificationRunStatus ? (
-                      <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                        {classificationRunStatus}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
+                        <Separator />
 
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">{settingsUiCopy.doiLinks}</CardTitle>
-                    <CardDescription>{t('settings.recheckDoiDescription')}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <Button variant="outline" onClick={() => void handleRecheckDoiReferences()} disabled={isRecheckingDoiReferences}>
-                      {isRecheckingDoiReferences ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      {isRecheckingDoiReferences ? settingsUiCopy.rechecking : settingsUiCopy.recheckDoiLinks}
-                    </Button>
-                    {doiReferenceStatus ? (
-                      <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                        {doiReferenceStatus}
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-medium">{processingCopy.semanticClassificationTitle}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {settings.advancedClassificationMode === 'off'
+                                  ? processingCopy.semanticClassificationDisabled
+                                  : processingCopy.classificationEligible
+                                    .replace('{count}', String(eligibleClassificationDocuments.length))
+                                    .replace('{suffix}', eligibleClassificationDocuments.length === 1 ? '' : 's')}
+                              </p>
+                            </div>
+                            <Button
+                              variant="outline"
+                              onClick={() => void handleClassifyAllDocuments()}
+                              disabled={isClassifyingDocuments || settings.advancedClassificationMode === 'off' || eligibleClassificationDocuments.length === 0}
+                            >
+                              {isClassifyingDocuments ? processingCopy.classifying : processingCopy.classifyAll}
+                            </Button>
+                          </div>
+                          {classificationProgress.total > 0 ? (
+                            <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-3">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="font-medium">{processingCopy.classificationProgress}</span>
+                                <span className="text-muted-foreground">{classificationProgress.finished}/{classificationProgress.total}</span>
+                              </div>
+                              <div className="h-2 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-primary transition-all"
+                                  style={{ width: `${Math.max(classificationProgress.percent, classificationProgress.finished > 0 ? 8 : 0)}%` }}
+                                />
+                              </div>
+                              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                <span>{classificationProgress.complete} {processingCopy.completed}</span>
+                                <span>{classificationProgress.processing} {processingCopy.processing}</span>
+                                <span>{classificationProgress.failed} {processingCopy.failed}</span>
+                              </div>
+                            </div>
+                          ) : null}
+                          {classificationRunStatus ? <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">{classificationRunStatus}</div> : null}
+                        </div>
+
+                        <Separator />
+
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium">{settingsUiCopy.doiLinks}</p>
+                            <SettingsHelp content={t('settings.recheckDoiDescription')} />
+                          </div>
+                          <Button variant="outline" onClick={() => void handleRecheckDoiReferences()} disabled={isRecheckingDoiReferences}>
+                            {isRecheckingDoiReferences ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                            {isRecheckingDoiReferences ? settingsUiCopy.rechecking : settingsUiCopy.recheckDoiLinks}
+                          </Button>
+                          {doiReferenceStatus ? <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">{doiReferenceStatus}</div> : null}
+                        </div>
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
               </>
             )}
 
-            {activeSection === 'data' && (
+            {activeSection === 'storage_sync' && (
               <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Workspace</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">Storage mode</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {hasRemoteVault ? 'Remote Vault connected' : 'Local workspace only'}
+                        </p>
+                      </div>
+                      <Badge variant={hasRemoteVault ? 'default' : 'secondary'}>
+                        {hasRemoteVault ? 'Remote Vault' : 'Local'}
+                      </Badge>
+                    </div>
+                    <Separator />
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm">Documents</span>
+                      <Badge variant="secondary">{documents.length}</Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
                       <Cloud className="h-4 w-4" />
                       {t('settings.remoteVault.title')}
                     </CardTitle>
-                    <CardDescription>{t('settings.remoteVault.description')}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-5">
                     <div className="grid gap-4 md:grid-cols-[1fr_180px]">
@@ -1712,7 +1766,6 @@ export default function SettingsPage() {
                         <>
                           <div className="rounded-xl border border-border/80 bg-background/70 p-4">
                             <p className="text-sm font-medium">{t('settings.remoteVault.syncTitle')}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">{t('settings.remoteVault.syncDescription')}</p>
                             <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                               <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.pullRemoteVault())} disabled={!isDesktopApp || isRemoteVaultBusy}>
                                 <Download className="mr-2 h-4 w-4" />
@@ -1731,22 +1784,37 @@ export default function SettingsPage() {
                             </div>
                           </div>
 
-                          <div className="rounded-xl border border-border/80 bg-background/70 p-4">
-                            <p className="text-sm font-medium">{t('settings.remoteVault.maintenanceTitle')}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">{t('settings.remoteVault.maintenanceDescription')}</p>
-                            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                              {canReleaseRemoteLease ? (
-                                <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.releaseRemoteVaultLease())} disabled={!isDesktopApp || isRemoteVaultBusy}>
-                                  <RotateCcw className="mr-2 h-4 w-4" />
-                                  {t('settings.remoteVault.releaseLease')}
-                                </Button>
-                              ) : null}
-                              <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.clearRemoteCache())} disabled={!isDesktopApp || isRemoteVaultBusy}>
-                                <HardDrive className="mr-2 h-4 w-4" />
-                                {t('settings.remoteVault.freeLocalSpace')}
-                              </Button>
+                          <Collapsible open={isRemoteVaultMaintenanceOpen} onOpenChange={setIsRemoteVaultMaintenanceOpen}>
+                            <div className="rounded-xl border border-border/80 bg-background/70 p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-medium">Maintenance</p>
+                                <CollapsibleTrigger asChild>
+                                  <Button variant="ghost" size="sm">
+                                    {isRemoteVaultMaintenanceOpen ? 'Hide' : 'Show'}
+                                    <ChevronDown className={cn('ml-2 h-4 w-4 transition-transform', isRemoteVaultMaintenanceOpen && 'rotate-180')} />
+                                  </Button>
+                                </CollapsibleTrigger>
+                              </div>
+                              <CollapsibleContent className="pt-3">
+                                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                  {canReleaseRemoteLease ? (
+                                    <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.releaseRemoteVaultLease())} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                      <RotateCcw className="mr-2 h-4 w-4" />
+                                      {t('settings.remoteVault.releaseLease')}
+                                    </Button>
+                                  ) : null}
+                                  <Button variant="outline" onClick={() => void withRemoteVaultBusy(() => repo.clearRemoteCache())} disabled={!isDesktopApp || isRemoteVaultBusy}>
+                                    <HardDrive className="mr-2 h-4 w-4" />
+                                    {t('settings.remoteVault.freeLocalSpace')}
+                                  </Button>
+                                  <Button variant="destructive" onClick={() => setIsClearDataDialogOpen(true)} disabled={isClearing}>
+                                    <ShieldAlert className="mr-2 h-4 w-4" />
+                                    {isClearing ? t('settings.clearing') : t('settings.clearLocalData')}
+                                  </Button>
+                                </div>
+                              </CollapsibleContent>
                             </div>
-                          </div>
+                          </Collapsible>
                         </>
                       ) : null}
                     </div>
@@ -1763,9 +1831,6 @@ export default function SettingsPage() {
                     <CardTitle className="text-base">
                       {isRemoteVaultBackupMode ? settingsUiCopy.vaultBackups : settingsUiCopy.backups}
                     </CardTitle>
-                    <CardDescription>
-                      {isRemoteVaultBackupMode ? settingsUiCopy.vaultBackupsDescription : settingsUiCopy.backupsDescription}
-                    </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-5">
                     <div className="space-y-4">
@@ -1941,24 +2006,40 @@ export default function SettingsPage() {
                   </CardContent>
                 </Card>
 
-                <Card className="border-red-200/70 bg-red-50/80">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base text-red-900">
-                      <ShieldAlert className="h-4 w-4" />
-                      {settingsUiCopy.dangerZone}
-                    </CardTitle>
-                    <CardDescription className="text-red-800">{settingsUiCopy.irreversible}</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <Button variant="destructive" className="w-full" onClick={() => setIsClearDataDialogOpen(true)} disabled={isClearing}>
-                      {isClearing ? t('settings.clearing') : t('settings.clearLocalData')}
-                    </Button>
-                  </CardContent>
-                </Card>
+                <Collapsible open={isDangerZoneOpen} onOpenChange={setIsDangerZoneOpen}>
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between gap-3">
+                        <CardTitle className="text-base">Maintenance</CardTitle>
+                        <CollapsibleTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            {isDangerZoneOpen ? 'Hide' : 'Show'}
+                            <ChevronDown className={cn('ml-2 h-4 w-4 transition-transform', isDangerZoneOpen && 'rotate-180')} />
+                          </Button>
+                        </CollapsibleTrigger>
+                      </div>
+                    </CardHeader>
+                    <CollapsibleContent>
+                      <CardContent>
+                        <div className="rounded-xl border border-red-200/70 bg-red-50/80 p-4">
+                          <div className="flex items-center gap-2 text-red-900">
+                            <ShieldAlert className="h-4 w-4" />
+                            <p className="text-sm font-medium">{settingsUiCopy.dangerZone}</p>
+                          </div>
+                          <p className="mt-1 text-xs text-red-800">{settingsUiCopy.irreversible}</p>
+                          <Button variant="destructive" className="mt-4 w-full" onClick={() => setIsClearDataDialogOpen(true)} disabled={isClearing}>
+                            {isClearing ? t('settings.clearing') : t('settings.clearLocalData')}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </CollapsibleContent>
+                  </Card>
+                </Collapsible>
+
               </>
             )}
 
-            {activeSection === 'about' && (
+            {activeSection === 'app_diagnostics' && (
               <>
                 <Card>
                   <CardHeader>
@@ -1977,10 +2058,12 @@ export default function SettingsPage() {
                     {isDevSplashPreviewAvailable ? (
                       <>
                         <Separator />
-                        <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-                          <p className="text-sm font-medium">{settingsUiCopy.splashPreview}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{settingsUiCopy.splashPreviewDescription}</p>
-                          <Button variant="outline" className="mt-3" onClick={handlePreviewLoadingSplash}>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium">{settingsUiCopy.splashPreview}</p>
+                            <SettingsHelp content={settingsUiCopy.splashPreviewDescription} />
+                          </div>
+                          <Button variant="outline" size="sm" onClick={handlePreviewLoadingSplash}>
                             <Sparkles className="mr-2 h-4 w-4" />
                             {settingsUiCopy.splashPreview}
                           </Button>
@@ -1993,13 +2076,12 @@ export default function SettingsPage() {
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">{t('settings.appUpdates')}</CardTitle>
-                    <CardDescription>{t('settings.appUpdatesDescription')}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <div>
+                      <div className="flex items-center gap-2">
                         <Label className="text-sm font-medium">{t('settings.checkAutomatically')}</Label>
-                        <p className="mt-1 text-xs text-muted-foreground">{t('settings.checkAutomaticallyHelp')}</p>
+                        <SettingsHelp content={t('settings.checkAutomaticallyHelp')} />
                       </div>
                       <Checkbox
                         checked={settings.autoCheckForUpdates}
@@ -2032,7 +2114,10 @@ export default function SettingsPage() {
                   <CardContent className="pt-6">
                     <div className="flex items-center justify-between gap-4">
                       <div className="min-w-0 pr-4">
-                        <Label className="text-sm font-medium">{settingsUiCopy.anonymousUsageStats}</Label>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm font-medium">{settingsUiCopy.anonymousUsageStats}</Label>
+                          <SettingsHelp content={settingsUiCopy.anonymousUsageStatsDescription} />
+                        </div>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <span>{isUsageTelemetryConfigured() ? 'Configured' : 'Missing'}</span>
                           <span>•</span>
