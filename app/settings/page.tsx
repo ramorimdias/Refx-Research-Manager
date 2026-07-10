@@ -36,6 +36,7 @@ import {
   getBaseThemeMode,
   getDefaultAiModel,
   getResolvedAiApiKey,
+  getResolvedSemanticScholarApiKey,
   getThemeAccentVariant,
   loadAppSettings,
   saveAppSettings,
@@ -49,6 +50,7 @@ import { useAppTour } from '@/components/refx/app-tour-provider'
 import { PageHeader } from '@/components/refx/page-header'
 import { checkForAppUpdate, downloadAndInstallAppUpdate, type AppUpdateSummary } from '@/lib/services/app-update-service'
 import { fetchAvailableAiModels, type AiModelOption } from '@/lib/services/document-ai-service'
+import { testCrossrefConnection, testSemanticScholarConnection } from '@/lib/services/bibtex-sniffer'
 import { isUsageTelemetryConfigured } from '@/lib/services/usage-telemetry-service'
 import { APP_LOCALES, useLocale, useT } from '@/lib/localization'
 import { getRemoteVaultDisplayMessage, getRemoteVaultModeLabel } from '@/lib/remote-vault-copy'
@@ -58,6 +60,7 @@ import { useRuntimeActions, useRuntimeState } from '@/lib/stores/runtime-store'
 
 type SettingsSection = 'profile' | 'appearance' | 'research_ai' | 'storage_sync' | 'app_diagnostics'
 type SettingsBackupMetadata = repo.DbBackupFileMetadata | repo.DbRemoteVaultBackupMetadata
+type ApiTestState = { status: 'idle' | 'testing' | 'success' | 'error'; message?: string }
 
 const isRemoteVaultBackup = (backup: SettingsBackupMetadata): backup is repo.DbRemoteVaultBackupMetadata => (
   'revision' in backup
@@ -115,6 +118,9 @@ export default function SettingsPage() {
   const [availableAiModels, setAvailableAiModels] = useState<AiModelOption[]>([])
   const [isLoadingAiModels, setIsLoadingAiModels] = useState(false)
   const [aiModelsError, setAiModelsError] = useState<string | null>(null)
+  const [crossrefTest, setCrossrefTest] = useState<ApiTestState>({ status: 'idle' })
+  const [semanticScholarTest, setSemanticScholarTest] = useState<ApiTestState>({ status: 'idle' })
+  const [aiApiTest, setAiApiTest] = useState<ApiTestState>({ status: 'idle' })
   const [restoreTargetPath, setRestoreTargetPath] = useState<string | null>(null)
   const [isRestoreWarningOpen, setIsRestoreWarningOpen] = useState(false)
   const [isClearDataDialogOpen, setIsClearDataDialogOpen] = useState(false)
@@ -533,6 +539,29 @@ export default function SettingsPage() {
   const selectedAiModelDescription = selectedAiProvider === 'local'
     ? 'The built-in extractor runs fully offline.'
     : selectedAiModelOptions.find((option) => option.value === settings.aiModel)?.description ?? 'Choose the preferred AI model.'
+
+  const runApiTest = async (
+    setState: (state: ApiTestState) => void,
+    test: () => Promise<unknown>,
+    successMessage: string,
+  ) => {
+    setState({ status: 'testing' })
+    try {
+      await test()
+      setState({ status: 'success', message: successMessage })
+    } catch (error) {
+      setState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'The connection test failed for an unknown reason.',
+      })
+    }
+  }
+
+  const apiTestMessage = (state: ApiTestState) => state.message ? (
+    <p className={cn('mt-2 text-xs', state.status === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')} role="status">
+      {state.message}
+    </p>
+  ) : null
 
   useEffect(() => {
     let cancelled = false
@@ -1309,10 +1338,29 @@ export default function SettingsPage() {
                       <Input
                         type="email"
                         value={settings.crossrefContactEmail}
-                        onChange={(event) => updateSettings('crossrefContactEmail', event.target.value)}
+                        onChange={(event) => {
+                          updateSettings('crossrefContactEmail', event.target.value)
+                          setCrossrefTest({ status: 'idle' })
+                        }}
                         className="mt-2"
                         placeholder="name@example.com"
                       />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-2"
+                        disabled={crossrefTest.status === 'testing'}
+                        onClick={() => void runApiTest(
+                          setCrossrefTest,
+                          () => testCrossrefConnection({ contactEmail: settings.crossrefContactEmail }),
+                          'Crossref is reachable and working.',
+                        )}
+                      >
+                        {crossrefTest.status === 'testing' ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                        {crossrefTest.status === 'testing' ? 'Testing...' : 'Test Crossref'}
+                      </Button>
+                      {apiTestMessage(crossrefTest)}
                     </div>
 
                     <div>
@@ -1322,7 +1370,10 @@ export default function SettingsPage() {
                       </div>
                       <Select
                         value={settings.semanticScholarApiMode}
-                        onValueChange={(value) => updateSettings('semanticScholarApiMode', value as StoredAppSettings['semanticScholarApiMode'])}
+                        onValueChange={(value) => {
+                          updateSettings('semanticScholarApiMode', value as StoredAppSettings['semanticScholarApiMode'])
+                          setSemanticScholarTest({ status: 'idle' })
+                        }}
                       >
                         <SelectTrigger className="mt-2">
                           <SelectValue />
@@ -1343,12 +1394,41 @@ export default function SettingsPage() {
                         <Input
                           type="password"
                           value={settings.semanticScholarApiKey}
-                          onChange={(event) => updateSettings('semanticScholarApiKey', event.target.value)}
+                          onChange={(event) => {
+                            updateSettings('semanticScholarApiKey', event.target.value)
+                            setSemanticScholarTest({ status: 'idle' })
+                          }}
                           className="mt-2"
                           placeholder={settingsUiCopy.semanticScholarApiKeyPlaceholder}
                         />
                       </div>
                     ) : null}
+
+                    <div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={
+                          semanticScholarTest.status === 'testing'
+                          || (settings.semanticScholarApiMode === 'custom' && !settings.semanticScholarApiKey.trim())
+                        }
+                        onClick={() => void runApiTest(
+                          setSemanticScholarTest,
+                          () => testSemanticScholarConnection({
+                            apiKey: getResolvedSemanticScholarApiKey(settings),
+                            queueOnRefusal: settings.semanticScholarApiMode === 'builtin',
+                          }),
+                          `Semantic Scholar ${settings.semanticScholarApiMode === 'builtin' ? 'built-in access' : 'API key'} is working.`,
+                        )}
+                      >
+                        {semanticScholarTest.status === 'testing' ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                        {semanticScholarTest.status === 'testing' ? 'Testing...' : 'Test Semantic Scholar'}
+                      </Button>
+                      {settings.semanticScholarApiMode === 'custom' && !settings.semanticScholarApiKey.trim() ? (
+                        <p className="mt-2 text-xs text-muted-foreground">Enter an API key to run the test.</p>
+                      ) : apiTestMessage(semanticScholarTest)}
+                    </div>
 
                   </CardContent>
                 </Card>
@@ -1446,6 +1526,7 @@ export default function SettingsPage() {
                                 : settings.anthropicApiKey
                           }
                           onChange={(event) => {
+                            setAiApiTest({ status: 'idle' })
                             if (settings.aiProvider === 'google') {
                               updateSettings('googleApiKey', event.target.value)
                               updateSettings('geminiApiKey', event.target.value)
@@ -1461,6 +1542,33 @@ export default function SettingsPage() {
                           placeholder="Leave blank to keep remote AI disabled."
                         />
                       )}
+                      {settings.aiProvider !== 'local' ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={aiApiTest.status === 'testing' || !getResolvedAiApiKey(settings.aiProvider, settings).trim()}
+                            onClick={() => void runApiTest(
+                              setAiApiTest,
+                              async () => {
+                                const models = await fetchAvailableAiModels(
+                                  settings.aiProvider as Exclude<StoredAppSettings['aiProvider'], 'local'>,
+                                  getResolvedAiApiKey(settings.aiProvider, settings),
+                                )
+                                if (models.length === 0) throw new Error(`${settings.aiProvider} accepted the request but returned no usable models.`)
+                              },
+                              `${AI_PROVIDER_OPTIONS.find((option) => option.value === settings.aiProvider)?.label ?? settings.aiProvider} API key is working.`,
+                            )}
+                          >
+                            {aiApiTest.status === 'testing' ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                            {aiApiTest.status === 'testing' ? 'Testing...' : 'Test API key'}
+                          </Button>
+                          {!getResolvedAiApiKey(settings.aiProvider, settings).trim() ? (
+                            <p className="mt-2 text-xs text-muted-foreground">Enter an API key to run the test.</p>
+                          ) : apiTestMessage(aiApiTest)}
+                        </>
+                      ) : null}
                     </div>
 
                     <div className="flex items-center justify-between">

@@ -3,6 +3,7 @@
 import { readFile } from '@tauri-apps/plugin-fs'
 import { extractNormalizedDoi } from '@/lib/services/document-metadata-service'
 import type { SuggestedTag } from '@/lib/types'
+import { enqueue } from '@/lib/services/discovery-request-queue'
 
 export type SniffedPdfMetadata = {
   title?: string
@@ -30,6 +31,32 @@ export type CrossrefLookupConfig = {
 
 export type SemanticScholarLookupConfig = {
   apiKey?: string
+  queueOnRefusal?: boolean
+}
+
+export async function testCrossrefConnection(config?: CrossrefLookupConfig) {
+  const result = await fetchJsonWithTimeout(
+    appendCrossrefContactEmail('https://api.crossref.org/works?rows=0', config),
+    { provider: 'Crossref' },
+  ) as { status?: string } | null
+
+  if (!result) throw new Error('Crossref returned an empty response.')
+}
+
+export async function testSemanticScholarConnection(config?: SemanticScholarLookupConfig) {
+  const fields = encodeURIComponent('title')
+  const result = await fetchJsonWithTimeout(
+    `https://api.semanticscholar.org/graph/v1/paper/search?query=research&limit=1&fields=${fields}`,
+    {
+      headers: semanticScholarHeaders(config),
+      provider: 'Semantic Scholar',
+      queueOnRefusal: config?.queueOnRefusal,
+    },
+  ) as { data?: unknown[] } | null
+
+  if (!result || !Array.isArray(result.data)) {
+    throw new Error('Semantic Scholar returned an invalid response.')
+  }
 }
 
 type CrossrefAuthor = {
@@ -248,25 +275,57 @@ async function fetchJsonWithTimeout(
   url: string,
   options?: {
     headers?: HeadersInit
+    provider?: string
+    queueOnRefusal?: boolean
     timeoutMs?: number
   },
 ) {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort('timeout'), options?.timeoutMs ?? 6000)
+  const provider = options?.provider ?? new URL(url).hostname
+  const request = async () => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort('timeout'), options?.timeoutMs ?? 6000)
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json',
+          ...(options?.headers ?? {}),
+        },
+      })
+
+      if (!response.ok) {
+        const retryAfter = response.headers.get('retry-after')
+        const retryHint = retryAfter ? ` Retry after ${retryAfter} seconds.` : ''
+        throw new Error(`${provider} refused the metadata request (HTTP ${response.status}).${retryHint}`)
+      }
+      return response.json()
+    } catch (error) {
+      if (isAbortLikeError(error)) {
+        throw new Error(`${provider} metadata request timed out. Check your connection and try again.`)
+      }
+      if (error instanceof TypeError) {
+        throw new Error(`${provider} could not be reached. Check your internet connection, firewall, or proxy.`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
 
   try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        ...(options?.headers ?? {}),
-      },
-    })
+    return await request()
+  } catch (error) {
+    if (!options?.queueOnRefusal || !(error instanceof Error) || !error.message.includes('refused the metadata request')) {
+      throw error
+    }
 
-    if (!response.ok) return null
-    return response.json()
-  } finally {
-    clearTimeout(timeout)
+    try {
+      return await enqueue(`metadata-retry:${url}`, request)
+    } catch (retryError) {
+      const reason = retryError instanceof Error ? retryError.message : 'unknown error'
+      throw new Error(`${provider} refused the initial request, so it was queued and retried. The queued request also failed: ${reason}`)
+    }
   }
 }
 
@@ -315,7 +374,7 @@ async function fetchSemanticScholarByDoi(
   const encoded = encodeURIComponent(`DOI:${doi}`)
   return fetchJsonWithTimeout(
     `https://api.semanticscholar.org/graph/v1/paper/${encoded}?fields=${fields}`,
-    { headers: semanticScholarHeaders(config) },
+    { headers: semanticScholarHeaders(config), provider: 'Semantic Scholar', queueOnRefusal: config?.queueOnRefusal },
   ) as Promise<SemanticScholarPaper | null>
 }
 
@@ -327,7 +386,7 @@ async function fetchSemanticScholarByQuery(
   const fields = encodeURIComponent('title,authors,year,abstract,citationCount,fieldsOfStudy,tldr,externalIds')
   const result = await fetchJsonWithTimeout(
     `https://api.semanticscholar.org/graph/v1/paper/search?query=${query}&limit=4&fields=${fields}`,
-    { headers: semanticScholarHeaders(config) },
+    { headers: semanticScholarHeaders(config), provider: 'Semantic Scholar', queueOnRefusal: config?.queueOnRefusal },
   ) as { data?: SemanticScholarPaper[] } | null
 
   return result?.data?.slice(0, 4) ?? []

@@ -17,7 +17,7 @@ import type { DocumentMetadataProvenanceEntry, MetadataFieldSource } from '@/lib
 
 export type OnlineMetadataEnrichmentSettings = Pick<
   StoredAppSettings,
-  'crossrefContactEmail' | 'semanticScholarApiKey'
+  'crossrefContactEmail' | 'semanticScholarApiKey' | 'semanticScholarApiMode'
 >
 
 export type DocumentMetadataEnrichmentResult = {
@@ -249,6 +249,7 @@ export async function loadOnlineMetadataEnrichmentSettings(isDesktopApp: boolean
   return {
     crossrefContactEmail: settings.crossrefContactEmail,
     semanticScholarApiKey: getResolvedSemanticScholarApiKey(settings),
+    semanticScholarApiMode: settings.semanticScholarApiMode,
   } satisfies OnlineMetadataEnrichmentSettings
 }
 
@@ -283,6 +284,7 @@ export async function enrichDocumentMetadataOnline(
   if (effectiveMetadataStatus(nextSeed) !== 'complete') {
     const semanticScholarMatch = await lookupSemanticScholarMetadata(nextSeed, {
       apiKey: settings.semanticScholarApiKey,
+      queueOnRefusal: settings.semanticScholarApiMode === 'builtin',
     })
 
     if (semanticScholarMatch) {
@@ -314,6 +316,7 @@ export async function findDocumentMetadataCandidates(
   if (providers.includes('semantic_scholar')) {
     const semanticScholarMatches = await lookupSemanticScholarMetadataCandidates(seed, {
       apiKey: settings.semanticScholarApiKey,
+      queueOnRefusal: settings.semanticScholarApiMode === 'builtin',
     })
 
     candidates.push(...semanticScholarMatches.slice(0, 4).map(toMetadataCandidate))

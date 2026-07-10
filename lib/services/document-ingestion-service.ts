@@ -2,7 +2,7 @@
 
 import { appDataDir, copyFile, join, mkdir } from '@/lib/tauri/client'
 import * as repo from '@/lib/repositories/local-db'
-import { loadAppSettings } from '@/lib/app-settings'
+import { getResolvedSemanticScholarApiKey, loadAppSettings } from '@/lib/app-settings'
 import { buildDocumentMetadataSeed, enrichDocumentMetadataOnline } from '@/lib/services/document-enrichment-service'
 import { rebuildCitationRelationsForDocument } from '@/lib/services/document-citation-relation-service'
 import { classifyDocumentSemantics } from '@/lib/services/document-classification-service'
@@ -686,7 +686,8 @@ async function runOnlineMetadataEnrichmentStage(
       buildDocumentMetadataSeed(context.document, context.localMetadata),
       {
         crossrefContactEmail: settings.crossrefContactEmail,
-        semanticScholarApiKey: settings.semanticScholarApiKey,
+        semanticScholarApiKey: getResolvedSemanticScholarApiKey(settings),
+        semanticScholarApiMode: settings.semanticScholarApiMode,
       },
     )
 
