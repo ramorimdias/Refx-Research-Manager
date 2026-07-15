@@ -28,6 +28,8 @@ export type PdfPageWords = {
   pageNumber: number
   text: string
   words: PdfWord[]
+  width: number
+  height: number
 }
 
 export type PdfPageLines = {
@@ -478,6 +480,8 @@ async function extractPdfPages(filePath: string) {
           pageNumber,
           text: words.map((word) => word.text).join(' '),
           words,
+          width: viewport.width,
+          height: viewport.height,
         })
 
         page.cleanup?.()

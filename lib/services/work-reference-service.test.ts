@@ -7,7 +7,14 @@ import {
   findReusableReference,
   matchReferenceToDocument,
   normalizeDoi,
+  seedReferenceFromDocument,
 } from '@/lib/services/work-reference-service'
+
+test('seeds bibliography types from work type without treating presentations as articles', () => {
+  assert.equal(seedReferenceFromDocument(createDocument({ workType: 'journal_article' })).type, 'article')
+  assert.equal(seedReferenceFromDocument(createDocument({ workType: 'conference_paper' })).type, 'inproceedings')
+  assert.equal(seedReferenceFromDocument(createDocument({ workType: 'presentation' })).type, 'misc')
+})
 
 function createDocument(overrides: Partial<Document> = {}): Document {
   return {
@@ -19,6 +26,8 @@ function createDocument(overrides: Partial<Document> = {}): Document {
     commentCount: 0,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     documentType: 'pdf',
+    workType: 'journal_article',
+    workTypeDetection: { source: 'automatic', confidence: 0.8, signals: ['test fixture'], locked: false },
     favorite: false,
     hasExtractedText: true,
     hasOcr: false,

@@ -37,6 +37,7 @@ import { useT } from '@/lib/localization'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
 import { useLibraryStore } from '@/lib/stores/library-store'
 import { useRuntimeState } from '@/lib/stores/runtime-store'
+import { requiresDoiForWorkType } from '@/lib/services/document-work-type-service'
 
 type MetadataQueueMode = 'fetch_possible' | 'missing_doi' | 'missing' | 'cleanup'
 
@@ -132,7 +133,7 @@ function isFetchPossibleDocument(document: Document) {
 }
 
 function isMissingDoiDocument(document: Document) {
-  return hasCompleteCoreMetadata(document) && (document.doi ?? '').trim().length === 0
+  return requiresDoiForWorkType(document.workType) && hasCompleteCoreMetadata(document) && (document.doi ?? '').trim().length === 0
 }
 
 function isMissingMetadataDocument(document: Document) {

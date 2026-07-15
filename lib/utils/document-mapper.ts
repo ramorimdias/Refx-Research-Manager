@@ -10,6 +10,7 @@ import {
   getDocumentSuggestedTags,
 } from '@/lib/services/document-tag-suggestion-service'
 import type { Document, MetadataStatus } from '@/lib/types'
+import { defaultWorkTypeDetection } from '@/lib/services/document-work-type-service'
 
 export function dbDocumentToUi(
   d: repo.DbDocument,
@@ -28,6 +29,8 @@ export function dbDocumentToUi(
       return d.authors ? [d.authors] : []
     }
   })()
+  const metadataProvenance = parseMetadataProvenance(d.metadataProvenance)
+  const work = metadataProvenance.work
 
   return {
     id: d.id,
@@ -37,6 +40,9 @@ export function dbDocumentToUi(
       : d.documentType === 'my_work'
         ? 'my_work'
         : 'pdf',
+    workType: work?.workType ?? (d.documentType === 'physical_book' ? 'book' : 'other'),
+    workTypeDetection: work?.detection ?? defaultWorkTypeDetection(),
+    presentationMetadata: work?.presentation,
     title: d.title,
     abstract: d.abstractText,
     authors: authorsParsed,
@@ -59,7 +65,7 @@ export function dbDocumentToUi(
     hasOcr: d.hasOcr ?? false,
     ocrStatus: (d.ocrStatus ?? 'pending') as Document['ocrStatus'],
     metadataStatus: (d.metadataStatus ?? 'missing') as MetadataStatus,
-    metadataProvenance: parseMetadataProvenance(d.metadataProvenance),
+    metadataProvenance,
     metadataUserEditedFields: parseMetadataUserEditedFields(d.metadataUserEditedFields),
     indexingStatus: d.indexingStatus ?? 'pending',
     suggestedTags: getDocumentSuggestedTags(d),

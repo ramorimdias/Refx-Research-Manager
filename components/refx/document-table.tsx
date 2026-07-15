@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ContextMenuItem } from '@/components/ui/context-menu'
+import { getDocumentDisplayIcon, getWorkTypeLabel } from '@/lib/utils/document-display-icon'
 import { useDocumentListSelection } from '@/lib/hooks/use-document-list-selection'
 import { cn } from '@/lib/utils'
 import type { Document, DocumentEphemeralUiFlags, ReadingStage } from '@/lib/types'
@@ -657,22 +658,19 @@ export function DocumentTable({ documents, ephemeralFlagsById = {} }: DocumentTa
           </TableCell>
         )
       case 'title':
+        const DocumentIcon = getDocumentDisplayIcon(doc)
         return (
           <TableCell key={column.key}>
             {quickEdit?.documentId === doc.id && quickEdit.field === 'title' ? (
               <div className="flex items-center gap-2">
-                {doc.documentType === 'physical_book'
-                  ? <BookMarked className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  : <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                <DocumentIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-label={getWorkTypeLabel(doc.workType)}><title>{getWorkTypeLabel(doc.workType)}</title></DocumentIcon>
                 {renderQuickEditInput()}
               </div>
             ) : renderQuickEditMenu(
               doc,
               'title',
               <Link href={getOpenHref(doc)} className="group/link flex items-start gap-2">
-                {doc.documentType === 'physical_book'
-                  ? <BookMarked className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                  : <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
+                <DocumentIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-label={getWorkTypeLabel(doc.workType)}><title>{getWorkTypeLabel(doc.workType)}</title></DocumentIcon>
                 <div className="min-w-0">
                   <div className="flex items-start gap-2">
                     <span className="block min-w-0 truncate font-medium text-foreground transition-colors group-hover/link:text-primary">

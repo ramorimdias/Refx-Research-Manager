@@ -58,9 +58,20 @@ function jaccardSimilarity(left: string[], right: string[]) {
 }
 
 export function seedReferenceFromDocument(document: Document): DbCreateReferenceInput {
+  const referenceType = document.workType === 'book'
+    ? 'book'
+    : document.workType === 'conference_paper'
+      ? 'inproceedings'
+      : document.workType === 'thesis'
+        ? 'thesis'
+        : document.workType === 'report'
+          ? 'report'
+          : document.workType === 'journal_article'
+            ? 'article'
+            : 'misc'
   return {
     documentId: document.id,
-    type: document.documentType === 'physical_book' ? 'book' : 'article',
+    type: referenceType,
     isManual: false,
     title: document.title,
     authors: serializeAuthors(document.authors),

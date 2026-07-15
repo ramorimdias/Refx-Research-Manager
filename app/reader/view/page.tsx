@@ -96,7 +96,7 @@ const READER_NOTE_COLOR_KEY = 'refx-reader-note-color'
 const READER_VIEW_STATE_KEY_PREFIX = 'refx-reader-view-state'
 const READER_PAGE_RENDER_BUFFER = 1
 const READER_DEFAULT_INTERNAL_ZOOM = 150
-const READER_MIN_INTERNAL_ZOOM = 75
+const READER_MIN_INTERNAL_ZOOM = 25
 const READER_MAX_INTERNAL_ZOOM = 375
 const READER_BUTTON_ZOOM_STEP = 15
 const READER_WHEEL_ZOOM_STEP = 2
@@ -439,6 +439,7 @@ function RealReaderViewPage() {
     anchorY: number
     targetZoom: number
   } | null>(null)
+  const autoFittedLandscapeDocumentRef = useRef<string | null>(null)
   const pageChangedFromScrollRef = useRef(false)
   const initializedDocumentIdRef = useRef<string | null>(null)
   const routeSelectionKeyRef = useRef<string | null>(null)
@@ -1140,6 +1141,40 @@ function RealReaderViewPage() {
 
     return true
   }
+
+  const fitCurrentPageToViewport = async () => {
+    const viewportElement = readerViewportRef.current
+    if (!pdfDocument || !viewportElement) return false
+    const pdfPage = await pdfDocument.getPage(page) as {
+      getViewport: (args: { scale: number }) => { width: number; height: number }
+    }
+    const baseSize = pdfPage.getViewport({ scale: 1 })
+    if (baseSize.width <= 0 || baseSize.height <= 0) return false
+    const availableWidth = Math.max(1, viewportElement.clientWidth - 48)
+    const availableHeight = Math.max(1, viewportElement.clientHeight - 48)
+    const nextZoom = normalizeZoomLevel(Math.min(
+      availableWidth / baseSize.width,
+      availableHeight / baseSize.height,
+    ) * 100)
+    setZoom(nextZoom)
+    return true
+  }
+
+  useEffect(() => {
+    if (!document || !pdfDocument || autoFittedLandscapeDocumentRef.current === document.id) return
+    let cancelled = false
+    const fitLandscapePage = async () => {
+      const pdfPage = await pdfDocument.getPage(page) as {
+        getViewport: (args: { scale: number }) => { width: number; height: number }
+      }
+      const baseSize = pdfPage.getViewport({ scale: 1 })
+      if (cancelled || baseSize.width <= baseSize.height) return
+      autoFittedLandscapeDocumentRef.current = document.id
+      await fitCurrentPageToViewport()
+    }
+    void fitLandscapePage()
+    return () => { cancelled = true }
+  }, [document, pdfDocument, page])
 
   useLayoutEffect(() => {
     const focus = zoomFocusRef.current
@@ -2457,9 +2492,7 @@ function RealReaderViewPage() {
             onNextPage={() => setPage((current) => Math.min(pdfDocument?.numPages ?? current + 1, current + 1))}
             displayedZoom={displayedZoom}
             onResetZoom={() => {
-              const nextZoom = READER_DEFAULT_INTERNAL_ZOOM
-              void captureViewportCenterZoomAnchor(nextZoom)
-              setZoom(nextZoom)
+              void fitCurrentPageToViewport()
             }}
             onZoomOut={() => {
               setZoom((current) => {

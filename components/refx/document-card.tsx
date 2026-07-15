@@ -2,10 +2,8 @@
 
 import Link from 'next/link'
 import {
-  BookMarked,
   Star,
   MoreHorizontal,
-  FileText,
   MessageSquare,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -26,6 +24,7 @@ import type { Document, DocumentEphemeralUiFlags, ReadingStage } from '@/lib/typ
 import { NewBadge, ReadingStageBadge, StarRating } from './common'
 import { useDocumentActions } from '@/lib/stores/document-store'
 import { DocumentActions, DocumentContextMenu } from './document-actions'
+import { getDocumentDisplayIcon, getWorkTypeLabel } from '@/lib/utils/document-display-icon'
 
 interface DocumentCardProps {
   document: Document
@@ -79,7 +78,7 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
     : doc.documentType === 'physical_book'
       ? `/books/notes?id=${doc.id}`
       : `/reader/view?id=${doc.id}`
-  const Icon = doc.documentType === 'physical_book' ? BookMarked : FileText
+  const Icon = getDocumentDisplayIcon(doc)
   const coverImageUrl = doc.documentType === 'physical_book' && doc.coverImagePath
     ? (isTauri() ? convertFileSrc(doc.coverImagePath) : doc.coverImagePath)
     : ''
@@ -111,7 +110,9 @@ export function DocumentCard({ document: doc, ephemeralFlags, variant = 'grid' }
                 </div>
               ) : (
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                  <Icon className="h-5 w-5 text-primary" />
+                  <Icon className="h-5 w-5 text-primary" aria-label={getWorkTypeLabel(doc.workType)}>
+                    <title>{getWorkTypeLabel(doc.workType)}</title>
+                  </Icon>
                 </div>
               )}
 

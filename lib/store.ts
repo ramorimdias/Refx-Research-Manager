@@ -165,6 +165,9 @@ interface AppState {
         | 'isbn'
         | 'publisher'
         | 'documentType'
+        | 'workType'
+        | 'workTypeDetection'
+        | 'presentationMetadata'
         | 'citationKey'
         | 'coverImagePath'
         | 'readingStage'
@@ -780,6 +783,8 @@ appActions.updateDocument = async (id, updates) => {
     authors: nextAuthors,
     year: nextYear,
     doi: nextDoi,
+    workType: updates.workType ?? existing.workType,
+    organization: updates.presentationMetadata?.organization ?? existing.presentationMetadata?.organization,
   })
 
   const optimistic: Partial<Document> = {
@@ -791,7 +796,7 @@ appActions.updateDocument = async (id, updates) => {
           ...Object.fromEntries(editedMetadataFields.map((field) => [field, true])),
         }
       : existing.metadataUserEditedFields,
-    metadataProvenance: editedMetadataFields.length > 0
+    metadataProvenance: editedMetadataFields.length > 0 || updates.workType !== undefined || updates.workTypeDetection !== undefined || updates.presentationMetadata !== undefined
       ? {
           ...(existing.metadataProvenance ?? {}),
           ...Object.fromEntries(
@@ -799,6 +804,13 @@ appActions.updateDocument = async (id, updates) => {
               .filter((field) => field === 'title' || field === 'authors' || field === 'year' || field === 'doi')
               .map((field) => [field, { source: 'user', extractedAt: new Date(), confidence: 1, detail: 'Edited manually in the document details view.' }]),
           ),
+          work: {
+            workType: updates.workType ?? existing.workType,
+            detection: updates.workTypeDetection ?? (updates.workType !== undefined
+              ? { source: 'user', confidence: 1, signals: ['Selected manually'], locked: true }
+              : existing.workTypeDetection),
+            presentation: updates.presentationMetadata ?? existing.presentationMetadata,
+          },
         }
       : existing.metadataProvenance,
     updatedAt: new Date(),
@@ -832,12 +844,7 @@ appActions.updateDocument = async (id, updates) => {
             editedMetadataFields,
           )
         : undefined,
-      metadataProvenance: editedMetadataFields.length > 0
-        ? markMetadataFieldProvenanceAsUser(
-            existing.metadataProvenance ? JSON.stringify(existing.metadataProvenance) : undefined,
-            editedMetadataFields,
-          )
-        : undefined,
+      metadataProvenance: optimistic.metadataProvenance ? JSON.stringify(optimistic.metadataProvenance) : undefined,
     })
     if (!saved) throw new Error('Document not found')
 

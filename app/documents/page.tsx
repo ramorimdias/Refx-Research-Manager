@@ -64,10 +64,10 @@ import {
 } from '@/lib/services/document-enrichment-service'
 import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
 import { scanDocumentForDoiReferences } from '@/lib/services/document-doi-reference-service'
-import { hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
+import { extractLocalPdfMetadata, hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
 import { loadPdfJsModule } from '@/lib/services/document-processing'
 import { convertFileSrc, isTauri, open as openFileDialog, readFile } from '@/lib/tauri/client'
-import type { Document as RefxDocument, ReadingStage } from '@/lib/types'
+import type { Document as RefxDocument, ReadingStage, WorkType, DocumentVisibility } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import * as repo from '@/lib/repositories/local-db'
 import { normalizeErrorMessage } from '@/lib/utils/error'
@@ -77,11 +77,19 @@ import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-stor
 import { useLibraryStore } from '@/lib/stores/library-store'
 import { useRelationActions, useRelationStore } from '@/lib/stores/relation-store'
 import { useRuntimeState } from '@/lib/stores/runtime-store'
+import { getLibraryMetadataFilterState } from '@/lib/stores/shared'
+import { getWorkTypeIcon } from '@/lib/utils/document-display-icon'
 
 const readingStages: Array<{ value: ReadingStage; label: string }> = [
   { value: 'unread', label: 'Unread' },
   { value: 'reading', label: 'Reading' },
   { value: 'finished', label: 'Finished' },
+]
+const workTypes: Array<{ value: WorkType; label: string }> = [
+  { value: 'journal_article', label: 'Journal article' }, { value: 'conference_paper', label: 'Conference paper' },
+  { value: 'presentation', label: 'Presentation / slides' }, { value: 'poster', label: 'Poster' },
+  { value: 'report', label: 'Report' }, { value: 'thesis', label: 'Thesis' }, { value: 'book', label: 'Book' },
+  { value: 'internal_document', label: 'Internal document' }, { value: 'other', label: 'Other' },
 ]
 
 type RelationListItem = {
@@ -616,6 +624,13 @@ function RealDocumentDetailPage({
   const [doi, setDoi] = useState('')
   const [isbn, setIsbn] = useState('')
   const [publisher, setPublisher] = useState('')
+  const [workType, setWorkType] = useState<WorkType>('other')
+  const [organization, setOrganization] = useState('')
+  const [eventName, setEventName] = useState('')
+  const [presentationDate, setPresentationDate] = useState('')
+  const [presentationLocation, setPresentationLocation] = useState('')
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [visibility, setVisibility] = useState<DocumentVisibility>('unspecified')
   const [citationKey, setCitationKey] = useState('')
   const [abstract, setAbstract] = useState('')
   const [coverImagePath, setCoverImagePath] = useState('')
@@ -624,6 +639,7 @@ function RealDocumentDetailPage({
   const [favorite, setFavorite] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [isRedetectingWork, setIsRedetectingWork] = useState(false)
   const [isFetchingOnlineMetadata, setIsFetchingOnlineMetadata] = useState(false)
   const [isMetadataDialogOpen, setIsMetadataDialogOpen] = useState(false)
   const [metadataCandidates, setMetadataCandidates] = useState<DocumentMetadataCandidate[]>([])
@@ -686,6 +702,13 @@ function RealDocumentDetailPage({
     setDoi(document.doi ?? '')
     setIsbn(document.isbn ?? '')
     setPublisher(document.publisher ?? '')
+    setWorkType(document.workType)
+    setOrganization(document.presentationMetadata?.organization ?? '')
+    setEventName(document.presentationMetadata?.event ?? '')
+    setPresentationDate(document.presentationMetadata?.presentationDate ?? '')
+    setPresentationLocation(document.presentationMetadata?.location ?? '')
+    setSourceUrl(document.presentationMetadata?.sourceUrl ?? '')
+    setVisibility(document.presentationMetadata?.visibility ?? 'unspecified')
     setCitationKey(document.citationKey ?? '')
     setAbstract(document.abstract ?? '')
     setCoverImagePath(document.coverImagePath ?? '')
@@ -910,6 +933,12 @@ function RealDocumentDetailPage({
         .filter(Boolean),
     [authors],
   )
+  const isPresentationLike = workType === 'presentation' || workType === 'poster'
+  const showsDoi = ['journal_article', 'conference_paper', 'report', 'thesis'].includes(workType)
+  const showsIsbn = workType === 'book'
+  const showsPublisher = ['journal_article', 'conference_paper', 'report', 'thesis', 'book'].includes(workType)
+  const showsCitationKey = ['journal_article', 'conference_paper', 'report', 'thesis', 'book'].includes(workType)
+  const SelectedWorkTypeIcon = getWorkTypeIcon(workType)
 
   const normalizedYear = useMemo(() => {
     const trimmedYear = year.trim()
@@ -930,6 +959,15 @@ function RealDocumentDetailPage({
       readingStage,
       rating,
       favorite,
+      workType,
+      presentationMetadata: isPresentationLike ? {
+        organization: organization.trim() || undefined,
+        event: eventName.trim() || undefined,
+        presentationDate: presentationDate.trim() || undefined,
+        location: presentationLocation.trim() || undefined,
+        sourceUrl: sourceUrl.trim() || undefined,
+        visibility,
+      } : undefined,
     }),
     [
       abstract,
@@ -945,6 +983,7 @@ function RealDocumentDetailPage({
       rating,
       readingStage,
       title,
+      workType, isPresentationLike, organization, eventName, presentationDate, presentationLocation, sourceUrl, visibility,
     ],
   )
 
@@ -963,20 +1002,19 @@ function RealDocumentDetailPage({
     if (savePayload.readingStage !== document.readingStage) return true
     if (savePayload.rating !== document.rating) return true
     if (savePayload.favorite !== document.favorite) return true
+    if (savePayload.workType !== document.workType) return true
+    if (JSON.stringify(savePayload.presentationMetadata) !== JSON.stringify(document.presentationMetadata)) return true
     return false
   }, [document, savePayload])
 
   const libraryMetadataState = useMemo(() => {
-    const hasTitle = hasUsableMetadataTitle(savePayload.title)
-    const hasAuthors = savePayload.authors.length > 0
-    const hasYear = typeof savePayload.year === 'number'
-    const hasDoi = (savePayload.doi ?? '').trim().length > 0
-
-    if (hasTitle && hasAuthors && hasYear && hasDoi) return 'complete'
-    if (hasTitle && hasAuthors && hasYear && !hasDoi) return 'missing_doi'
-    if (hasDoi) return 'fetch_possible'
-    return 'missing'
-  }, [savePayload])
+    if (!document) return 'missing'
+    return getLibraryMetadataFilterState({
+      ...document,
+      ...savePayload,
+      presentationMetadata: savePayload.presentationMetadata ?? document.presentationMetadata,
+    })
+  }, [document, savePayload])
 
   const documentCanBeClassified = useMemo(() => {
     if (!document) return false
@@ -1043,6 +1081,19 @@ function RealDocumentDetailPage({
       setCoverImagePath(savePayload.coverImagePath ?? '')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleRedetectFromPdf = async () => {
+    if (!document || document.documentType !== 'pdf' || !isTauri()) return
+    setIsRedetectingWork(true)
+    try {
+      const resolvedPath = await repo.ensureDocumentPdfInStorage(document.id)
+      if (!resolvedPath) throw new Error('The PDF file is not available in document storage.')
+      const metadata = await extractLocalPdfMetadata(resolvedPath, document.sourcePath ?? resolvedPath)
+      await applyFetchedMetadataCandidate(document.id, metadata, 'replace_unlocked')
+    } finally {
+      setIsRedetectingWork(false)
     }
   }
 
@@ -1846,13 +1897,41 @@ function RealDocumentDetailPage({
                   </Collapsible>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-2 rounded-md border p-3">
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div className="min-w-64 flex-1">
+                        <Label htmlFor="work-type">Work type</Label>
+                        <Select value={workType} onValueChange={(value) => setWorkType(value as WorkType)}>
+                          <SelectTrigger id="work-type" className="mt-1.5">
+                            <span className="flex items-center gap-2"><SelectedWorkTypeIcon className="h-4 w-4 text-muted-foreground" />{workTypes.find((type) => type.value === workType)?.label}</span>
+                          </SelectTrigger>
+                          <SelectContent>{workTypes.map((type) => {
+                            const WorkTypeIcon = getWorkTypeIcon(type.value)
+                            return <SelectItem key={type.value} value={type.value}><span className="flex items-center gap-2"><WorkTypeIcon className="h-4 w-4 text-muted-foreground" />{type.label}</span></SelectItem>
+                          })}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="pb-1 text-xs text-muted-foreground">
+                        {document.workTypeDetection.source === 'automatic'
+                          ? `Automatically detected · ${Math.round(document.workTypeDetection.confidence * 100)}% confidence`
+                          : 'Selected manually'}
+                      </div>
+                      {document.documentType === 'pdf' && <Button type="button" variant="outline" size="sm" onClick={() => void handleRedetectFromPdf()} disabled={isRedetectingWork}>
+                        {isRedetectingWork ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-2 h-3.5 w-3.5" />}
+                        Re-detect from PDF
+                      </Button>}
+                    </div>
+                    {document.workTypeDetection.signals.length > 0 && (
+                      <p className="mt-2 text-xs text-muted-foreground">{document.workTypeDetection.signals.join(' · ')}</p>
+                    )}
+                  </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="title">Title</Label>
                     <Input id="title" className="mt-1.5" value={title} onChange={(event) => setTitle(event.target.value)} />
                   </div>
 
                   <div className="md:col-span-2">
-                    <Label htmlFor="authors">Authors</Label>
+                    <Label htmlFor="authors">{isPresentationLike ? 'Presenters / Authors' : workType === 'book' ? 'Authors / Editors' : 'Authors'}</Label>
                     <Input
                       id="authors"
                       className="mt-1.5"
@@ -1883,7 +1962,7 @@ function RealDocumentDetailPage({
                     </Select>
                   </div>
 
-                  <div>
+                  {showsDoi && <div>
                     <Label htmlFor="doi">DOI</Label>
                     <Input
                       id="doi"
@@ -1897,19 +1976,28 @@ function RealDocumentDetailPage({
                         setMetadataDoiSearchFailed(false)
                       }}
                     />
-                  </div>
+                  </div>}
 
-                  <div>
+                  {isPresentationLike && <>
+                    <div><Label htmlFor="organization">Organization</Label><Input id="organization" className="mt-1.5" value={organization} onChange={(event) => setOrganization(event.target.value)} /></div>
+                    <div><Label htmlFor="event-name">Event / conference</Label><Input id="event-name" className="mt-1.5" value={eventName} onChange={(event) => setEventName(event.target.value)} /></div>
+                    <div><Label htmlFor="presentation-date">Presentation date</Label><Input id="presentation-date" className="mt-1.5" value={presentationDate} onChange={(event) => setPresentationDate(event.target.value)} placeholder="YYYY-MM-DD or displayed date" /></div>
+                    <div><Label htmlFor="presentation-location">Location</Label><Input id="presentation-location" className="mt-1.5" value={presentationLocation} onChange={(event) => setPresentationLocation(event.target.value)} /></div>
+                    <div><Label htmlFor="source-url">Source URL</Label><Input id="source-url" className="mt-1.5" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} /></div>
+                    <div><Label htmlFor="visibility">Visibility</Label><Select value={visibility} onValueChange={(value) => setVisibility(value as DocumentVisibility)}><SelectTrigger id="visibility" className="mt-1.5"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="unspecified">Unspecified</SelectItem><SelectItem value="public">Public</SelectItem><SelectItem value="internal">Internal</SelectItem><SelectItem value="confidential">Confidential</SelectItem></SelectContent></Select></div>
+                  </>}
+
+                  {showsIsbn && <div>
                     <Label htmlFor="isbn">ISBN</Label>
                     <Input id="isbn" className="mt-1.5" value={isbn} onChange={(event) => setIsbn(event.target.value)} />
-                  </div>
+                  </div>}
 
-                  <div>
+                  {showsPublisher && <div>
                     <Label htmlFor="publisher">Publisher</Label>
                     <Input id="publisher" className="mt-1.5" value={publisher} onChange={(event) => setPublisher(event.target.value)} />
-                  </div>
+                  </div>}
 
-                  <div>
+                  {showsCitationKey && <div>
                     <Label htmlFor="citation-key">Citation Key</Label>
                     <Input
                       id="citation-key"
@@ -1917,7 +2005,7 @@ function RealDocumentDetailPage({
                       value={citationKey}
                       onChange={(event) => setCitationKey(event.target.value)}
                     />
-                  </div>
+                  </div>}
 
                   <div className="space-y-2">
                     <Label>Rating</Label>
@@ -1937,7 +2025,7 @@ function RealDocumentDetailPage({
                   </div>
 
                   <div className="md:col-span-2">
-                    <Label htmlFor="abstract">Abstract</Label>
+                    <Label htmlFor="abstract">{['journal_article', 'conference_paper', 'thesis'].includes(workType) ? 'Abstract' : 'Description / summary'}</Label>
                     <Textarea
                       id="abstract"
                       className="mt-1.5 min-h-40"
@@ -2397,7 +2485,9 @@ function RealDocumentDetailPage({
         <DialogContent className="right-4 left-auto top-1/2 max-h-[calc(100vh-2rem)] w-[min(520px,calc(100vw-2rem))] max-w-none translate-x-0 overflow-hidden rounded-[28px]">
           <DialogHeader>
             <DialogTitle>Find Metadata Online</DialogTitle>
-            <DialogDescription>Search and apply metadata candidates from your selected providers.</DialogDescription>
+            <DialogDescription>{document?.workType === 'presentation'
+              ? 'Search for a possible associated paper. Results are not assumed to be the slides themselves; choose Fill Missing Fields unless you intend to replace slide metadata.'
+              : 'Search and apply metadata candidates from your selected providers.'}</DialogDescription>
           </DialogHeader>
 
           <div className="h-[calc(100vh-13rem)] min-h-[360px] overflow-y-auto pr-1">

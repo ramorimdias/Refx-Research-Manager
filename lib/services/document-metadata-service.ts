@@ -1,7 +1,8 @@
 'use client'
 
 import { readFile } from '@tauri-apps/plugin-fs'
-import { extractPdfPageLines } from '@/lib/services/document-processing'
+import { extractPdfPageLines, extractPdfPageWords } from '@/lib/services/document-processing'
+import { classifyPdfWorkType } from '@/lib/services/document-work-type-service'
 import type { DbDocument, DbUpdateDocumentMetadataInput } from '@/lib/repositories/local-db'
 import { getDocumentSuggestedTags, serializeSuggestedTags } from '@/lib/services/document-tag-suggestion-service'
 import type {
@@ -12,6 +13,7 @@ import type {
   MetadataFieldSource,
   MetadataStatus,
   SuggestedTag,
+  DocumentWorkMetadata,
 } from '@/lib/types'
 
 export type LocalPdfMetadata = {
@@ -25,6 +27,7 @@ export type LocalPdfMetadata = {
   suggestedTags?: SuggestedTag[]
   citationCount?: number
   provenance: DocumentMetadataProvenance
+  work?: DocumentWorkMetadata
 }
 
 type MetadataMergeMode = 'fill_missing' | 'replace_unlocked'
@@ -44,6 +47,52 @@ type FirstPageMetadataSignals = {
   pageCount?: number
 }
 
+function extractPresentationSignals(lines: string[], text: string) {
+  const useful = lines.map(normalizeWhitespace).filter(Boolean).slice(0, 20)
+  const organization = useful.find((line) => /\b(university|institute|laborator(?:y|ies)|department|company|corporation|inc\.?|ltd\.?|research cent(?:re|er))\b/i.test(line))
+  const event = useful.find((line) => /\b(conference|symposium|workshop|summit|annual meeting|webinar|keynote)\b/i.test(line))
+  const presentationDate = text.match(/\b(20\d{2}[-/]\d{1,2}[-/]\d{1,2}|(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[\s,/-]+\d{1,2}[\s,/-]+20\d{2})\b/i)?.[0]
+  const location = useful.find((line) => /\b(location|venue|hosted in|held in)\s*[:\-]/i.test(line))?.replace(/^.*?[:\-]\s*/, '')
+  const sourceUrl = text.match(/https?:\/\/[^\s)]+/i)?.[0]
+  const visibility = /\b(confidential|do not distribute)\b/i.test(text) ? 'confidential' as const
+    : /\binternal(?: use only)?\b/i.test(text) ? 'internal' as const : 'unspecified' as const
+  return { organization, event, presentationDate, location, sourceUrl, visibility }
+}
+
+function extractPresentationTitleAndAuthors(pages: Array<{ lines: string[] }>) {
+  const isNoise = (line: string) =>
+    /\b(june|january|february|march|april|may|july|august|september|october|november|december)\b|\b(grand palais|conference|symposium|workshop)\b/i.test(line)
+    || /^sia\s+powertrain\b/i.test(line)
+  const isPersonOrAffiliation = (line: string) =>
+    /\b(university|technologies|corporation|institute|department|company|\bAG\b|\bInc\b|\bLtd\b)\b/i.test(line)
+    || /^(presenter|co-?author|speaker)\s*:/i.test(line)
+
+  let title: string | undefined
+  for (const page of [pages[1], pages[0], pages[2]].filter(Boolean)) {
+    const lines = page!.lines.map(normalizeWhitespace).filter(Boolean)
+    const start = lines.findIndex((line) => line.length >= 20 && !isNoise(line) && !isPersonOrAffiliation(line) && !/@/.test(line))
+    if (start < 0) continue
+    const parts: string[] = []
+    for (const line of lines.slice(start, start + 5)) {
+      if (isPersonOrAffiliation(line)) break
+      if (isNoise(line) || line.length > 180) continue
+      parts.push(line)
+      if (parts.join(' ').length >= 60) break
+    }
+    const candidate = normalizeWhitespace(parts.join(' '))
+    if (candidate.length >= 20) { title = candidate; break }
+  }
+
+  const authors: string[] = []
+  for (const line of pages.slice(0, 3).flatMap((page) => page.lines)) {
+    const explicit = line.match(/^(?:presenter|co-?author|speaker)\s*:\s*([^,;|]+)/i)?.[1]?.trim()
+    const beforeAffiliation = line.match(/^([A-ZÀ-ÖØ-Ý][\p{L}.'-]+(?:\s+[A-ZÀ-ÖØ-Ý][\p{L}.'-]+){1,3})\s*,\s*[^,]+$/u)?.[1]?.trim()
+    const author = explicit ?? beforeAffiliation
+    if (author && !authors.some((entry) => entry.toLowerCase() === author.toLowerCase())) authors.push(author)
+  }
+  return { title, authors }
+}
+
 function normalizeWhitespace(input: string) {
   return input.replace(/\s+/g, ' ').trim()
 }
@@ -54,6 +103,7 @@ export function hasUsableMetadataTitle(title?: string | null) {
 
   const alphanumeric = normalized.replace(/[^a-z0-9]/gi, '')
   if (!alphanumeric) return false
+  if (/^(?:copy|copie|copia)?\s*(?:of|de|do|da)?\s*(?:template|mod[eè]le|modelo)(?:\s+(?:ppt|powerpoint|presentation))?$/i.test(normalized)) return false
 
   const digitCount = (alphanumeric.match(/\d/g) ?? []).length
   return digitCount / alphanumeric.length < 0.7
@@ -308,7 +358,9 @@ async function readRawPdfMetadata(filePath: string): Promise<RawPdfMetadataSigna
     rawText: text,
     title: rawTitle ? cleanPdfField(rawTitle) : undefined,
     authors: splitAuthors(rawAuthor ? cleanPdfField(rawAuthor) : undefined),
-    year: parseYear(rawCreationDate ? cleanPdfField(rawCreationDate) : text),
+    // Never derive a year from arbitrary PDF bytes: compressed streams routinely
+    // contain accidental values such as 2016/2018 that are not document dates.
+    year: rawCreationDate ? parseYear(cleanPdfField(rawCreationDate)) : undefined,
     doi: parseDoi(text),
   }
 }
@@ -381,7 +433,13 @@ export function deriveMetadataStatus(input: {
   authors?: string[]
   year?: number
   doi?: string
+  workType?: import('@/lib/types').WorkType
+  organization?: string
 }): MetadataStatus {
+  if (input.workType === 'presentation') {
+    if (hasUsableMetadataTitle(input.title) && ((input.authors?.length ?? 0) > 0 || Boolean(input.organization))) return 'complete'
+    return hasUsableMetadataTitle(input.title) || Boolean(input.organization) ? 'partial' : 'missing'
+  }
   const signalCount = [
     hasUsableMetadataTitle(input.title) ? 1 : 0,
     input.authors && input.authors.length > 0 ? 1 : 0,
@@ -397,6 +455,9 @@ export function deriveMetadataStatus(input: {
 export async function extractLocalPdfMetadata(filePath: string, titleFallbackPath?: string): Promise<LocalPdfMetadata> {
   const rawMetadata = await readRawPdfMetadata(filePath)
   let firstPageMetadata: FirstPageMetadataSignals = {}
+  let work: DocumentWorkMetadata | undefined
+  let presentationIdentity: ReturnType<typeof extractPresentationTitleAndAuthors> | undefined
+  let visibleOpeningYear: number | undefined
 
   try {
     const pages = await extractPdfPageLines(filePath)
@@ -405,6 +466,19 @@ export async function extractLocalPdfMetadata(filePath: string, titleFallbackPat
       ...extractFirstPageMetadata(firstPage?.lines ?? [], firstPage?.text ?? ''),
       pageCount: pages.length,
     }
+    visibleOpeningYear = parseYear(pages.slice(0, 3).map((page) => page.text).join('\n'))
+    const classified = classifyPdfWorkType({
+      pages: await extractPdfPageWords(filePath),
+      embeddedProducer: rawMetadata.rawText,
+      fileName: titleFallbackPath ?? filePath,
+    })
+    work = {
+      ...classified,
+      presentation: classified.workType === 'presentation'
+        ? extractPresentationSignals(pages.slice(0, 3).flatMap((page) => page.lines), pages.slice(0, 3).map((page) => page.text).join('\n'))
+        : undefined,
+    }
+    if (classified.workType === 'presentation') presentationIdentity = extractPresentationTitleAndAuthors(pages.slice(0, 3))
   } catch (error) {
     console.info('First-page metadata extraction skipped:', error)
   }
@@ -415,10 +489,13 @@ export async function extractLocalPdfMetadata(filePath: string, titleFallbackPat
   const embeddedTitle = normalizeExtractedTitle(rawMetadata.title)
   const meaningfulFileNameTitle = looksLikeMeaningfulFileTitle(fileNameTitle) ? fileNameTitle : undefined
   const firstPageTitle = normalizeExtractedTitle(firstPageMetadata.title)
+  const presentationTitle = normalizeExtractedTitle(presentationIdentity?.title)
   const title = hasUsableMetadataTitle(embeddedTitle)
     ? embeddedTitle
-    : meaningfulFileNameTitle
-      ?? (hasUsableMetadataTitle(firstPageTitle) ? firstPageTitle : undefined)
+    : work?.workType === 'presentation'
+      ? (hasUsableMetadataTitle(presentationTitle) ? presentationTitle : hasUsableMetadataTitle(firstPageTitle) ? firstPageTitle : meaningfulFileNameTitle)
+      : meaningfulFileNameTitle
+        ?? (hasUsableMetadataTitle(firstPageTitle) ? firstPageTitle : undefined)
       ?? fileNameTitle
 
   if (title) {
@@ -431,24 +508,28 @@ export async function extractLocalPdfMetadata(filePath: string, titleFallbackPat
         : provenanceEntry('filename_fallback', 'Filename fallback.', 0.25)
   }
 
-  const authors = rawMetadata.authors && rawMetadata.authors.length > 0
-    ? rawMetadata.authors
-    : (firstPageMetadata.authors ?? [])
+  const authors = work?.workType === 'presentation' && presentationIdentity?.authors.length
+    ? presentationIdentity.authors
+    : rawMetadata.authors && rawMetadata.authors.length > 0
+      ? rawMetadata.authors
+      : (firstPageMetadata.authors ?? [])
 
   if (authors.length > 0) {
     provenance.authors = provenanceEntry(
-      rawMetadata.authors && rawMetadata.authors.length > 0 ? 'embedded_pdf_metadata' : 'first_page_heuristic',
-      rawMetadata.authors && rawMetadata.authors.length > 0 ? 'Embedded PDF author metadata.' : 'First-page author heuristic.',
-      rawMetadata.authors && rawMetadata.authors.length > 0 ? 0.9 : 0.8,
+      work?.workType === 'presentation' && presentationIdentity?.authors.length ? 'first_page_heuristic' : rawMetadata.authors && rawMetadata.authors.length > 0 ? 'embedded_pdf_metadata' : 'first_page_heuristic',
+      work?.workType === 'presentation' && presentationIdentity?.authors.length ? 'Presenter labels from the opening slides.' : rawMetadata.authors && rawMetadata.authors.length > 0 ? 'Embedded PDF author metadata.' : 'First-page author heuristic.',
+      work?.workType === 'presentation' && presentationIdentity?.authors.length ? 0.92 : rawMetadata.authors && rawMetadata.authors.length > 0 ? 0.9 : 0.8,
     )
   }
 
-  const year = rawMetadata.year
+  const year = work?.workType === 'presentation'
+    ? (visibleOpeningYear ?? rawMetadata.year)
+    : (rawMetadata.year ?? visibleOpeningYear)
   if (year) {
     provenance.year = provenanceEntry(
-      'embedded_pdf_metadata',
-      'Embedded PDF date metadata.',
-      0.7,
+      year === visibleOpeningYear ? 'first_page_heuristic' : 'embedded_pdf_metadata',
+      year === visibleOpeningYear ? 'Year extracted from the opening slides.' : 'Embedded PDF date metadata.',
+      year === visibleOpeningYear ? 0.9 : 0.7,
     )
   }
 
@@ -464,6 +545,7 @@ export async function extractLocalPdfMetadata(filePath: string, titleFallbackPat
   if (firstPageMetadata.pageCount) {
     provenance.pageCount = provenanceEntry('first_page_heuristic', 'Page count derived from PDF page scan.', 1)
   }
+  if (work) provenance.work = work
 
   const normalizedTitle = title || undefined
   return {
@@ -474,6 +556,7 @@ export async function extractLocalPdfMetadata(filePath: string, titleFallbackPat
     pageCount: firstPageMetadata.pageCount,
     citationKey: normalizedTitle ? citationKeyFor(normalizedTitle, authors, year) : undefined,
     provenance,
+    work,
   }
 }
 
@@ -484,6 +567,7 @@ export function mergeExtractedMetadataIntoDocument(
 ) {
   const userEdited = parseMetadataUserEditedFields(document.metadataUserEditedFields)
   const provenance = parseMetadataProvenance(document.metadataProvenance)
+  if (metadata.work && !provenance.work?.detection.locked) provenance.work = metadata.work
   const currentAuthors = parseAuthorsValue(document.authors)
   const updates: DbUpdateDocumentMetadataInput = {}
 
@@ -564,6 +648,8 @@ export function mergeExtractedMetadataIntoDocument(
     authors: effectiveAuthors,
     year: effectiveYear,
     doi: effectiveDoi,
+    workType: provenance.work?.workType,
+    organization: provenance.work?.presentation?.organization,
   })
   updates.metadataProvenance = serializeMetadataProvenance(provenance)
 
@@ -588,7 +674,7 @@ export function markMetadataFieldProvenanceAsUser(
   const provenance = parseMetadataProvenance(existingValue)
   for (const field of fields) {
     if (field === 'abstract' || field === 'isbn' || field === 'publisher' || field === 'citationKey') continue
-    provenance[field as keyof DocumentMetadataProvenance] = provenanceEntry('user', 'Edited manually in the document details view.', 1)
+    provenance[field as import('@/lib/types').DocumentMetadataField] = provenanceEntry('user', 'Edited manually in the document details view.', 1)
   }
   return serializeMetadataProvenance(provenance)
 }

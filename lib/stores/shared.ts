@@ -20,6 +20,7 @@ import type {
   PersistentSearchState,
 } from '@/lib/types'
 import { hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
+import { requiresDoiForWorkType } from '@/lib/services/document-work-type-service'
 import { hydrateRemoteVaultSyncState } from '@/lib/remote-storage-state'
 
 export type AppNote = repo.DbNote
@@ -282,6 +283,13 @@ export function getLibraryMetadataFilterState(document: Document): LibraryMetada
   const hasAuthors = document.authors.length > 0
   const hasYear = typeof document.year === 'number'
   const hasDoi = (document.doi ?? '').trim().length > 0
+  const requiresDoi = requiresDoiForWorkType(document.workType)
+
+  if (!requiresDoi) {
+    if (hasTitle && (hasAuthors || Boolean(document.presentationMetadata?.organization)) && hasYear) return 'complete'
+    if (hasDoi) return 'fetch_possible'
+    return 'missing'
+  }
 
   if (hasTitle && hasAuthors && hasYear && hasDoi) return 'complete'
   if (hasTitle && hasAuthors && hasYear && !hasDoi) return 'missing_doi'

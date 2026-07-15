@@ -20,6 +20,27 @@ export type OcrStatus = 'pending' | 'processing' | 'complete' | 'failed' | 'not_
 export type MetadataStatus = 'missing' | 'partial' | 'complete'
 export type LibraryMetadataState = 'missing' | 'fetch_possible' | 'missing_doi' | 'complete'
 export type DocumentType = 'pdf' | 'physical_book' | 'my_work'
+export type WorkType = 'journal_article' | 'conference_paper' | 'presentation' | 'poster' | 'report' | 'thesis' | 'book' | 'internal_document' | 'other'
+export type DocumentVisibility = 'public' | 'internal' | 'confidential' | 'unspecified'
+export interface WorkTypeDetection {
+  source: 'automatic' | 'user'
+  confidence: number
+  signals: string[]
+  locked: boolean
+}
+export interface PresentationMetadata {
+  organization?: string
+  event?: string
+  presentationDate?: string
+  location?: string
+  sourceUrl?: string
+  visibility: DocumentVisibility
+}
+export interface DocumentWorkMetadata {
+  workType: WorkType
+  detection: WorkTypeDetection
+  presentation?: PresentationMetadata
+}
 export type TextExtractionStatus = ProcessingStatus
 export type IndexingStatus = ProcessingStatus
 export type TagSuggestionStatus = ProcessingStatus
@@ -76,7 +97,9 @@ export interface DocumentMetadataProvenanceEntry {
   detail?: string
 }
 
-export type DocumentMetadataProvenance = Partial<Record<DocumentMetadataField, DocumentMetadataProvenanceEntry>>
+export type DocumentMetadataProvenance = Partial<Record<DocumentMetadataField, DocumentMetadataProvenanceEntry>> & {
+  work?: DocumentWorkMetadata
+}
 export type DocumentMetadataUserEditedFields = Partial<Record<EditableMetadataField, boolean>>
 
 export interface SuggestedTag {
@@ -103,6 +126,9 @@ export interface Document {
   id: string
   libraryId: string
   documentType: DocumentType
+  workType: WorkType
+  workTypeDetection: WorkTypeDetection
+  presentationMetadata?: PresentationMetadata
   title: string
   subtitle?: string
   abstract?: string
