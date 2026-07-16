@@ -156,6 +156,8 @@ const translations = {
         push: 'Sync Now',
         freeLocalSpace: 'Free Local Space',
         releaseLease: 'Release Write Lease',
+        requestEditing: 'Request editing',
+        requestingEditing: 'Requesting...',
         refreshStatus: 'Refresh Status',
         cacheLimit: 'Local cache limit (MB)',
         path: 'Vault folder',

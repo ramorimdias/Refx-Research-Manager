@@ -337,7 +337,23 @@ appActions.initialize = async () => {
   }
 
   try {
-    syncDesktopData(await withTimeout(fetchDesktopData({ pullRemote: true, acquireLease: true }), DESKTOP_BOOTSTRAP_TIMEOUT_MS, 'Desktop bootstrap'))
+    const cachedData = await withTimeout(
+      fetchDesktopData({ pullRemote: false, acquireLease: false }),
+      DESKTOP_BOOTSTRAP_TIMEOUT_MS,
+      'Desktop bootstrap',
+    )
+    syncDesktopData(cachedData)
+
+    if (cachedData.remoteVaultStatus?.enabled && !cachedData.remoteVaultStatus.isOffline) {
+      void (async () => {
+        try {
+          await repo.pullRemoteVault('background')
+          syncDesktopData(await fetchDesktopData({ pullRemote: false, acquireLease: false }))
+        } catch (error) {
+          console.warn('Background remote vault startup refresh failed:', error)
+        }
+      })()
+    }
   } catch (error) {
     console.error('Desktop bootstrap failed; starting with a safe empty workspace.', error)
     resetPreviewData(true)

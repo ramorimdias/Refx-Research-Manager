@@ -37,7 +37,7 @@ import { DocumentBulkActions } from './document-bulk-actions'
 import { useDocumentActions } from '@/lib/stores/document-store'
 import { DocumentActions, DocumentContextMenu } from './document-actions'
 import { translate, useLocale, useT } from '@/lib/localization'
-import { hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
+import { getLibraryMetadataFilterState } from '@/lib/stores/shared'
 
 interface DocumentTableProps {
   documents: Document[]
@@ -82,23 +82,16 @@ const READING_STAGE_OPTIONS: Array<{ value: ReadingStage; label: string }> = [
 type QuickEditField = 'title' | 'authors' | 'year'
 
 function getTableMetadataState(document: Document) {
-  const hasTitle = hasUsableMetadataTitle(document.title)
-  const hasAuthors = document.authors.length > 0
-  const hasYear = typeof document.year === 'number'
-  const hasDoi = (document.doi ?? '').trim().length > 0
-
-  if (hasTitle && hasAuthors && hasYear && hasDoi) {
+  const state = getLibraryMetadataFilterState(document)
+  if (state === 'complete') {
     return { label: 'Complete', className: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' }
   }
-
-  if (hasTitle && hasAuthors && hasYear && !hasDoi) {
+  if (state === 'missing_doi') {
     return { label: 'Missing DOI', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' }
   }
-
-  if (hasDoi) {
+  if (state === 'fetch_possible') {
     return { label: 'Fetch Possible', className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' }
   }
-
   return { label: 'Missing', className: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
 }
 

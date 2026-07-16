@@ -7,17 +7,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Manager};
 
-const REMOTE_VAULT_FORMAT_VERSION: u32 = 1;
+const REMOTE_VAULT_FORMAT_VERSION: u32 = 2;
 const REMOTE_VAULT_MANIFEST_FILE: &str = "refx-vault.json";
 const REMOTE_VAULT_SNAPSHOT_FILE: &str = "state/snapshot.json";
 const REMOTE_VAULT_LEASE_FILE: &str = "locks/write-lease.json";
 const REMOTE_CACHE_DIR: &str = "remote-cache";
-const REMOTE_LEASE_TTL_MINUTES: i64 = 120;
+const REMOTE_LEASE_TTL_MINUTES: i64 = 3;
+static REMOTE_VAULT_OPERATION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn remote_vault_operation_lock() -> &'static Mutex<()> {
+    REMOTE_VAULT_OPERATION_LOCK.get_or_init(|| Mutex::new(()))
+}
 
 const REMOTE_SYNC_TABLES: [&str; 13] = [
     "libraries",
@@ -187,6 +193,7 @@ pub struct RemoteVaultStatus {
     pub vault_id: Option<String>,
     pub device_id: String,
     pub revision: Option<i64>,
+    pub local_revision: Option<i64>,
     pub remote_updated_at: Option<String>,
     pub remote_last_pulled_at: Option<String>,
     pub remote_last_pushed_at: Option<String>,
@@ -202,6 +209,14 @@ pub struct RemoteVaultLease {
     pub hostname: String,
     pub created_at: String,
     pub expires_at: String,
+    #[serde(default)]
+    pub lease_id: String,
+    #[serde(default)]
+    pub owner_token: String,
+    #[serde(default)]
+    pub heartbeat_at: String,
+    #[serde(default)]
+    pub fencing_revision: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,8 +229,28 @@ struct RemoteVaultManifest {
     device_id: String,
     snapshot_sha256: Option<String>,
     #[serde(default)]
+    snapshot_size: Option<i64>,
+    #[serde(default)]
+    writer_token: Option<String>,
+    #[serde(default)]
+    fencing_revision: i64,
+    #[serde(default)]
+    previous_revision: Option<i64>,
+    #[serde(default)]
     files: Vec<RemoteVaultBlob>,
     active_lease: Option<RemoteVaultLease>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteRevisionInfo {
+    pub enabled: bool,
+    pub available: bool,
+    pub vault_id: Option<String>,
+    pub revision: Option<i64>,
+    pub updated_at: Option<String>,
+    pub snapshot_sha256: Option<String>,
+    pub snapshot_size: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -308,6 +343,10 @@ fn parse_setting_bool(raw: Option<String>) -> bool {
 fn parse_setting_i64(raw: Option<String>, fallback: i64) -> i64 {
     raw.and_then(|value| serde_json::from_str::<i64>(&value).ok())
         .unwrap_or(fallback)
+}
+
+fn parse_setting_optional_i64(raw: Option<String>) -> Option<i64> {
+    parse_setting_string(raw).and_then(|value| value.parse::<i64>().ok())
 }
 
 fn set_setting(conn: &Connection, key: &str, value: String) -> Result<(), AppError> {
@@ -450,28 +489,65 @@ fn vault_backup_archive_path(backup_dir: &Path) -> PathBuf {
 fn read_manifest(root: &Path) -> Result<Option<RemoteVaultManifest>, AppError> {
     let path = manifest_path(root);
     if !path.exists() {
-        return Ok(None);
+        let previous = path.with_extension("previous");
+        if !previous.exists() { return Ok(None); }
+        let raw = fs::read_to_string(previous)?;
+        return serde_json::from_str::<RemoteVaultManifest>(&raw)
+            .map(Some)
+            .map_err(|error| AppError::Validation(format!("Could not read previous remote vault manifest: {error}")));
     }
     let raw = fs::read_to_string(path)?;
-    serde_json::from_str::<RemoteVaultManifest>(&raw)
-        .map(Some)
-        .map_err(|error| AppError::Validation(format!("Could not read remote vault manifest: {error}")))
+    match serde_json::from_str::<RemoteVaultManifest>(&raw) {
+        Ok(manifest) => Ok(Some(manifest)),
+        Err(primary_error) => {
+            let previous = manifest_path(root).with_extension("previous");
+            if !previous.exists() {
+                return Err(AppError::Validation(format!("Could not read remote vault manifest: {primary_error}")));
+            }
+            let previous_raw = fs::read_to_string(previous)?;
+            serde_json::from_str::<RemoteVaultManifest>(&previous_raw)
+                .map(Some)
+                .map_err(|error| AppError::Validation(format!("Remote vault manifest and recovery copy are invalid: {error}")))
+        }
+    }
+}
+
+fn atomic_write(path: &Path, payload: &[u8]) -> Result<(), AppError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let temp = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
+    let mut file = OpenOptions::new().create_new(true).write(true).open(&temp)?;
+    file.write_all(payload)?;
+    file.sync_all()?;
+    drop(file);
+    if path.exists() {
+        let previous = path.with_extension("previous");
+        let _ = fs::copy(path, previous);
+        fs::remove_file(path)?;
+    }
+    fs::rename(temp, path)?;
+    Ok(())
 }
 
 fn write_manifest(root: &Path, manifest: &RemoteVaultManifest) -> Result<(), AppError> {
     ensure_vault_layout(root)?;
     let payload = serde_json::to_string_pretty(manifest)
         .map_err(|error| AppError::Validation(format!("Could not serialize remote vault manifest: {error}")))?;
-    fs::write(manifest_path(root), payload)?;
+    atomic_write(&manifest_path(root), payload.as_bytes())?;
     Ok(())
 }
 
 fn read_snapshot(root: &Path) -> Result<RemoteVaultSnapshot, AppError> {
     let path = snapshot_path(root);
     if !path.exists() {
-        return Err(AppError::Validation(
-            "This remote vault does not have a snapshot yet.".to_string(),
-        ));
+        let previous = path.with_extension("previous");
+        if !previous.exists() {
+            return Err(AppError::Validation("This remote vault does not have a snapshot yet.".to_string()));
+        }
+        let raw = fs::read_to_string(previous)?;
+        return serde_json::from_str::<RemoteVaultSnapshot>(&raw)
+            .map_err(|error| AppError::Validation(format!("Could not read previous remote vault snapshot: {error}")));
     }
     let raw = fs::read_to_string(path)?;
     serde_json::from_str::<RemoteVaultSnapshot>(&raw)
@@ -503,10 +579,33 @@ fn write_lease(root: &Path, device_id: &str) -> Result<RemoteVaultLease, AppErro
         hostname: hostname(),
         created_at: created_at.to_rfc3339(),
         expires_at: (created_at + Duration::minutes(REMOTE_LEASE_TTL_MINUTES)).to_rfc3339(),
+        lease_id: format!("lease-{}", uuid::Uuid::new_v4()),
+        owner_token: uuid::Uuid::new_v4().to_string(),
+        heartbeat_at: created_at.to_rfc3339(),
+        fencing_revision: read_manifest(root)?.map(|value| value.fencing_revision + 1).unwrap_or(1),
     };
     let payload = serde_json::to_string_pretty(&lease)
         .map_err(|error| AppError::Validation(format!("Could not serialize remote vault lease: {error}")))?;
-    fs::write(lease_path(root), payload)?;
+    let path = lease_path(root);
+    let create_result = OpenOptions::new().create_new(true).write(true).open(&path);
+    match create_result {
+        Ok(mut file) => {
+            file.write_all(payload.as_bytes())?;
+            file.sync_all()?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let current = read_lease(root)?;
+            if current.as_ref().is_some_and(lease_is_valid) {
+                return current.ok_or_else(|| AppError::Validation("Remote vault lease changed during acquisition.".to_string()));
+            }
+            atomic_write(&path, payload.as_bytes())?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    let verified = read_lease(root)?.ok_or_else(|| AppError::Validation("Remote vault lease disappeared during acquisition.".to_string()))?;
+    if verified.owner_token != lease.owner_token {
+        return Err(AppError::Validation("Another device acquired the remote vault at the same time.".to_string()));
+    }
     Ok(lease)
 }
 
@@ -518,6 +617,9 @@ fn acquire_or_respect_lease(
     if let Some(lease) = existing {
         if lease.device_id != device_id && lease_is_valid(&lease) {
             return Ok((Some(lease), false));
+        }
+        if lease.device_id == device_id && lease_is_valid(&lease) && lease.owner_token.is_empty() {
+            let _ = fs::remove_file(lease_path(root));
         }
     }
 
@@ -533,6 +635,10 @@ fn create_empty_manifest(vault_id: String, device_id: String) -> RemoteVaultMani
         revision: 0,
         device_id,
         snapshot_sha256: None,
+        snapshot_size: None,
+        writer_token: None,
+        fencing_revision: 0,
+        previous_revision: None,
         files: Vec::new(),
         active_lease: None,
     }
@@ -559,6 +665,7 @@ fn vault_status(
             vault_id: None,
             device_id,
             revision: None,
+            local_revision: None,
             remote_updated_at: None,
             remote_last_pulled_at: None,
             remote_last_pushed_at: None,
@@ -578,6 +685,7 @@ fn vault_status(
             vault_id: Some(config.vault_id),
             device_id: config.device_id,
             revision: None,
+            local_revision: parse_setting_optional_i64(read_setting(conn, "remoteLastPulledRevision")?),
             remote_updated_at: None,
             remote_last_pulled_at: config.last_pulled_at,
             remote_last_pushed_at: config.last_pushed_at,
@@ -629,6 +737,7 @@ fn vault_status(
         vault_id: Some(config.vault_id),
         device_id: config.device_id,
         revision: Some(manifest.revision),
+        local_revision: parse_setting_optional_i64(read_setting(conn, "remoteLastPulledRevision")?),
         remote_updated_at: Some(manifest.updated_at),
         remote_last_pulled_at: config.last_pulled_at,
         remote_last_pushed_at: config.last_pushed_at,
@@ -678,6 +787,11 @@ pub async fn get_remote_vault_status(
     tauri::async_runtime::spawn_blocking(move || {
         let conn = open_db(&app)?;
         let acquire_lease = input.and_then(|value| value.acquire_lease).unwrap_or(false);
+        let _operation = if acquire_lease {
+            Some(remote_vault_operation_lock().lock().map_err(|_| AppError::Validation("Remote vault operation lock is unavailable.".to_string()))?)
+        } else {
+            None
+        };
         vault_status(&app, &conn, acquire_lease)
     })
     .await
@@ -792,6 +906,7 @@ fn push_remote_vault_sync(
     app: AppHandle,
     input: Option<PushRemoteVaultInput>,
 ) -> Result<RemoteVaultActionResult, AppError> {
+    let _operation = remote_vault_operation_lock().lock().map_err(|_| AppError::Validation("Remote vault operation lock is unavailable.".to_string()))?;
     let conn = open_db(&app)?;
     let (config, existing_manifest) = require_remote_writer(&conn)?;
     let revision = existing_manifest.revision + 1;
@@ -818,13 +933,21 @@ fn push_remote_vault_sync(
     let payload = serde_json::to_string_pretty(&snapshot)
         .map_err(|error| AppError::Validation(format!("Could not serialize remote snapshot: {error}")))?;
     let snapshot_path = snapshot_path(&config.path);
-    if let Some(parent) = snapshot_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&snapshot_path, payload.as_bytes())?;
     let snapshot_sha256 = sha256_bytes(payload.as_bytes());
+    let lease = read_lease(&config.path)?.ok_or_else(|| AppError::Validation("Remote vault write lease was lost.".to_string()))?;
+    if !lease_is_valid(&lease) || lease.device_id != config.device_id {
+        return Err(AppError::Validation("Remote vault write lease expired or changed before publication.".to_string()));
+    }
+    let current_manifest = read_manifest(&config.path)?.ok_or_else(|| AppError::Validation("Remote vault manifest disappeared before publication.".to_string()))?;
+    if current_manifest.revision != existing_manifest.revision {
+        return Err(AppError::Validation("Remote vault changed before this revision could be published. Refresh and retry.".to_string()));
+    }
+    atomic_write(&snapshot_path, payload.as_bytes())?;
+    let publish_lease = read_lease(&config.path)?.ok_or_else(|| AppError::Validation("Remote vault write lease was lost during publication.".to_string()))?;
+    if publish_lease.owner_token != lease.owner_token || !lease_is_valid(&publish_lease) {
+        return Err(AppError::Validation("Remote vault write ownership changed during publication.".to_string()));
+    }
 
-    let lease = read_lease(&config.path)?;
     let manifest = RemoteVaultManifest {
         format_version: REMOTE_VAULT_FORMAT_VERSION,
         vault_id: config.vault_id.clone(),
@@ -832,11 +955,16 @@ fn push_remote_vault_sync(
         revision,
         device_id: config.device_id.clone(),
         snapshot_sha256: Some(snapshot_sha256),
+        snapshot_size: Some(payload.len() as i64),
+        writer_token: Some(lease.owner_token.clone()),
+        fencing_revision: lease.fencing_revision,
+        previous_revision: Some(existing_manifest.revision),
         files: snapshot.files.clone(),
-        active_lease: lease,
+        active_lease: Some(lease),
     };
     write_manifest(&config.path, &manifest)?;
     set_setting_json(&conn, "remoteLastPushedAt", &snapshot.updated_at)?;
+    set_setting_json(&conn, "remoteLastPulledRevision", revision)?;
 
     Ok(RemoteVaultActionResult {
         status: vault_status(&app, &conn, false)?,
@@ -858,6 +986,7 @@ pub async fn push_remote_vault(
 }
 
 fn pull_remote_vault_sync(app: AppHandle) -> Result<RemoteVaultActionResult, AppError> {
+    let _operation = remote_vault_operation_lock().lock().map_err(|_| AppError::Validation("Remote vault operation lock is unavailable.".to_string()))?;
     let conn = open_db(&app)?;
     let Some(config) = read_remote_config(&conn)? else {
         return Err(AppError::Validation(
@@ -870,17 +999,93 @@ fn pull_remote_vault_sync(app: AppHandle) -> Result<RemoteVaultActionResult, App
         ));
     }
 
-    let snapshot = read_snapshot(&config.path)?;
+    let manifest_before = read_manifest(&config.path)?.ok_or_else(|| AppError::Validation("Remote vault manifest was not found.".to_string()))?;
+    if manifest_before.vault_id != config.vault_id {
+        return Err(AppError::Validation("Remote vault identity does not match this local cache.".to_string()));
+    }
+    let snapshot_file = snapshot_path(&config.path);
+    let mut raw = fs::read(&snapshot_file)?;
+    let matches_manifest = |bytes: &[u8]| {
+        manifest_before.snapshot_size.is_none_or(|expected| bytes.len() as i64 == expected)
+            && manifest_before.snapshot_sha256.as_ref().is_none_or(|expected| sha256_bytes(bytes) == *expected)
+    };
+    if !matches_manifest(&raw) {
+        let previous_path = snapshot_file.with_extension("previous");
+        if previous_path.exists() {
+            let previous = fs::read(previous_path)?;
+            if matches_manifest(&previous) { raw = previous; }
+        }
+    }
+    if let Some(expected_size) = manifest_before.snapshot_size {
+        if raw.len() as i64 != expected_size {
+            return Err(AppError::Validation("Remote vault snapshot is incomplete.".to_string()));
+        }
+    }
+    if let Some(expected_hash) = manifest_before.snapshot_sha256.as_ref() {
+        if sha256_bytes(&raw) != *expected_hash {
+            return Err(AppError::Validation("Remote vault snapshot checksum does not match its manifest.".to_string()));
+        }
+    }
+    let snapshot = serde_json::from_slice::<RemoteVaultSnapshot>(&raw)
+        .map_err(|error| AppError::Validation(format!("Could not read remote vault snapshot: {error}")))?;
+    if snapshot.vault_id != manifest_before.vault_id || snapshot.revision != manifest_before.revision {
+        return Err(AppError::Validation("Remote vault snapshot and manifest revisions do not match.".to_string()));
+    }
+    let manifest_after = read_manifest(&config.path)?.ok_or_else(|| AppError::Validation("Remote vault manifest disappeared during refresh.".to_string()))?;
+    if manifest_after.revision != manifest_before.revision || manifest_after.snapshot_sha256 != manifest_before.snapshot_sha256 {
+        return Err(AppError::Validation("Remote vault changed during refresh. Try again.".to_string()));
+    }
     replace_local_tables_from_snapshot(&app, snapshot.clone())?;
     set_setting_json(&conn, "remoteLastPulledAt", &now_iso())?;
+    set_setting_json(&conn, "remoteLastPulledRevision", snapshot.revision)?;
 
     Ok(RemoteVaultActionResult {
-        status: vault_status(&app, &conn, true)?,
+        status: vault_status(&app, &conn, false)?,
         message: format!("Pulled remote vault revision {}.", snapshot.revision),
         safety_backup_path: None,
         copied_file_count: 0,
         copied_byte_count: 0,
     })
+}
+
+#[tauri::command]
+pub fn get_remote_vault_revision(app: AppHandle) -> Result<RemoteRevisionInfo, AppError> {
+    let conn = open_db(&app)?;
+    let Some(config) = read_remote_config(&conn)? else {
+        return Ok(RemoteRevisionInfo { enabled: false, available: false, vault_id: None, revision: None, updated_at: None, snapshot_sha256: None, snapshot_size: None });
+    };
+    if !config.path.exists() {
+        return Ok(RemoteRevisionInfo { enabled: true, available: false, vault_id: Some(config.vault_id), revision: None, updated_at: None, snapshot_sha256: None, snapshot_size: None });
+    }
+    let manifest = read_manifest(&config.path)?;
+    Ok(RemoteRevisionInfo {
+        enabled: true,
+        available: manifest.is_some(),
+        vault_id: manifest.as_ref().map(|value| value.vault_id.clone()),
+        revision: manifest.as_ref().map(|value| value.revision),
+        updated_at: manifest.as_ref().map(|value| value.updated_at.clone()),
+        snapshot_sha256: manifest.as_ref().and_then(|value| value.snapshot_sha256.clone()),
+        snapshot_size: manifest.and_then(|value| value.snapshot_size),
+    })
+}
+
+#[tauri::command]
+pub fn renew_remote_vault_lease(app: AppHandle) -> Result<RemoteVaultStatus, AppError> {
+    let _operation = remote_vault_operation_lock().lock().map_err(|_| AppError::Validation("Remote vault operation lock is unavailable.".to_string()))?;
+    let conn = open_db(&app)?;
+    let Some(config) = read_remote_config(&conn)? else { return vault_status(&app, &conn, false); };
+    let Some(mut lease) = read_lease(&config.path)? else { return vault_status(&app, &conn, false); };
+    if lease.device_id != config.device_id || !lease_is_valid(&lease) {
+        return vault_status(&app, &conn, false);
+    }
+    let now = Utc::now();
+    if lease.lease_id.is_empty() { lease.lease_id = format!("lease-{}", uuid::Uuid::new_v4()); }
+    if lease.owner_token.is_empty() { lease.owner_token = uuid::Uuid::new_v4().to_string(); }
+    lease.heartbeat_at = now.to_rfc3339();
+    lease.expires_at = (now + Duration::minutes(REMOTE_LEASE_TTL_MINUTES)).to_rfc3339();
+    let payload = serde_json::to_string_pretty(&lease).map_err(|error| AppError::Validation(format!("Could not serialize remote vault lease: {error}")))?;
+    atomic_write(&lease_path(&config.path), payload.as_bytes())?;
+    vault_status(&app, &conn, false)
 }
 
 #[tauri::command]
@@ -892,6 +1097,7 @@ pub async fn pull_remote_vault(app: AppHandle) -> Result<RemoteVaultActionResult
 
 #[tauri::command]
 pub fn release_remote_vault_lease(app: AppHandle) -> Result<RemoteVaultStatus, AppError> {
+    let _operation = remote_vault_operation_lock().lock().map_err(|_| AppError::Validation("Remote vault operation lock is unavailable.".to_string()))?;
     let conn = open_db(&app)?;
     if let Some(config) = read_remote_config(&conn)? {
         let path = lease_path(&config.path);
@@ -1057,7 +1263,18 @@ pub fn create_remote_vault_backup(
     app: AppHandle,
     input: RemoteVaultBackupInput,
 ) -> Result<RemoteVaultBackupMetadata, AppError> {
-    push_remote_vault_sync(app.clone(), None)?;
+    let automatic = input.automatic.unwrap_or(false);
+    let conn = open_db(&app)?;
+    let has_pending_sync = read_setting_json::<PersistedRemoteVaultSyncState>(
+        &conn,
+        "remoteVaultSyncState",
+    )?
+    .and_then(|state| state.has_pending_sync)
+    .unwrap_or(false);
+    drop(conn);
+    if !automatic || has_pending_sync {
+        push_remote_vault_sync(app.clone(), None)?;
+    }
     let conn = open_db(&app)?;
     let Some(config) = read_remote_config(&conn)? else {
         return Err(AppError::Validation(
@@ -1072,7 +1289,7 @@ pub fn create_remote_vault_backup(
     let backup_id = format!(
         "refx-vault-backup-{}{}",
         Utc::now().format("%Y%m%d-%H%M%S"),
-        if input.automatic.unwrap_or(false) { "-auto" } else { "" }
+        if automatic { "-auto" } else { "" }
     );
     let backup_dir = vault_backups_dir(&config.path).join(&backup_id);
     fs::create_dir_all(backup_dir.join("state"))?;
@@ -1091,7 +1308,7 @@ pub fn create_remote_vault_backup(
         created_at,
         vault_id: config.vault_id,
         revision: manifest.revision,
-        automatic: input.automatic.unwrap_or(false),
+        automatic,
         manifest,
         files: snapshot.files,
     };
@@ -1180,6 +1397,10 @@ pub fn restore_remote_vault_backup(
         revision: next_revision,
         device_id: config.device_id.clone(),
         snapshot_sha256: Some(snapshot_sha256),
+        snapshot_size: Some(payload.len() as i64),
+        writer_token: read_lease(&config.path)?.map(|value| value.owner_token),
+        fencing_revision: current_manifest.fencing_revision,
+        previous_revision: Some(current_manifest.revision),
         files: snapshot.files.clone(),
         active_lease: read_lease(&config.path)?,
     };
@@ -1213,6 +1434,10 @@ pub fn run_scheduled_remote_vault_backup_if_due(
 
     let conn = open_db(&app)?;
     if read_remote_config(&conn)?.is_none() {
+        return Ok(None);
+    }
+    let status = vault_status(&app, &conn, false)?;
+    if status.mode != "remoteWriter" || status.is_offline {
         return Ok(None);
     }
     let last_run = parse_setting_string(read_setting(&conn, "remoteVaultBackupLastRunAt")?);
@@ -1910,4 +2135,44 @@ fn collect_cache_files(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_one_lease_remains_readable() {
+        let lease: RemoteVaultLease = serde_json::from_str(r#"{
+            "deviceId":"device-a","hostname":"host-a",
+            "createdAt":"2026-01-01T00:00:00Z","expiresAt":"2026-01-01T02:00:00Z"
+        }"#).expect("legacy lease should deserialize");
+        assert_eq!(lease.device_id, "device-a");
+        assert!(lease.owner_token.is_empty());
+        assert_eq!(lease.fencing_revision, 0);
+    }
+
+    #[test]
+    fn version_one_manifest_remains_readable() {
+        let manifest: RemoteVaultManifest = serde_json::from_str(r#"{
+            "formatVersion":1,"vaultId":"vault-a","updatedAt":"2026-01-01T00:00:00Z",
+            "revision":4,"deviceId":"device-a","snapshotSha256":"abc",
+            "files":[],"activeLease":null
+        }"#).expect("legacy manifest should deserialize");
+        assert_eq!(manifest.revision, 4);
+        assert_eq!(manifest.snapshot_size, None);
+        assert_eq!(manifest.fencing_revision, 0);
+    }
+
+    #[test]
+    fn atomic_write_keeps_previous_committed_file() {
+        let root = std::env::temp_dir().join(format!("refx-vault-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create test directory");
+        let path = root.join("snapshot.json");
+        atomic_write(&path, b"first").expect("first write");
+        atomic_write(&path, b"second").expect("second write");
+        assert_eq!(fs::read(&path).expect("current file"), b"second");
+        assert_eq!(fs::read(path.with_extension("previous")).expect("previous file"), b"first");
+        let _ = fs::remove_dir_all(root);
+    }
 }

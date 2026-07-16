@@ -6,8 +6,11 @@ import {
   flushRemoteVaultSync,
   getRemoteVaultSyncQueueSnapshot,
   markRemoteVaultDirty,
+  runRemoteVaultOperation,
   runRemoteVaultPull,
+  setRemoteVaultSemanticState,
   setRemoteVaultStatus,
+  type RemoteRevisionInfo,
   type RemoteVaultStatus,
 } from '@/lib/remote-storage-state'
 
@@ -905,9 +908,9 @@ export async function runScheduledBackupIfDue(scope: DbBackupScope, intervalDays
 }
 
 export async function createRemoteVaultBackup(automatic?: boolean) {
-  return await invoke<DbRemoteVaultBackupMetadata>('create_remote_vault_backup', {
+  return runRemoteVaultOperation('backup', () => invoke<DbRemoteVaultBackupMetadata>('create_remote_vault_backup', {
     input: { automatic },
-  })
+  }))
 }
 
 export async function listRemoteVaultBackups() {
@@ -919,13 +922,13 @@ export async function deleteRemoteVaultBackup(path: string) {
 }
 
 export async function restoreRemoteVaultBackup(path: string) {
-  return rememberRemoteVaultStatus(await invoke<DbRestoreRemoteVaultBackupResult>('restore_remote_vault_backup', { path }))
+  return runRemoteVaultOperation('restore', async () => rememberRemoteVaultStatus(await invoke<DbRestoreRemoteVaultBackupResult>('restore_remote_vault_backup', { path })))
 }
 
 export async function runScheduledRemoteVaultBackupIfDue(intervalDays: number, keepCount: number) {
-  return await invoke<DbRemoteVaultBackupMetadata | null>('run_scheduled_remote_vault_backup_if_due', {
+  return runRemoteVaultOperation('backup', () => invoke<DbRemoteVaultBackupMetadata | null>('run_scheduled_remote_vault_backup_if_due', {
     input: { intervalDays, keepCount },
-  })
+  }))
 }
 
 export async function configureRemoteVault(path: string, cacheLimitMb?: number) {
@@ -937,9 +940,9 @@ export async function configureRemoteVault(path: string, cacheLimitMb?: number) 
 }
 
 export async function migrateToRemoteVault(path: string) {
-  return rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('migrate_to_remote_vault', {
+  return runRemoteVaultOperation('migration', async () => rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('migrate_to_remote_vault', {
     input: { path },
-  }))
+  })))
 }
 
 export async function getRemoteVaultStatus(options?: { acquireLease?: boolean }) {
@@ -950,8 +953,8 @@ export async function getRemoteVaultStatus(options?: { acquireLease?: boolean })
   return status
 }
 
-export async function pullRemoteVault() {
-  return rememberRemoteVaultStatus(await runRemoteVaultPull({ kind: 'manual' }))
+export async function pullRemoteVault(kind: 'manual' | 'background' = 'manual') {
+  return runRemoteVaultOperation('pull', async () => rememberRemoteVaultStatus(await runRemoteVaultPull({ kind })))
 }
 
 export async function pushRemoteVault() {
@@ -965,15 +968,35 @@ export async function releaseRemoteVaultLease() {
   if (syncState.highestPriority === 'high' || syncState.highestPriority === 'medium') {
     await flushRemoteVaultSync({ kind: 'manual' })
   }
-  const status = await invoke<DbRemoteVaultStatus>('release_remote_vault_lease')
+  const status = await runRemoteVaultOperation('lease', () => invoke<DbRemoteVaultStatus>('release_remote_vault_lease'))
   setRemoteVaultStatus(status)
   return status
 }
 
+export async function requestRemoteVaultEditing() {
+  return runRemoteVaultOperation('lease', () => getRemoteVaultStatus({ acquireLease: true }), { conflictOnError: false })
+}
+
+export async function renewRemoteVaultLease() {
+  const status = await runRemoteVaultOperation('lease', () => invoke<DbRemoteVaultStatus>('renew_remote_vault_lease'), { conflictOnError: false })
+  setRemoteVaultStatus(status)
+  return status
+}
+
+export async function getRemoteVaultRevision() {
+  setRemoteVaultSemanticState('checking')
+  try {
+    return await runRemoteVaultOperation('check', () => invoke<RemoteRevisionInfo>('get_remote_vault_revision'), { conflictOnError: false })
+  } finally {
+    const queue = getRemoteVaultSyncQueueSnapshot()
+    if (queue.state === 'checking') setRemoteVaultSemanticState(queue.hasPendingSync ? 'pendingPush' : 'upToDate')
+  }
+}
+
 export async function migrateRemoteVaultToLocal(clearRemoteCache = true) {
-  return rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('migrate_remote_vault_to_local', {
+  return runRemoteVaultOperation('migration', async () => rememberRemoteVaultStatus(await invoke<DbRemoteVaultActionResult>('migrate_remote_vault_to_local', {
     input: { clearRemoteCache },
-  }))
+  })))
 }
 
 export async function cacheRemoteDocumentFile(documentId: string) {

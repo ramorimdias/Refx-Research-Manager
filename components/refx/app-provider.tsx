@@ -42,7 +42,12 @@ import {
   sendUsageTelemetryEvent,
 } from '@/lib/services/usage-telemetry-service'
 import { getCurrentWindow, isTauri, WebviewWindow } from '@/lib/tauri/client'
-import { getRemoteVaultStatusSnapshot, getRemoteVaultSyncPhaseSnapshot } from '@/lib/remote-storage-state'
+import {
+  getRemoteVaultStatusSnapshot,
+  getRemoteVaultSyncPhaseSnapshot,
+  getRemoteVaultSyncQueueSnapshot,
+  setRemoteVaultSemanticState,
+} from '@/lib/remote-storage-state'
 
 interface AppProviderProps {
   children: React.ReactNode
@@ -51,7 +56,12 @@ interface AppProviderProps {
 const DEBUG_LOADING_SPLASH_UNTIL_KEY = 'refx.debug.loading-splash-until'
 const SETTINGS_LOAD_TIMEOUT_MS = 8000
 const STARTUP_WATCHDOG_TIMEOUT_MS = 15000
-const REMOTE_VAULT_IDLE_LEASE_RELEASE_MS = 15 * 60 * 1000
+const REMOTE_VAULT_IDLE_LEASE_RELEASE_MS = 5 * 60 * 1000
+const REMOTE_VAULT_HEARTBEAT_MS = 45 * 1000
+const REMOTE_VAULT_REVISION_POLL_MS = 20 * 1000
+const REMOTE_VAULT_RETRY_STORAGE_KEY = 'refx.remote-vault-retry'
+const AUTOMATIC_BACKUP_STARTUP_DELAY_MS = 45 * 1000
+const AUTOMATIC_BACKUP_BUSY_RETRY_MS = 15 * 1000
 
 function isLikelyMacDesktop() {
   if (typeof window === 'undefined') return false
@@ -109,7 +119,7 @@ export function AppProvider({ children }: AppProviderProps) {
   const hasRevealedDesktopWindow = useRef(false)
   const telemetrySessionStartedAt = useRef(new Date().toISOString())
   const telemetrySettingsRef = useRef<StoredAppSettings | null>(null)
-  const { initialize } = useRuntimeActions()
+  const { initialize, refreshData } = useRuntimeActions()
   const { initialized, isDesktopApp } = useRuntimeState()
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed)
   const setSidebarCollapsed = useUiStore((state) => state.setSidebarCollapsed)
@@ -186,18 +196,6 @@ export function AppProvider({ children }: AppProviderProps) {
         }
         document.documentElement.style.fontSize = `${settings.fontSize}px`
 
-        if (isDesktopApp && settings.autoBackupEnabled) {
-          const intervalDays = Number(settings.autoBackupIntervalDays)
-          const keepCount = Number(settings.autoBackupKeepCount)
-          const backupTask = settings.remoteVaultEnabled
-            ? repo.runScheduledRemoteVaultBackupIfDue(intervalDays, keepCount)
-            : repo.runScheduledBackupIfDue(settings.autoBackupScope, intervalDays, keepCount)
-
-          void backupTask.catch((error) => {
-            console.error('Automatic backup failed:', error)
-          })
-        }
-
         setIsSettingsReady(true)
         setStartupStatusLine('Settings ready')
         pushStartupDiagnostic(`[settings] ready`)
@@ -206,6 +204,46 @@ export function AppProvider({ children }: AppProviderProps) {
 
     void applySettings()
   }, [initialized, isDesktopApp, setTheme])
+
+  useEffect(() => {
+    if (!initialized || !isSettingsReady || !isDesktopApp || !appSettings?.autoBackupEnabled) return
+
+    let cancelled = false
+    let timer: number | null = null
+    const intervalDays = Number(appSettings.autoBackupIntervalDays)
+    const keepCount = Number(appSettings.autoBackupKeepCount)
+
+    const schedule = (delay: number) => {
+      timer = window.setTimeout(runWhenIdle, delay)
+    }
+
+    const runWhenIdle = () => {
+      timer = null
+      if (cancelled) return
+      if (getRemoteVaultSyncPhaseSnapshot() !== 'idle') {
+        schedule(AUTOMATIC_BACKUP_BUSY_RETRY_MS)
+        return
+      }
+
+      if (appSettings.remoteVaultEnabled) {
+        const status = getRemoteVaultStatusSnapshot()
+        if (!status.enabled || status.mode !== 'remoteWriter' || status.isOffline) return
+      }
+
+      const backupTask = appSettings.remoteVaultEnabled
+        ? repo.runScheduledRemoteVaultBackupIfDue(intervalDays, keepCount)
+        : repo.runScheduledBackupIfDue(appSettings.autoBackupScope, intervalDays, keepCount)
+      void backupTask.catch((error) => {
+        console.error('Automatic backup failed:', error)
+      })
+    }
+
+    schedule(AUTOMATIC_BACKUP_STARTUP_DELAY_MS)
+    return () => {
+      cancelled = true
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [appSettings, initialized, isDesktopApp, isSettingsReady])
 
   useEffect(() => {
     telemetrySettingsRef.current = appSettings
@@ -380,7 +418,7 @@ export function AppProvider({ children }: AppProviderProps) {
     if (!initialized || !isDesktopApp || !isTauri() || typeof window === 'undefined') return
 
     let idleTimer: number | null = null
-    let reacquiringLease = false
+    let heartbeatTimer: number | null = null
 
     const clearIdleTimer = () => {
       if (idleTimer !== null) {
@@ -397,9 +435,11 @@ export function AppProvider({ children }: AppProviderProps) {
         return
       }
 
-      void repo.releaseRemoteVaultLease().catch((error) => {
-        console.warn('Remote vault idle lease release failed:', error)
-      })
+      void repo.releaseRemoteVaultLease()
+        .then(() => refreshData())
+        .catch((error) => {
+          console.warn('Remote vault idle lease release failed:', error)
+        })
     }
 
     const scheduleIdleTimer = () => {
@@ -407,23 +447,20 @@ export function AppProvider({ children }: AppProviderProps) {
       idleTimer = window.setTimeout(releaseLeaseIfIdle, REMOTE_VAULT_IDLE_LEASE_RELEASE_MS)
     }
 
-    const reacquireLeaseIfNeeded = () => {
+    const renewLeaseIfNeeded = () => {
       const status = getRemoteVaultStatusSnapshot()
-      if (!status.enabled || status.mode !== 'remoteReader' || status.activeLease || reacquiringLease) return
-
-      reacquiringLease = true
-      void repo.getRemoteVaultStatus({ acquireLease: true })
-        .catch((error) => {
-          console.warn('Remote vault idle lease reacquire failed:', error)
+      if (!status.enabled || status.mode !== 'remoteWriter') return
+      void repo.renewRemoteVaultLease()
+        .then((nextStatus) => {
+          if (nextStatus.mode !== 'remoteWriter') return refreshData()
         })
-        .finally(() => {
-          reacquiringLease = false
+        .catch((error) => {
+          console.warn('Remote vault lease heartbeat failed:', error)
         })
     }
 
     const recordActivity = () => {
       scheduleIdleTimer()
-      reacquireLeaseIfNeeded()
     }
 
     const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'wheel']
@@ -432,15 +469,82 @@ export function AppProvider({ children }: AppProviderProps) {
     })
     window.addEventListener('touchstart', recordActivity, { passive: true })
     scheduleIdleTimer()
+    heartbeatTimer = window.setInterval(renewLeaseIfNeeded, REMOTE_VAULT_HEARTBEAT_MS)
 
     return () => {
       clearIdleTimer()
+      if (heartbeatTimer !== null) window.clearInterval(heartbeatTimer)
       activityEvents.forEach((eventName) => {
         window.removeEventListener(eventName, recordActivity)
       })
       window.removeEventListener('touchstart', recordActivity)
     }
-  }, [initialized, isDesktopApp])
+  }, [initialized, isDesktopApp, refreshData])
+
+  useEffect(() => {
+    if (!initialized || !isDesktopApp || typeof window === 'undefined') return
+    let disposed = false
+    let pollTimer: number | null = null
+    let retryState: { revision: number | null, attempts: number, nextRetryAt: number, blocked: boolean } = (() => {
+      try {
+        const stored = window.localStorage.getItem(REMOTE_VAULT_RETRY_STORAGE_KEY)
+        return stored ? JSON.parse(stored) : { revision: null, attempts: 0, nextRetryAt: 0, blocked: false }
+      } catch {
+        return { revision: null, attempts: 0, nextRetryAt: 0, blocked: false }
+      }
+    })()
+    const persistRetryState = () => window.localStorage.setItem(REMOTE_VAULT_RETRY_STORAGE_KEY, JSON.stringify(retryState))
+    const isIntegrityFailure = (error: unknown) => /checksum|incomplete|identity|do not match|invalid|changed during refresh/i.test(error instanceof Error ? error.message : String(error))
+
+    const checkForRevision = async () => {
+      if (disposed || document.visibilityState === 'hidden') return
+      const status = getRemoteVaultStatusSnapshot()
+      const queue = getRemoteVaultSyncQueueSnapshot()
+      if (!status.enabled || status.isOffline || queue.operation || queue.hasPendingSync) return
+      try {
+        const remote = await repo.getRemoteVaultRevision()
+        if (!remote.available || remote.revision == null || remote.revision <= (status.localRevision ?? -1)) return
+        if (retryState.revision !== remote.revision) {
+          retryState = { revision: remote.revision, attempts: 0, nextRetryAt: 0, blocked: false }
+          persistRetryState()
+        }
+        if (retryState.blocked || Date.now() < retryState.nextRetryAt) return
+        setRemoteVaultSemanticState('refreshAvailable')
+        try {
+          await repo.pullRemoteVault('background')
+          retryState = { revision: null, attempts: 0, nextRetryAt: 0, blocked: false }
+          window.localStorage.removeItem(REMOTE_VAULT_RETRY_STORAGE_KEY)
+          await refreshData()
+        } catch (error) {
+          const attempts = retryState.attempts + 1
+          const blocked = isIntegrityFailure(error)
+          const delay = Math.min(60_000, 5_000 * (2 ** Math.min(attempts - 1, 4))) + Math.floor(Math.random() * 2_000)
+          retryState = { revision: remote.revision, attempts, nextRetryAt: Date.now() + delay, blocked }
+          persistRetryState()
+          throw error
+        }
+      } catch (error) {
+        console.warn('Remote vault revision check failed:', error)
+      }
+    }
+
+    const handleFocus = () => { void checkForRevision() }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void checkForRevision()
+    }
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('online', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+    pollTimer = window.setInterval(() => { void checkForRevision() }, REMOTE_VAULT_REVISION_POLL_MS)
+
+    return () => {
+      disposed = true
+      if (pollTimer !== null) window.clearInterval(pollTimer)
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('online', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [initialized, isDesktopApp, refreshData])
 
   useEffect(() => {
     if (typeof window === 'undefined') return

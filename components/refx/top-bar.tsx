@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Cloud, DownloadCloud, Eye, PencilLine, Search, Settings, Unplug, UploadCloud } from 'lucide-react'
+import { AlertTriangle, Cloud, DownloadCloud, Eye, PencilLine, RefreshCw, Search, Settings, Unplug, UploadCloud } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -30,6 +30,28 @@ function getRemoteVaultBadge(
   t: ReturnType<typeof useT>,
 ) {
   const showExplicitActivity = syncState.activeKind === 'manual' || syncState.longRunning
+
+  if (syncState.state === 'conflict') {
+    return {
+      Icon: AlertTriangle,
+      loading: false,
+      pending: false,
+      label: 'Remote vault conflict',
+      tooltip: syncState.lastError ?? 'Remote vault validation failed. Refresh manually after resolving the conflict.',
+      className: 'border-red-300/80 bg-red-50 text-red-900 dark:border-red-500/40 dark:bg-red-950/50 dark:text-red-200',
+    }
+  }
+
+  if (syncState.state === 'checking' || syncState.state === 'refreshAvailable') {
+    return {
+      Icon: RefreshCw,
+      loading: syncState.state === 'refreshAvailable',
+      pending: false,
+      label: syncState.state === 'checking' ? 'Checking remote vault' : 'Remote update available',
+      tooltip: syncState.state === 'checking' ? 'Checking for a newer remote revision.' : 'A newer revision is being received.',
+      className: 'border-sky-300/80 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-sky-950/50 dark:text-sky-200',
+    }
+  }
 
   if (showExplicitActivity && syncPhase === 'pulling') {
     return {

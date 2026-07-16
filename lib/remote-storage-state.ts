@@ -4,6 +4,25 @@ import { invoke } from '@/lib/tauri/client'
 
 export type RemoteStorageMode = 'local' | 'remoteWriter' | 'remoteReader' | 'remoteOfflineCache'
 export type RemoteVaultSyncPhase = 'idle' | 'pulling' | 'pushing'
+export type RemoteVaultOperation = 'check' | 'pull' | 'push' | 'backup' | 'restore' | 'migration' | 'lease'
+export type RemoteVaultSyncState = 'upToDate' | 'checking' | 'refreshAvailable' | 'pulling' | 'pendingPush' | 'waitingForWriter' | 'offline' | 'conflict'
+export type RemoteRevisionInfo = {
+  enabled: boolean
+  available: boolean
+  vaultId?: string | null
+  revision?: number | null
+  localRevision?: number | null
+  updatedAt?: string | null
+  snapshotSha256?: string | null
+  snapshotSize?: number | null
+}
+export type RemoteVaultDiagnosticEvent = {
+  operation: RemoteVaultOperation
+  outcome: 'started' | 'completed' | 'failed'
+  at: string
+  durationMs?: number
+  error?: string
+}
 export type RemoteVaultSyncPriority = 'none' | 'low' | 'medium' | 'high'
 export type RemoteVaultSyncKind = 'background' | 'manual'
 
@@ -12,6 +31,10 @@ export type RemoteVaultLease = {
   hostname: string
   createdAt: string
   expiresAt: string
+  leaseId?: string
+  ownerToken?: string
+  heartbeatAt?: string
+  fencingRevision?: number
 }
 
 export type RemoteVaultStatus = {
@@ -23,6 +46,7 @@ export type RemoteVaultStatus = {
   vaultId?: string | null
   deviceId: string
   revision?: number | null
+  localRevision?: number | null
   remoteUpdatedAt?: string | null
   remoteLastPulledAt?: string | null
   remoteLastPushedAt?: string | null
@@ -46,6 +70,9 @@ export type RemoteVaultSyncQueueState = {
   pendingRerun: boolean
   activeKind: RemoteVaultSyncKind | null
   longRunning: boolean
+  state: RemoteVaultSyncState
+  operation: RemoteVaultOperation | null
+  lastError: string | null
 }
 
 export type MarkRemoteVaultDirtyOptions = {
@@ -84,6 +111,9 @@ const DEFAULT_QUEUE_STATE: RemoteVaultSyncQueueState = {
   pendingRerun: false,
   activeKind: null,
   longRunning: false,
+  state: 'upToDate',
+  operation: null,
+  lastError: null,
 }
 
 const PRIORITY_ORDER: Record<RemoteVaultSyncPriority, number> = {
@@ -113,6 +143,50 @@ let suspendDepth = 0
 let hydrated = false
 let activePushPromise: Promise<unknown> | null = null
 let longRunningTimer: number | null = null
+let activeOperationPromise: Promise<unknown> | null = null
+const diagnosticEvents: RemoteVaultDiagnosticEvent[] = []
+
+export function getRemoteVaultDiagnosticEvents() {
+  return [...diagnosticEvents]
+}
+
+function recordDiagnostic(event: RemoteVaultDiagnosticEvent) {
+  diagnosticEvents.push(event)
+  if (diagnosticEvents.length > 100) diagnosticEvents.shift()
+}
+
+export async function runRemoteVaultOperation<T>(
+  operation: RemoteVaultOperation,
+  task: () => Promise<T>,
+  options?: { conflictOnError?: boolean },
+): Promise<T> {
+  while (activeOperationPromise) await activeOperationPromise.catch(() => undefined)
+  const startedAt = Date.now()
+  recordDiagnostic({ operation, outcome: 'started', at: new Date(startedAt).toISOString() })
+  let resolveOperation: () => void = () => undefined
+  activeOperationPromise = new Promise<void>((resolve) => { resolveOperation = resolve })
+  setRemoteVaultSyncQueueState({ ...currentRemoteVaultSyncQueueState, operation, lastError: null })
+  try {
+    const result = await task()
+    recordDiagnostic({ operation, outcome: 'completed', at: new Date().toISOString(), durationMs: Date.now() - startedAt })
+    return result
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    recordDiagnostic({ operation, outcome: 'failed', at: new Date().toISOString(), durationMs: Date.now() - startedAt, error: message })
+    if (options?.conflictOnError !== false) {
+      setRemoteVaultSyncQueueState({ ...currentRemoteVaultSyncQueueState, state: 'conflict', lastError: message })
+    }
+    throw error
+  } finally {
+    resolveOperation()
+    activeOperationPromise = null
+    setRemoteVaultSyncQueueState({ ...currentRemoteVaultSyncQueueState, operation: null })
+  }
+}
+
+export function setRemoteVaultSemanticState(state: RemoteVaultSyncState, lastError: string | null = null) {
+  setRemoteVaultSyncQueueState({ ...currentRemoteVaultSyncQueueState, state, lastError })
+}
 
 function cloneDirtyDomains(value?: Partial<RemoteVaultDirtyDomains>): RemoteVaultDirtyDomains {
   return {
@@ -262,6 +336,16 @@ export function getRemoteVaultStatusSnapshot() {
 
 export function setRemoteVaultStatus(status: RemoteVaultStatus | null | undefined) {
   currentRemoteVaultStatus = status ?? LOCAL_STATUS
+  const semanticState: RemoteVaultSyncState = currentRemoteVaultStatus.isOffline
+    ? 'offline'
+    : currentRemoteVaultStatus.mode === 'remoteReader' && currentRemoteVaultStatus.activeLease
+      ? 'waitingForWriter'
+      : currentRemoteVaultSyncQueueState.hasPendingSync
+        ? 'pendingPush'
+        : currentRemoteVaultSyncQueueState.state === 'conflict'
+          ? 'conflict'
+          : 'upToDate'
+  setRemoteVaultSyncQueueState({ ...currentRemoteVaultSyncQueueState, state: semanticState })
   statusListeners.forEach((listener) => listener(currentRemoteVaultStatus))
   if (canScheduleBackgroundPush()) {
     scheduleBackgroundPush()
@@ -324,6 +408,9 @@ export async function hydrateRemoteVaultSyncState() {
 
 export function assertRemoteWriteAllowed() {
   const status = currentRemoteVaultStatus
+  if (status.enabled && currentRemoteVaultSyncPhase === 'pulling') {
+    throw new Error('The remote vault is refreshing. Editing will be available as soon as it finishes.')
+  }
   if (!status.enabled || status.isWritable) return
   throw new Error(status.message || 'This remote vault is currently read-only.')
 }
@@ -345,6 +432,7 @@ export function markRemoteVaultDirty(options: MarkRemoteVaultDirtyOptions) {
     dirty,
     highestPriority: mergePriority(currentRemoteVaultSyncQueueState.highestPriority, options.priority),
     hasPendingSync: hasDirtyDomains(dirty),
+    state: 'pendingPush',
   }
 
   if (activePushPromise) {
@@ -407,10 +495,11 @@ export async function flushRemoteVaultSync(options?: { kind?: RemoteVaultSyncKin
   clearPendingPushTimer()
   const dirtySnapshot = cloneQueueState(currentRemoteVaultSyncQueueState)
   const finishActivity = beginSyncActivity('pushing', kind)
+  setRemoteVaultSemanticState('pendingPush')
 
   activePushPromise = (async () => {
     try {
-      const result = await invoke<{
+      const result = await runRemoteVaultOperation('push', () => invoke<{
         status?: RemoteVaultStatus
         message?: string
         copiedFileCount?: number
@@ -419,7 +508,7 @@ export async function flushRemoteVaultSync(options?: { kind?: RemoteVaultSyncKin
         input: {
           dirtyState: queueStateToPushInput(dirtySnapshot),
         },
-      })
+      }))
       if (result.status) {
         setRemoteVaultStatus(result.status)
       }
@@ -444,6 +533,7 @@ export async function flushRemoteVaultSync(options?: { kind?: RemoteVaultSyncKin
         })
         clearPersistedSyncState()
       }
+      setRemoteVaultSemanticState('upToDate')
       return normalizedResult
     } catch (error) {
       console.warn('Remote vault push failed:', error)
@@ -472,6 +562,7 @@ export async function flushRemoteVaultSync(options?: { kind?: RemoteVaultSyncKin
 export async function runRemoteVaultPull(options?: { kind?: RemoteVaultSyncKind }) {
   const kind = options?.kind ?? 'manual'
   const finishActivity = beginSyncActivity('pulling', kind)
+  setRemoteVaultSemanticState('pulling')
   try {
     const result = await invoke<{
       status?: RemoteVaultStatus
@@ -482,6 +573,7 @@ export async function runRemoteVaultPull(options?: { kind?: RemoteVaultSyncKind 
     if (result.status) {
       setRemoteVaultStatus(result.status)
     }
+    setRemoteVaultSemanticState('upToDate')
     return {
       message: result.message ?? '',
       copiedFileCount: result.copiedFileCount ?? 0,
