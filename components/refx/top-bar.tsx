@@ -11,6 +11,9 @@ import { useUiStore } from '@/lib/stores/ui-store'
 import { useT } from '@/lib/localization'
 import { cn } from '@/lib/utils'
 import { getRemoteVaultDisplayMessage } from '@/lib/remote-vault-copy'
+import * as repo from '@/lib/repositories/local-db'
+import { useRuntimeActions } from '@/lib/stores/runtime-store'
+import { toast } from 'sonner'
 import {
   getRemoteVaultStatusSnapshot,
   getRemoteVaultSyncPhaseSnapshot,
@@ -128,6 +131,8 @@ export function TopBar() {
     startCurrentPageTour,
   } = useAppTour()
   const inputRef = useRef<HTMLInputElement>(null)
+  const { refreshData } = useRuntimeActions()
+  const [isRequestingEditing, setIsRequestingEditing] = useState(false)
   const [remoteVaultStatus, setRemoteVaultStatus] = useState(getRemoteVaultStatusSnapshot)
   const [remoteVaultSyncPhase, setRemoteVaultSyncPhase] = useState(getRemoteVaultSyncPhaseSnapshot)
   const [remoteVaultSyncState, setRemoteVaultSyncState] = useState(getRemoteVaultSyncQueueSnapshot)
@@ -147,6 +152,25 @@ export function TopBar() {
   const remoteVaultBadge = remoteVaultStatus.enabled
     ? getRemoteVaultBadge(remoteVaultStatus, remoteVaultSyncPhase, remoteVaultSyncState, t)
     : null
+  const canRequestEditing = remoteVaultStatus.mode === 'remoteReader' && !remoteVaultStatus.isOffline
+
+  const requestEditingAccess = async () => {
+    if (!canRequestEditing || isRequestingEditing) return
+    setIsRequestingEditing(true)
+    try {
+      const status = await repo.requestRemoteVaultEditing()
+      await refreshData()
+      if (status.mode === 'remoteWriter') {
+        toast.success(t('settings.remoteVault.writerMessage'))
+      } else {
+        toast.info(getRemoteVaultDisplayMessage(t, status))
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('settings.remoteVault.actionFailed'))
+    } finally {
+      setIsRequestingEditing(false)
+    }
+  }
 
   return (
     <header className="flex h-16 items-center justify-between gap-4 border-b border-border/80 bg-background/92 px-5 backdrop-blur">
@@ -171,20 +195,23 @@ export function TopBar() {
         {remoteVaultBadge ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <div
+              <button
+                type="button"
                 className={cn(
-                  'relative flex h-9 w-9 items-center justify-center',
+                  'relative flex h-9 w-9 items-center justify-center rounded-full outline-none transition-transform focus-visible:ring-2 focus-visible:ring-ring/50',
+                  canRequestEditing ? 'hover:scale-105 active:scale-95' : 'cursor-default',
                 )}
-                aria-label={remoteVaultBadge.label}
-                role="status"
+                aria-label={canRequestEditing ? t('settings.remoteVault.requestEditing') : remoteVaultBadge.label}
+                aria-busy={isRequestingEditing}
+                onClick={() => { void requestEditingAccess() }}
               >
-                {remoteVaultBadge.loading ? (
+                {remoteVaultBadge.loading || isRequestingEditing ? (
                   <span
                     aria-hidden="true"
                     className="pointer-events-none absolute inset-[-3px] rounded-full border-2 border-sky-200/70 border-t-sky-500 animate-spin dark:border-sky-900/80 dark:border-t-sky-400"
                   />
                 ) : null}
-                {!remoteVaultBadge.loading && remoteVaultBadge.pending ? (
+                {!remoteVaultBadge.loading && !isRequestingEditing && remoteVaultBadge.pending ? (
                   <span
                     aria-hidden="true"
                     className="pointer-events-none absolute right-0 top-0 h-2.5 w-2.5 rounded-full border border-background bg-sky-500"
@@ -198,10 +225,15 @@ export function TopBar() {
                 >
                   <remoteVaultBadge.Icon className="h-4 w-4" aria-hidden="true" />
                 </span>
-              </div>
+              </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              {remoteVaultBadge.tooltip}
+              <div className="max-w-xs space-y-1">
+                <p>{remoteVaultBadge.tooltip}</p>
+                {canRequestEditing ? (
+                  <p className="font-medium text-foreground">{t('settings.remoteVault.requestEditing')}</p>
+                ) : null}
+              </div>
             </TooltipContent>
           </Tooltip>
         ) : null}

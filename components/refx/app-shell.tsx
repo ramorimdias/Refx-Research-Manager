@@ -2,7 +2,7 @@
 
 import { DragEvent, ReactNode, useEffect, useRef, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { FileUp, Lock, WifiOff } from 'lucide-react'
+import { FileUp } from 'lucide-react'
 import { AppSidebar } from './app-sidebar'
 import { TopBar } from './top-bar'
 import { CommandBar } from './command-bar'
@@ -11,9 +11,6 @@ import { getCurrentWindow, isTauri } from '@/lib/tauri/client'
 import { useRuntimeState } from '@/lib/stores/runtime-store'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/localization'
-import { getRemoteVaultDisplayMessage } from '@/lib/remote-vault-copy'
-import { Button } from '@/components/ui/button'
-import * as repo from '@/lib/repositories/local-db'
 
 interface AppShellProps {
   children: ReactNode
@@ -26,17 +23,10 @@ export function AppShell({ children }: AppShellProps) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const { isDesktopApp, remoteVaultStatus, refreshData } = useRuntimeState()
-  const showRemoteReadOnlyBanner = Boolean(
-    remoteVaultStatus?.enabled && (
-      remoteVaultStatus.mode === 'remoteOfflineCache'
-      || remoteVaultStatus.mode === 'remoteReader'
-    ),
-  )
+  const { isDesktopApp } = useRuntimeState()
   const isDetachedReaderWindow =
     pathname === '/reader/view' && searchParams.get('detached') === DETACHED_READER_QUERY_VALUE
   const [isDragActive, setIsDragActive] = useState(false)
-  const [isRequestingEditing, setIsRequestingEditing] = useState(false)
   const dragDepthRef = useRef(0)
 
   const queueDroppedPaths = (paths: string[]) => {
@@ -143,32 +133,6 @@ export function AppShell({ children }: AppShellProps) {
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
-        {showRemoteReadOnlyBanner ? (
-          <div className="flex items-center gap-2 border-b border-amber-200/80 bg-amber-50 px-4 py-2 text-sm text-amber-950">
-            {remoteVaultStatus?.mode === 'remoteOfflineCache' ? (
-              <WifiOff className="h-4 w-4 shrink-0" />
-            ) : (
-              <Lock className="h-4 w-4 shrink-0" />
-            )}
-            <span>{getRemoteVaultDisplayMessage(t, remoteVaultStatus)}</span>
-            {remoteVaultStatus?.mode === 'remoteReader' && !remoteVaultStatus.isOffline ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto h-7 bg-white/70"
-                disabled={isRequestingEditing}
-                onClick={() => {
-                  setIsRequestingEditing(true)
-                  void repo.requestRemoteVaultEditing()
-                    .then(() => refreshData())
-                    .finally(() => setIsRequestingEditing(false))
-                }}
-              >
-                {isRequestingEditing ? t('settings.remoteVault.requestingEditing') : t('settings.remoteVault.requestEditing')}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
         <main className="min-w-0 flex-1 overflow-auto bg-background" data-refx-main>
           <div key={pathname} className="refx-page-stage min-h-full">
             {children}

@@ -412,7 +412,15 @@ export function assertRemoteWriteAllowed() {
     throw new Error('The remote vault is refreshing. Editing will be available as soon as it finishes.')
   }
   if (!status.enabled || status.isWritable) return
-  throw new Error(status.message || 'This remote vault is currently read-only.')
+  if (status.isOffline) {
+    throw new Error('Your libraries are available from this device’s cache, but the shared vault is offline. Reconnect before making changes.')
+  }
+  const holder = status.activeLease?.hostname?.trim()
+  throw new Error(
+    holder
+      ? `You are connected in view-only mode because ${holder} currently has editing access. Request editing access before making changes.`
+      : 'You are connected in view-only mode. Request editing access before making changes.',
+  )
 }
 
 export function markRemoteVaultDirty(options: MarkRemoteVaultDirtyOptions) {
