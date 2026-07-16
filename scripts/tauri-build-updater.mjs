@@ -19,6 +19,17 @@ if (!('TAURI_SIGNING_PRIVATE_KEY_PASSWORD' in env)) {
 
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 
+const verifyApiConfig = spawnSync('node', ['scripts/verify-release-api-config.mjs'], {
+  cwd: repoRoot,
+  env,
+  stdio: 'inherit',
+  shell: true,
+})
+
+if ((verifyApiConfig.status ?? 1) !== 0) {
+  process.exit(verifyApiConfig.status ?? 1)
+}
+
 const buildIcons = spawnSync(pnpmCommand, ['tauri:icons'], {
   cwd: repoRoot,
   env,

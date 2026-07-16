@@ -64,7 +64,7 @@ import {
 } from '@/lib/services/document-enrichment-service'
 import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
 import { scanDocumentForDoiReferences } from '@/lib/services/document-doi-reference-service'
-import { extractLocalPdfMetadata, hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
+import { extractLocalPdfMetadata, extractNormalizedDoi, hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
 import { loadPdfJsModule } from '@/lib/services/document-processing'
 import { convertFileSrc, isTauri, open as openFileDialog, readFile } from '@/lib/tauri/client'
 import type { Document as RefxDocument, ReadingStage, WorkType, DocumentVisibility } from '@/lib/types'
@@ -1343,6 +1343,9 @@ function RealDocumentDetailPage({
       const settings = await loadOnlineMetadataEnrichmentSettings(isDesktopApp)
       const trimmedSearchValue = searchValue.trim()
       const trimmedAuthorSearchValue = authorSearchValue.trim()
+      if (searchField === 'doi' && !extractNormalizedDoi(trimmedSearchValue || doi.trim() || document.doi)) {
+        throw new Error('Enter a complete DOI, including the suffix after the slash (for example, 10.1234/article-123).')
+      }
       const candidates = await findDocumentMetadataCandidates(
         buildDocumentMetadataSeed({
           authors: JSON.stringify(

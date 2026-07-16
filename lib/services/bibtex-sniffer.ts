@@ -278,6 +278,7 @@ async function fetchJsonWithTimeout(
     provider?: string
     queueOnRefusal?: boolean
     timeoutMs?: number
+    notFoundAsNull?: boolean
   },
 ) {
   const provider = options?.provider ?? new URL(url).hostname
@@ -293,6 +294,10 @@ async function fetchJsonWithTimeout(
           ...(options?.headers ?? {}),
         },
       })
+
+      if (response.status === 404 && options?.notFoundAsNull) {
+        return null
+      }
 
       if (!response.ok) {
         const retryAfter = response.headers.get('retry-after')
@@ -344,7 +349,10 @@ function appendCrossrefContactEmail(url: string, config?: CrossrefLookupConfig) 
 
 async function fetchCrossrefByDoi(doi: string, config?: CrossrefLookupConfig): Promise<CrossrefWork | null> {
   const encoded = encodeURIComponent(doi)
-  const result = await fetchJsonWithTimeout(appendCrossrefContactEmail(`https://api.crossref.org/works/${encoded}`, config))
+  const result = await fetchJsonWithTimeout(
+    appendCrossrefContactEmail(`https://api.crossref.org/works/${encoded}`, config),
+    { provider: 'Crossref', notFoundAsNull: true },
+  )
   return result?.message ?? null
 }
 
@@ -374,7 +382,12 @@ async function fetchSemanticScholarByDoi(
   const encoded = encodeURIComponent(`DOI:${doi}`)
   return fetchJsonWithTimeout(
     `https://api.semanticscholar.org/graph/v1/paper/${encoded}?fields=${fields}`,
-    { headers: semanticScholarHeaders(config), provider: 'Semantic Scholar', queueOnRefusal: config?.queueOnRefusal },
+    {
+      headers: semanticScholarHeaders(config),
+      provider: 'Semantic Scholar',
+      queueOnRefusal: config?.queueOnRefusal,
+      notFoundAsNull: true,
+    },
   ) as Promise<SemanticScholarPaper | null>
 }
 
@@ -446,12 +459,14 @@ export async function fetchOpenAlexByQuery(title: string, author?: string): Prom
 }
 
 function normalizeMetadata(metadata: SniffedPdfMetadata): SniffedPdfMetadata {
-  if (!metadata.title) return metadata
+  const doi = extractNormalizedDoi(metadata.doi)
+  if (!metadata.title) return { ...metadata, doi }
   const authors = metadata.authors ?? []
   const citationKey = metadata.citationKey || citationKeyFor(metadata.title, authors, metadata.year)
 
   return {
     ...metadata,
+    doi,
     authors,
     citationKey,
     bibtex: metadata.bibtex || bibtexFor({ ...metadata, citationKey, authors, title: metadata.title }),

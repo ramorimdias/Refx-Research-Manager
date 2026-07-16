@@ -38,7 +38,9 @@ jobs:
           NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY }}
           NEXT_PUBLIC_REFX_USAGE_TELEMETRY_URL: ${{ vars.NEXT_PUBLIC_REFX_USAGE_TELEMETRY_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: pnpm exec tauri build --bundles app --target x86_64-apple-darwin --no-sign
+        run: |
+          node scripts/verify-release-api-config.mjs
+          pnpm exec tauri build --bundles app --target x86_64-apple-darwin --no-sign
 
       - name: Package Intel app
         shell: bash
