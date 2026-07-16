@@ -3,6 +3,8 @@ import Script from 'next/script'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AppShell } from '@/components/refx/app-shell'
 import { AppProvider } from '@/components/refx/app-provider'
+import { Toaster } from '@/components/ui/sonner'
+import { InteractionFeedback } from '@/components/refx/interaction-feedback'
 import './globals.css'
 
 const BOOT_MONITOR_SCRIPT = `
@@ -130,9 +132,16 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AppProvider>
+            <InteractionFeedback />
             <AppShell>
               {children}
             </AppShell>
+            <Toaster
+              position="bottom-right"
+              closeButton
+              richColors
+              toastOptions={{ duration: 3200 }}
+            />
           </AppProvider>
         </ThemeProvider>
       </body>

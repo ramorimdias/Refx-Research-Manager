@@ -3124,7 +3124,7 @@ dependencies = [
 
 [[package]]
 name = "refx"
-version = "0.9.7"
+version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",

@@ -710,6 +710,8 @@ function RealReaderViewPage() {
       void repo.updateDocumentMetadata(id, {
         lastReadPage: page,
         lastOpenedAt: new Date().toISOString(),
+      }).catch((error) => {
+        console.warn('Could not save reader progress:', error)
       })
     }, 150)
 

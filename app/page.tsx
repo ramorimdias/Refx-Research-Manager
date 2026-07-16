@@ -1035,13 +1035,13 @@ export default function HomePage() {
       </div>
 
       <Dialog open={isCustomizeDialogOpen} onOpenChange={setIsCustomizeDialogOpen}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="grid max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0 sm:max-w-2xl">
+          <DialogHeader className="border-b border-border/60 px-6 pb-4 pt-6 pr-12">
             <DialogTitle>{t('home.customize')}</DialogTitle>
             <DialogDescription>{t('home.customizeDescription')}</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6">
+          <div className="space-y-6 overflow-y-auto overscroll-contain px-6 py-1 pb-5">
             <div className="space-y-3">
               <div className="text-sm font-medium">{t('home.layout')}</div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1120,7 +1120,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="border-t border-border/60 bg-background/95 px-6 py-4 backdrop-blur-sm">
             <Button type="button" onClick={() => setIsCustomizeDialogOpen(false)}>
               {t('home.done')}
             </Button>

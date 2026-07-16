@@ -4,6 +4,8 @@ import { invoke } from '@/lib/tauri/client'
 import {
   assertRemoteWriteAllowed,
   flushRemoteVaultSync,
+  getRemoteVaultStatusSnapshot,
+  getRemoteVaultSyncPhaseSnapshot,
   getRemoteVaultSyncQueueSnapshot,
   markRemoteVaultDirty,
   runRemoteVaultOperation,
@@ -592,6 +594,12 @@ export async function updateDocumentMetadata(id: string, input: DbUpdateDocument
     changedKeys.length > 0
     && changedKeys.every((key) => key === 'lastOpenedAt' || key === 'lastReadPage')
   )
+
+  const remoteStatus = getRemoteVaultStatusSnapshot()
+  if (isReadProgressOnly && remoteStatus.enabled && !remoteStatus.isWritable) {
+    if (getRemoteVaultSyncPhaseSnapshot() !== 'idle') return null
+    return invoke<DbDocument | null>('update_document_metadata', { id, input })
+  }
 
   const isMediumPriority = changedKeys.some((key) => [
     'searchText',

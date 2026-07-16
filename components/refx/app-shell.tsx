@@ -169,8 +169,10 @@ export function AppShell({ children }: AppShellProps) {
             ) : null}
           </div>
         ) : null}
-        <main className="min-w-0 flex-1 overflow-auto bg-background">
-          {children}
+        <main className="min-w-0 flex-1 overflow-auto bg-background" data-refx-main>
+          <div key={pathname} className="refx-page-stage min-h-full">
+            {children}
+          </div>
         </main>
       </div>
       {isDragActive ? (
