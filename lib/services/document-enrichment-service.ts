@@ -17,7 +17,7 @@ import type { DocumentMetadataProvenanceEntry, MetadataFieldSource } from '@/lib
 
 export type OnlineMetadataEnrichmentSettings = Pick<
   StoredAppSettings,
-  'crossrefContactEmail' | 'semanticScholarApiKey' | 'semanticScholarApiMode'
+  'crossrefContactEmail' | 'semanticScholarApiKey' | 'semanticScholarApiMode' | 'semanticScholarRetryCount'
 >
 
 export type DocumentMetadataEnrichmentResult = {
@@ -250,6 +250,7 @@ export async function loadOnlineMetadataEnrichmentSettings(isDesktopApp: boolean
     crossrefContactEmail: settings.crossrefContactEmail,
     semanticScholarApiKey: getResolvedSemanticScholarApiKey(settings),
     semanticScholarApiMode: settings.semanticScholarApiMode,
+    semanticScholarRetryCount: settings.semanticScholarRetryCount,
   } satisfies OnlineMetadataEnrichmentSettings
 }
 
@@ -285,6 +286,8 @@ export async function enrichDocumentMetadataOnline(
     const semanticScholarMatch = await lookupSemanticScholarMetadata(nextSeed, {
       apiKey: settings.semanticScholarApiKey,
       queueOnRefusal: settings.semanticScholarApiMode === 'builtin',
+      retryCount: Number.parseInt(settings.semanticScholarRetryCount, 10) || 0,
+      retryDelayMs: 1000,
     })
 
     if (semanticScholarMatch) {
@@ -317,6 +320,8 @@ export async function findDocumentMetadataCandidates(
     const semanticScholarMatches = await lookupSemanticScholarMetadataCandidates(seed, {
       apiKey: settings.semanticScholarApiKey,
       queueOnRefusal: settings.semanticScholarApiMode === 'builtin',
+      retryCount: Number.parseInt(settings.semanticScholarRetryCount, 10) || 0,
+      retryDelayMs: 1000,
     })
 
     candidates.push(...semanticScholarMatches.slice(0, 4).map(toMetadataCandidate))

@@ -23,6 +23,18 @@ test('leaves an ambiguous document as other', () => {
   assert.equal(classifyPdfWorkType({ pages: [page('Notes', 612, 792)] }).workType, 'other')
 })
 
+test('does not classify a research article as internal from ordinary usage of internal', () => {
+  const result = classifyPdfWorkType({
+    pages: [page('Abstract Introduction Methods Results Discussion References Internal validity was assessed carefully.', 612, 792)],
+  })
+  assert.equal(result.workType, 'journal_article')
+})
+
+test('requires an explicit confidentiality marker for a single-page internal document', () => {
+  const result = classifyPdfWorkType({ pages: [page('Internal use only. Do not distribute.', 612, 792)] })
+  assert.equal(result.workType, 'internal_document')
+})
+
 test('requires DOI only for actual paper work types', () => {
   assert.equal(requiresDoiForWorkType('journal_article'), true)
   assert.equal(requiresDoiForWorkType('conference_paper'), true)

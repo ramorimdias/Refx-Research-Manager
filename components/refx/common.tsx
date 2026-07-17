@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode } from 'react'
+import { ReactNode, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { LibraryMetadataState, MetadataStatus, OcrStatus, ReadingStage } from '@/lib/types'
@@ -146,8 +146,14 @@ export function StarRating({
   onChange?: (rating: number) => void
   readonly?: boolean
 }) {
+  const [hoverRating, setHoverRating] = useState<number | null>(null)
+  const previewRating = hoverRating ?? rating
+
   return (
-    <div className="flex gap-0.5">
+    <div
+      className="flex gap-0.5"
+      onMouseLeave={() => setHoverRating(null)}
+    >
       {[1, 2, 3, 4, 5].map((star) => (
         <button
           key={star}
@@ -157,9 +163,15 @@ export function StarRating({
             event.stopPropagation()
             onChange?.(star === rating ? 0 : star)
           }}
+          onMouseEnter={() => {
+            if (!readonly) setHoverRating(star)
+          }}
+          onFocus={() => {
+            if (!readonly) setHoverRating(star)
+          }}
           className={cn(
             'text-base leading-none transition-colors',
-            star <= rating ? 'text-amber-400' : 'text-muted-foreground/30',
+            star <= previewRating ? 'text-amber-400' : 'text-muted-foreground/30',
             !readonly && 'cursor-pointer hover:text-amber-400',
             readonly && 'cursor-default',
           )}

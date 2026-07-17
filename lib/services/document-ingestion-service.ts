@@ -688,6 +688,7 @@ async function runOnlineMetadataEnrichmentStage(
         crossrefContactEmail: settings.crossrefContactEmail,
         semanticScholarApiKey: getResolvedSemanticScholarApiKey(settings),
         semanticScholarApiMode: settings.semanticScholarApiMode,
+        semanticScholarRetryCount: settings.semanticScholarRetryCount,
       },
     )
 

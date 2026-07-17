@@ -32,6 +32,8 @@ export type CrossrefLookupConfig = {
 export type SemanticScholarLookupConfig = {
   apiKey?: string
   queueOnRefusal?: boolean
+  retryCount?: number
+  retryDelayMs?: number
 }
 
 export async function testCrossrefConnection(config?: CrossrefLookupConfig) {
@@ -51,6 +53,8 @@ export async function testSemanticScholarConnection(config?: SemanticScholarLook
       headers: semanticScholarHeaders(config),
       provider: 'Semantic Scholar',
       queueOnRefusal: config?.queueOnRefusal,
+      retryCount: config?.retryCount,
+      retryDelayMs: config?.retryDelayMs,
     },
   ) as { data?: unknown[] } | null
 
@@ -279,6 +283,8 @@ async function fetchJsonWithTimeout(
     queueOnRefusal?: boolean
     timeoutMs?: number
     notFoundAsNull?: boolean
+    retryCount?: number
+    retryDelayMs?: number
   },
 ) {
   const provider = options?.provider ?? new URL(url).hostname
@@ -318,8 +324,21 @@ async function fetchJsonWithTimeout(
     }
   }
 
+  const retryCount = Math.max(0, Math.min(10, Math.trunc(options?.retryCount ?? 0)))
+  const retryDelayMs = Math.max(0, options?.retryDelayMs ?? 1000)
+
   try {
-    return await request()
+    let lastError: unknown
+    for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+      try {
+        return await request()
+      } catch (error) {
+        lastError = error
+        if (attempt >= retryCount || !isTransientMetadataError(error)) throw error
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs))
+      }
+    }
+    throw lastError
   } catch (error) {
     if (!options?.queueOnRefusal || !(error instanceof Error) || !error.message.includes('refused the metadata request')) {
       throw error
@@ -332,6 +351,13 @@ async function fetchJsonWithTimeout(
       throw new Error(`${provider} refused the initial request, so it was queued and retried. The queued request also failed: ${reason}`)
     }
   }
+}
+
+function isTransientMetadataError(error: unknown) {
+  if (!(error instanceof Error)) return false
+  if (error.message.includes('timed out') || error.message.includes('could not be reached')) return true
+  const status = Number(error.message.match(/HTTP (\d{3})/)?.[1])
+  return status === 408 || status === 425 || status === 429 || status >= 500
 }
 
 function isAbortLikeError(error: unknown) {
@@ -387,6 +413,8 @@ async function fetchSemanticScholarByDoi(
       provider: 'Semantic Scholar',
       queueOnRefusal: config?.queueOnRefusal,
       notFoundAsNull: true,
+      retryCount: config?.retryCount,
+      retryDelayMs: config?.retryDelayMs,
     },
   ) as Promise<SemanticScholarPaper | null>
 }
@@ -399,7 +427,13 @@ async function fetchSemanticScholarByQuery(
   const fields = encodeURIComponent('title,authors,year,abstract,citationCount,fieldsOfStudy,tldr,externalIds')
   const result = await fetchJsonWithTimeout(
     `https://api.semanticscholar.org/graph/v1/paper/search?query=${query}&limit=4&fields=${fields}`,
-    { headers: semanticScholarHeaders(config), provider: 'Semantic Scholar', queueOnRefusal: config?.queueOnRefusal },
+    {
+      headers: semanticScholarHeaders(config),
+      provider: 'Semantic Scholar',
+      queueOnRefusal: config?.queueOnRefusal,
+      retryCount: config?.retryCount,
+      retryDelayMs: config?.retryDelayMs,
+    },
   ) as { data?: SemanticScholarPaper[] } | null
 
   return result?.data?.slice(0, 4) ?? []

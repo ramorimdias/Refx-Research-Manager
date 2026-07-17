@@ -8,7 +8,8 @@ import type { DiscoverMode, DiscoverWork } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const DEFAULT_CANVAS_WIDTH = 640
-const DEFAULT_CANVAS_HEIGHT = 620
+const DEFAULT_CANVAS_HEIGHT = 420
+const MIN_CANVAS_HEIGHT = 240
 const BUBBLE_RADIUS = 24
 const NODE_SIZE = BUBBLE_RADIUS * 2
 const BUBBLE_OUTER_OUTLINE_WIDTH = 4
@@ -301,7 +302,7 @@ export function DiscoverMap({
 
     const updateSize = () => {
       const nextWidth = Math.max(Math.floor(element.clientWidth), 320)
-      const nextHeight = Math.max(Math.floor(element.clientHeight), DEFAULT_CANVAS_HEIGHT)
+      const nextHeight = Math.max(Math.floor(element.clientHeight), MIN_CANVAS_HEIGHT)
       setCanvasSize((current) =>
         current.width === nextWidth && current.height === nextHeight
           ? current
@@ -544,7 +545,7 @@ export function DiscoverMap({
   }
 
   return (
-    <div ref={containerRef} className="relative h-full min-h-[620px] overflow-hidden rounded-xl border bg-card">
+    <div ref={containerRef} className="relative h-full min-h-0 overflow-hidden rounded-xl border bg-card">
       <div
         className={cn(
           'absolute inset-0 transform-gpu will-change-transform',

@@ -192,6 +192,27 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
+        {canRequestEditing ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="rounded-full whitespace-nowrap"
+            disabled={isRequestingEditing}
+            aria-busy={isRequestingEditing}
+            onClick={() => { void requestEditingAccess() }}
+          >
+            {isRequestingEditing ? (
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <PencilLine className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            {isRequestingEditing
+              ? t('settings.remoteVault.requestingEditing')
+              : t('settings.remoteVault.requestEditing')}
+          </Button>
+        ) : null}
+
         {remoteVaultBadge ? (
           <Tooltip>
             <TooltipTrigger asChild>

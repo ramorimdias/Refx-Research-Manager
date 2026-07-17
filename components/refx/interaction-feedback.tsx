@@ -21,26 +21,34 @@ export function InteractionFeedback() {
       if (!target) return
 
       const bounds = target.getBoundingClientRect()
-      const diameter = Math.max(bounds.width, bounds.height) * 1.7
-      const ripple = document.createElement('span')
-      ripple.className = 'refx-press-ripple'
-      ripple.style.width = `${diameter}px`
-      ripple.style.height = `${diameter}px`
-      ripple.style.left = `${event.clientX - bounds.left - diameter / 2}px`
-      ripple.style.top = `${event.clientY - bounds.top - diameter / 2}px`
-      target.classList.add('refx-press-target')
-      if (window.getComputedStyle(target).position === 'static') target.classList.add('refx-press-relative')
-      target.appendChild(ripple)
-      ripple.addEventListener('animationend', () => {
-        ripple.remove()
-        if (!target.querySelector('.refx-press-ripple')) {
-          target.classList.remove('refx-press-target', 'refx-press-relative')
-        }
-      }, { once: true })
+      const radius = Math.hypot(
+        Math.max(event.clientX - bounds.left, bounds.right - event.clientX),
+        Math.max(event.clientY - bounds.top, bounds.bottom - event.clientY),
+      )
+      target.style.setProperty('--refx-ripple-x', `${event.clientX - bounds.left}px`)
+      target.style.setProperty('--refx-ripple-y', `${event.clientY - bounds.top}px`)
+      target.style.setProperty('--refx-ripple-max', `${radius}px`)
+      if (window.getComputedStyle(target).position === 'static') {
+        target.classList.add('refx-ripple-host')
+      }
+      target.classList.remove('refx-ripple-active')
+      void target.offsetWidth
+      target.classList.add('refx-ripple-active')
+    }
+
+    const clearRipple = (event: AnimationEvent) => {
+      const target = event.target
+      if (target instanceof HTMLElement && event.animationName === 'refx-contained-ripple') {
+        target.classList.remove('refx-ripple-active')
+      }
     }
 
     document.addEventListener('pointerdown', handlePointerDown, { passive: true })
-    return () => document.removeEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('animationend', clearRipple)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('animationend', clearRipple)
+    }
   }, [])
 
   return null

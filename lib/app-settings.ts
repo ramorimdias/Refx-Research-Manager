@@ -48,6 +48,7 @@ export type StoredAppSettings = {
   crossrefContactEmail: string
   semanticScholarApiMode: 'builtin' | 'custom'
   semanticScholarApiKey: string
+  semanticScholarRetryCount: string
   aiProvider: AiProvider
   aiModel: string
   googleApiKey: string
@@ -91,6 +92,7 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   crossrefContactEmail: '',
   semanticScholarApiMode: 'builtin',
   semanticScholarApiKey: '',
+  semanticScholarRetryCount: '3',
   aiProvider: 'local',
   aiModel: '',
   googleApiKey: '',
@@ -206,6 +208,12 @@ function parseStoredSemanticScholarApiKey(value: string | undefined): string {
   return parseValue(value, '').trim()
 }
 
+function normalizeSemanticScholarRetryCount(value: unknown): string {
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed)) return DEFAULT_APP_SETTINGS.semanticScholarRetryCount
+  return String(Math.max(0, Math.min(5, Math.trunc(parsed))))
+}
+
 function resolveSemanticScholarApiMode(
   modeValue: string | undefined,
   keyValue: string | undefined,
@@ -282,6 +290,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
         typeof parsed.semanticScholarApiKey === 'string' ? parsed.semanticScholarApiKey : undefined,
       ),
       semanticScholarApiKey: parsed.semanticScholarApiKey?.trim() ?? DEFAULT_APP_SETTINGS.semanticScholarApiKey,
+      semanticScholarRetryCount: normalizeSemanticScholarRetryCount(parsed.semanticScholarRetryCount),
       aiProvider,
       aiModel: validateAiModel(aiProvider, typeof parsed.aiModel === 'string' ? parsed.aiModel : parsed.geminiModel),
       googleApiKey,
@@ -341,6 +350,9 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     crossrefContactEmail: parseValue(stored.crossrefContactEmail, DEFAULT_APP_SETTINGS.crossrefContactEmail),
     semanticScholarApiMode: resolveSemanticScholarApiMode(stored.semanticScholarApiMode, stored.semanticScholarApiKey),
     semanticScholarApiKey: parseStoredSemanticScholarApiKey(stored.semanticScholarApiKey),
+    semanticScholarRetryCount: normalizeSemanticScholarRetryCount(
+      parseValue(stored.semanticScholarRetryCount, DEFAULT_APP_SETTINGS.semanticScholarRetryCount),
+    ),
     aiProvider,
     aiModel: validateAiModel(aiProvider, parseValue(stored.aiModel, parseValue(stored.geminiModel, DEFAULT_APP_SETTINGS.geminiModel))),
     googleApiKey,
@@ -404,6 +416,7 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     crossrefContactEmail: JSON.stringify(settings.crossrefContactEmail),
     semanticScholarApiMode: JSON.stringify(settings.semanticScholarApiMode),
     semanticScholarApiKey: JSON.stringify(settings.semanticScholarApiKey),
+    semanticScholarRetryCount: JSON.stringify(settings.semanticScholarRetryCount),
     aiProvider: JSON.stringify(settings.aiProvider),
     aiModel: JSON.stringify(settings.aiModel),
     googleApiKey: JSON.stringify(settings.googleApiKey),

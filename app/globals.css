@@ -36,9 +36,30 @@
   to { transform: translateX(310%); }
 }
 
-@keyframes refx-press-ripple {
-  from { opacity: 0.16; transform: scale(0); }
-  to { opacity: 0; transform: scale(1); }
+@property --refx-ripple-radius {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --refx-ripple-opacity {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+@keyframes refx-contained-ripple {
+  from {
+    --refx-ripple-radius: 0px;
+    --refx-ripple-opacity: 0.13;
+  }
+  62% {
+    --refx-ripple-opacity: 0.1;
+  }
+  to {
+    --refx-ripple-radius: var(--refx-ripple-max);
+    --refx-ripple-opacity: 0;
+  }
 }
 
 .refx-type-cursor {
@@ -452,22 +473,37 @@
     transform: translateY(0) scale(0.995);
   }
 
-  .refx-press-target {
-    isolation: isolate;
-    overflow: hidden;
-  }
-
-  .refx-press-relative {
+  .refx-ripple-host {
     position: relative;
   }
 
-  .refx-press-ripple {
+  .refx-ripple-active {
+    overflow: clip;
+  }
+
+  .refx-ripple-active::after {
     position: absolute;
-    z-index: 0;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    background: color-mix(in oklab, currentColor calc(var(--refx-ripple-opacity) * 100%), transparent);
+    clip-path: circle(var(--refx-ripple-radius) at var(--refx-ripple-x) var(--refx-ripple-y));
+    content: '';
     pointer-events: none;
-    border-radius: 9999px;
-    background: currentColor;
-    animation: refx-press-ripple 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    animation: refx-contained-ripple 400ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .refx-table-scrollbar-source [data-slot='table-container'] {
+    scrollbar-width: none;
+  }
+
+  .refx-table-scrollbar-source [data-slot='table-container']::-webkit-scrollbar {
+    height: 0;
+  }
+
+  .refx-library-scroll-area:hover .refx-docked-scrollbar,
+  .refx-library-scroll-area:focus-within .refx-docked-scrollbar {
+    opacity: 1;
   }
 
   .surface-panel {

@@ -34,6 +34,7 @@ export function classifyPdfWorkType(input: PdfWorkTypeInput): { workType: WorkTy
   const bookTerms = countMatches(text, /\b(isbn|edition|published by|table of contents|chapter 1)\b/g)
   const internalTerms = countMatches(text, /\b(internal|confidential|company confidential|do not distribute)\b/g)
   const conferenceTerms = countMatches(text, /\b(conference|symposium|proceedings|annual meeting)\b/g)
+  const explicitInternalMarking = /\b(company confidential|do not distribute|internal use(?: only)?|internal (?:document|memo|report|brief)|proprietary and confidential|restricted circulation)\b/.test(text)
   const signals: string[] = []
 
   let workType: WorkType = 'other'
@@ -54,8 +55,8 @@ export function classifyPdfWorkType(input: PdfWorkTypeInput): { workType: WorkTy
     if (avgWords < 90) signals.push('Low text density per page')
     if (largeTextRatio > 0.18) signals.push('Prominent title-sized text')
     if (internalTerms > 0) signals.push('Contains internal or confidential markings')
-  } else if (internalTerms > 0) {
-    workType = 'internal_document'; confidence = 0.82; signals.push('Internal or confidential wording')
+  } else if (explicitInternalMarking) {
+    workType = 'internal_document'; confidence = 0.88; signals.push('Internal or confidential wording')
   } else if (paperSections >= 3) {
     workType = conferenceTerms ? 'conference_paper' : 'journal_article'
     confidence = conferenceTerms ? 0.84 : 0.82

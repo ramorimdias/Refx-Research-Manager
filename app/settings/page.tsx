@@ -1405,6 +1405,30 @@ export default function SettingsPage() {
                     ) : null}
 
                     <div>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-medium">Automatic retries</Label>
+                        <SettingsHelp content="Retry temporary Semantic Scholar connection, timeout, rate-limit, and server failures. Retries are spaced one second apart; permanent errors such as an invalid key or missing paper are not retried." />
+                      </div>
+                      <Select
+                        value={settings.semanticScholarRetryCount}
+                        onValueChange={(value) => updateSettings('semanticScholarRetryCount', value)}
+                      >
+                        <SelectTrigger className="mt-2">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">Off</SelectItem>
+                          <SelectItem value="1">1 retry</SelectItem>
+                          <SelectItem value="2">2 retries</SelectItem>
+                          <SelectItem value="3">3 retries (recommended)</SelectItem>
+                          <SelectItem value="4">4 retries</SelectItem>
+                          <SelectItem value="5">5 retries</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="mt-2 text-xs text-muted-foreground">One second between attempts.</p>
+                    </div>
+
+                    <div>
                       <Button
                         type="button"
                         variant="outline"
@@ -1418,6 +1442,8 @@ export default function SettingsPage() {
                           () => testSemanticScholarConnection({
                             apiKey: getResolvedSemanticScholarApiKey(settings),
                             queueOnRefusal: settings.semanticScholarApiMode === 'builtin',
+                            retryCount: Number.parseInt(settings.semanticScholarRetryCount, 10) || 0,
+                            retryDelayMs: 1000,
                           }),
                           `Semantic Scholar ${settings.semanticScholarApiMode === 'builtin' ? 'built-in access' : 'API key'} is working.`,
                         )}

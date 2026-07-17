@@ -552,7 +552,7 @@ function DiscoverPageContent() {
         <div className="rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-500/40 dark:bg-red-950/40 dark:text-red-200">{error}</div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_360px]">
+      <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[340px_minmax(0,1fr)_360px] xl:grid-rows-[minmax(0,1fr)]">
         <DiscoverLeftPane
           label={leftPaneLabel}
           step={currentStep}
@@ -560,7 +560,7 @@ function DiscoverPageContent() {
           showFilterHint={showFilterHint}
           onFilterHintClick={focusCurrentStepFilters}
         />
-        <div className="min-h-0 overflow-hidden">
+        <div className="h-full min-h-0 overflow-hidden">
           <DiscoverMap
             sourceWork={activeStepIndex === -1 ? sourceWork : currentStep?.sourceWork ?? sourceWork}
             items={currentItems}

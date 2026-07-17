@@ -745,6 +745,11 @@ function RealDocumentDetailPage({
     document?.doi,
     document?.isbn,
     document?.publisher,
+    document?.workType,
+    document?.workTypeDetection?.source,
+    document?.workTypeDetection?.confidence,
+    document?.workTypeDetection?.locked,
+    document?.workTypeDetection?.signals?.join('|'),
     document?.citationKey,
     document?.abstract,
     document?.coverImagePath,
@@ -1091,6 +1096,7 @@ function RealDocumentDetailPage({
       const resolvedPath = await repo.ensureDocumentPdfInStorage(document.id)
       if (!resolvedPath) throw new Error('The PDF file is not available in document storage.')
       const metadata = await extractLocalPdfMetadata(resolvedPath, document.sourcePath ?? resolvedPath)
+      if (!metadata.work) throw new Error('Could not classify this PDF. Check that its text can be extracted and try again.')
       await applyFetchedMetadataCandidate(document.id, metadata, 'replace_unlocked')
     } finally {
       setIsRedetectingWork(false)

@@ -407,6 +407,9 @@ export default function LibrariesPage() {
   const [duplicateScanError, setDuplicateScanError] = useState<string>('')
   const [mergingDuplicateGroupId, setMergingDuplicateGroupId] = useState<string | null>(null)
   const bookCoverQrSectionRef = useRef<HTMLDivElement | null>(null)
+  const tableViewportRef = useRef<HTMLDivElement | null>(null)
+  const tableHorizontalScrollRef = useRef<HTMLDivElement | null>(null)
+  const [tableContentWidth, setTableContentWidth] = useState(0)
 
   const libraryUiCopy = useMemo(() => {
     switch (locale) {
@@ -515,6 +518,44 @@ export default function LibrariesPage() {
       setCurrentPage(totalPages)
     }
   }, [currentPage, setCurrentPage, totalPages])
+
+  useEffect(() => {
+    if (viewMode !== 'table') {
+      setTableContentWidth(0)
+      return
+    }
+
+    const viewport = tableViewportRef.current?.querySelector<HTMLElement>('[data-slot="table-container"]')
+    if (!viewport) return
+
+    const updateWidth = () => setTableContentWidth(viewport.scrollWidth)
+    updateWidth()
+    const table = viewport.querySelector<HTMLElement>('[data-slot="table"]')
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateWidth) : null
+    observer?.observe(viewport)
+    if (table) observer?.observe(table)
+    const mutationObserver = typeof MutationObserver !== 'undefined'
+      ? new MutationObserver(updateWidth)
+      : null
+    mutationObserver?.observe(viewport, { subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
+    window.addEventListener('resize', updateWidth)
+    return () => {
+      observer?.disconnect()
+      mutationObserver?.disconnect()
+      window.removeEventListener('resize', updateWidth)
+    }
+  }, [paginatedDocuments.length, viewMode])
+
+  const syncTableHorizontalScroll = (source: 'table' | 'bar') => {
+    const tableViewport = tableViewportRef.current?.querySelector<HTMLElement>('[data-slot="table-container"]')
+    const horizontalBar = tableHorizontalScrollRef.current
+    if (!tableViewport || !horizontalBar) return
+    if (source === 'table') {
+      horizontalBar.scrollLeft = tableViewport.scrollLeft
+    } else {
+      tableViewport.scrollLeft = horizontalBar.scrollLeft
+    }
+  }
 
   useEffect(() => {
     const stored = window.sessionStorage.getItem('refx-libraries-filters-collapsed')
@@ -945,10 +986,10 @@ export default function LibrariesPage() {
 
   return (
     <>
-      <div className="flex h-full bg-muted/65">
+      <div className="flex h-[calc(100dvh-4rem)] min-h-0 overflow-hidden bg-muted/65">
         {!filtersCollapsed && <FilterPanel />}
 
-        <div className="flex-1 flex min-w-0 flex-col bg-transparent">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
           <div
             className="flex items-center justify-between gap-4 border-b border-transparent bg-muted/65 px-5 py-4 backdrop-blur"
             data-tour-id="libraries-toolbar"
@@ -1122,7 +1163,7 @@ export default function LibrariesPage() {
 
           <div
             className={cn(
-              'relative flex-1 overflow-x-auto overflow-y-scroll px-5 pb-0 pt-5 transition-colors',
+              'refx-library-scroll-area relative flex min-h-0 flex-1 flex-col overflow-hidden px-5 pb-0 pt-5 transition-colors',
               isImporting && 'bg-muted/20',
             )}
             style={{ scrollbarGutter: 'stable' }}
@@ -1164,7 +1205,7 @@ export default function LibrariesPage() {
                 </div>
               </div>
             )}
-            <div className="flex min-h-full flex-col">
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               <div className="flex-1">
                 {visibleLibraryDocuments.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -1186,7 +1227,13 @@ export default function LibrariesPage() {
                   </div>
                 ) : viewMode === 'table' ? (
                   <div className={cn('transition-opacity', isImporting && 'opacity-60')}>
-                    <DocumentTable documents={paginatedDocuments} ephemeralFlagsById={documentFlagsById} />
+                    <div
+                      ref={tableViewportRef}
+                      className="refx-table-scrollbar-source overflow-hidden"
+                      onScrollCapture={() => syncTableHorizontalScroll('table')}
+                    >
+                      <DocumentTable documents={paginatedDocuments} ephemeralFlagsById={documentFlagsById} />
+                    </div>
                   </div>
                 ) : viewMode === 'grid' ? (
                   <div className={cn('grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4', isImporting && 'opacity-60')}>
@@ -1202,11 +1249,24 @@ export default function LibrariesPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {viewMode === 'table' && tableContentWidth > 0 ? (
+              <div
+                ref={tableHorizontalScrollRef}
+                className="refx-docked-scrollbar h-3 shrink-0 overflow-x-auto rounded-full bg-muted/90 opacity-0 shadow-sm transition-opacity duration-150"
+                aria-label="Scroll table horizontally"
+                tabIndex={0}
+                onScroll={() => syncTableHorizontalScroll('bar')}
+              >
+                <div className="h-px" style={{ width: Math.max(tableContentWidth, 1) }} />
+              </div>
+            ) : null}
 
               {visibleLibraryDocuments.length > 0 && totalPages > 1 && (
-                <div className="sticky bottom-0 mt-6 -mx-5 border-t border-transparent bg-muted px-5 py-4">
-                <div className="flex flex-col gap-3">
-                <div className="text-sm text-muted-foreground">
+                <div className="sticky bottom-0 -mx-5 border-t border-transparent bg-muted px-5 py-2">
+                <div className="flex flex-row items-center justify-between gap-3">
+                <div className="shrink-0 text-sm text-muted-foreground">
                   {t('libraries.showingRange', {
                     start: (currentPage - 1) * DOCUMENTS_PER_PAGE + 1,
                     end: Math.min(currentPage * DOCUMENTS_PER_PAGE, visibleLibraryDocuments.length),
@@ -1264,7 +1324,6 @@ export default function LibrariesPage() {
                 </div>
                 </div>
               )}
-            </div>
           </div>
         </div>
       </div>
