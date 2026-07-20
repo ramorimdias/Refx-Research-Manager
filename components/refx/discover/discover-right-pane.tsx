@@ -9,6 +9,7 @@ import { DiscoverFilters } from '@/components/refx/discover/discover-filters'
 import type { DiscoverFilterState, DiscoverWork } from '@/lib/types'
 import { getDiscoverStepCacheKey } from '@/lib/services/discovery-service'
 import { useDiscoverActions, useDiscoverStore } from '@/lib/stores/discover-store'
+import { useOnlineStatus } from '@/lib/hooks/use-online-status'
 import { useT } from '@/lib/localization'
 import type { DiscoverMode } from '@/lib/types'
 
@@ -26,6 +27,7 @@ export function DiscoverRightPane({
   const t = useT()
   const [isAbstractOpen, setIsAbstractOpen] = useState(false)
   const [pendingAdvanceMode, setPendingAdvanceMode] = useState<DiscoverMode | null>(null)
+  const isOnline = useOnlineStatus()
   const activeJourney = useDiscoverStore((state) => state.activeJourney)
   const activeStepIndex = useDiscoverStore((state) => state.activeStepIndex)
   const cachedSteps = useDiscoverStore((state) => state.cachedSteps)
@@ -58,12 +60,16 @@ export function DiscoverRightPane({
   const href = work.url ?? (work.doi ? `https://doi.org/${work.doi}` : null)
   const referencesKey = getDiscoverStepCacheKey(work, 'references')
   const citationsKey = getDiscoverStepCacheKey(work, 'citations')
+  const recommendationsKey = getDiscoverStepCacheKey(work, 'recommendations')
   const hasReferencesCached = cachedSteps.has(referencesKey)
   const hasCitationsCached = cachedSteps.has(citationsKey)
   const referencesCount = cachedSteps.get(referencesKey)?.length ?? work.referencedWorksCount
   const citationsCount = cachedSteps.get(citationsKey)?.length ?? work.citedByCount
+  const recommendationsCount = cachedSteps.get(recommendationsKey)?.length ?? work.recommendedWorksCount
   const noReferences = (hasReferencesCached || work.referencedWorksCount != null) && referencesCount === 0
   const noCitations = (hasCitationsCached || work.citedByCount != null) && citationsCount === 0
+  const hasRecommendationsCached = cachedSteps.has(recommendationsKey)
+  const noRecommendations = (hasRecommendationsCached || work.recommendedWorksCount != null) && recommendationsCount === 0
   const willBranchJourney = Boolean(
     activeJourney
     && activeStepIndex >= 0
@@ -206,8 +212,9 @@ export function DiscoverRightPane({
           ) : null}
           {(!showStepFilters || currentMode !== 'references') ? (
             <Button
-              className="justify-start gap-2 bg-sky-600 text-white hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-500 dark:bg-sky-500 dark:text-slate-950 dark:hover:bg-sky-400 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
-              disabled={noReferences}
+              variant="outline"
+              className="justify-start gap-2 border-sky-300 text-sky-700 hover:border-sky-400 hover:bg-sky-50 disabled:border-slate-200 disabled:text-slate-500 dark:border-sky-500/40 dark:text-sky-200 dark:hover:border-sky-400/50 dark:hover:bg-sky-400/10 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
+              disabled={!isOnline || noReferences}
               onClick={() => handleAdvance('references')}
             >
               <Telescope className="h-4 w-4" />
@@ -229,7 +236,7 @@ export function DiscoverRightPane({
             <Button
               variant="outline"
               className="justify-start gap-2 border-rose-300 text-rose-700 hover:border-rose-400 hover:bg-rose-50 disabled:border-slate-200 disabled:text-slate-500 dark:border-rose-500/40 dark:text-rose-200 dark:hover:border-rose-400/50 dark:hover:bg-rose-400/10 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
-              disabled={noCitations}
+              disabled={!isOnline || noCitations}
               onClick={() => handleAdvance('citations')}
             >
               <Telescope className="h-4 w-4" />
@@ -241,6 +248,28 @@ export function DiscoverRightPane({
                       <span>{t('discoverPage.discoverCitationsLabel')}</span>
                       <span>{' ('}</span>
                       {renderCountContent(citationsCount)}
+                      <span>{')'}</span>
+                    </>
+                  )}
+              </span>
+            </Button>
+          ) : null}
+          {(!showStepFilters || currentMode !== 'recommendations') ? (
+            <Button
+              variant="outline"
+              className="justify-start gap-2 border-emerald-700 text-emerald-800 hover:border-emerald-800 hover:bg-emerald-50 disabled:border-slate-200 disabled:text-slate-500 dark:border-emerald-500/50 dark:text-emerald-300 dark:hover:border-emerald-400/60 dark:hover:bg-emerald-400/10 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
+              disabled={!isOnline || noRecommendations}
+              onClick={() => handleAdvance('recommendations')}
+            >
+              <Telescope className="h-4 w-4" />
+              <span>
+                {noRecommendations
+                  ? t('discoverPage.noRecommendationsFound')
+                  : (
+                    <>
+                      <span>{t('discoverPage.discoverRecommendationsLabel')}</span>
+                      <span>{' ('}</span>
+                      {renderCountContent(recommendationsCount)}
                       <span>{')'}</span>
                     </>
                   )}

@@ -214,10 +214,18 @@ function DiscoverPageContent() {
           <span
             className={cn(
               'font-bold',
-              currentStep.mode === 'references' ? 'text-sky-600 dark:text-sky-300' : 'text-rose-600 dark:text-rose-300',
+              currentStep.mode === 'references'
+                ? 'text-sky-600 dark:text-sky-300'
+                : currentStep.mode === 'citations'
+                  ? 'text-rose-600 dark:text-rose-300'
+                : 'text-emerald-700 dark:text-emerald-300',
             )}
           >
-            {currentStep.mode === 'references' ? t('discoverPage.referencesLabel') : t('discoverPage.citationsLabel')}
+            {currentStep.mode === 'references'
+              ? t('discoverPage.referencesLabel')
+              : currentStep.mode === 'citations'
+                ? t('discoverPage.citationsLabel')
+                : t('discoverPage.recommendationsLabel')}
           </span>
           <span className="text-muted-foreground"> {t('discoverPage.of')} </span>
           <span className="font-bold text-amber-500 dark:text-amber-300">
@@ -296,7 +304,7 @@ function DiscoverPageContent() {
 
   if (viewMode === 'home') {
     return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
+      <div className="relative flex h-[calc(100dvh-4rem)] min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
         <PageHeader
           icon={<Telescope className="h-6 w-6" />}
           title={t('discoverPage.title')}
@@ -389,8 +397,8 @@ function DiscoverPageContent() {
                                   </span>
                                   {isLastVisibleStep && lastStep ? (
                                     <span className="min-w-0 truncate text-sm text-muted-foreground">
-                                      <span className={cn('font-semibold', lastStep.mode === 'references' ? 'text-sky-600 dark:text-sky-300' : 'text-rose-600 dark:text-rose-300')}>
-                                        {lastStep.mode === 'references' ? t('discoverPage.referencesLabel') : t('discoverPage.citationsLabel')}
+                                      <span className={cn('font-semibold', lastStep.mode === 'references' ? 'text-sky-600 dark:text-sky-300' : lastStep.mode === 'citations' ? 'text-rose-600 dark:text-rose-300' : 'text-emerald-700 dark:text-emerald-300')}>
+                                        {lastStep.mode === 'references' ? t('discoverPage.referencesLabel') : lastStep.mode === 'citations' ? t('discoverPage.citationsLabel') : t('discoverPage.recommendationsLabel')}
                                       </span>
                                       <span>{` ${t('discoverPage.of')} ${lastStep.sourceWork.firstAuthorLabel}`}</span>
                                       {lastStep.sourceWork.year ? <span>{`, ${lastStep.sourceWork.year}`}</span> : null}
@@ -458,7 +466,7 @@ function DiscoverPageContent() {
 
   if (viewMode === 'seed' && sourceWork && !activeJourney) {
     return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
+      <div className="relative flex h-[calc(100dvh-4rem)] min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
         <PageHeader
           icon={<Telescope className="h-6 w-6" />}
           title={t('discoverPage.title')}
@@ -501,7 +509,7 @@ function DiscoverPageContent() {
   }
 
   return (
-      <div className="relative flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
+      <div className="relative flex h-[calc(100dvh-4rem)] min-h-0 flex-col gap-4 overflow-hidden p-4 md:p-6" data-tour-id="discover-overview">
       <PageHeader
         icon={<Telescope className="h-6 w-6" />}
         title={isEditingJourneyName ? (

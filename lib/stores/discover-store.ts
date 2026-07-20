@@ -277,9 +277,11 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
 
     const referencesKey = getDiscoverStepCacheKey(work, 'references')
     const citationsKey = getDiscoverStepCacheKey(work, 'citations')
+    const recommendationsKey = getDiscoverStepCacheKey(work, 'recommendations')
     const hasReferencesCached = get().cachedSteps.has(referencesKey)
     const hasCitationsCached = get().cachedSteps.has(citationsKey)
-    if (hasReferencesCached && hasCitationsCached) return
+    const hasRecommendationsCached = get().cachedSteps.has(recommendationsKey)
+    if (hasReferencesCached && hasCitationsCached && hasRecommendationsCached) return
 
     cancelActivePrefetch()
     const controller = new AbortController()
@@ -291,8 +293,8 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
       const settings = await loadDiscoverySettings()
       const nextCachedSteps = new Map(get().cachedSteps)
 
-      const [referencesResult, citationsResult] = await Promise.all(
-        (['references', 'citations'] as const).map(async (mode) => {
+      const [referencesResult, citationsResult, recommendationsResult] = await Promise.all(
+        (['references', 'citations', 'recommendations'] as const).map(async (mode) => {
           const cacheKey = getDiscoverStepCacheKey(work, mode)
           const cached = nextCachedSteps.get(cacheKey)
           if (cached) {
@@ -301,7 +303,7 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
 
           const items = (await fetchDiscoverStep(work, mode, documents, relations, settings, controller.signal, true))
             .map((item) => applyTagState(item, get().workTags))
-          if (items.length > 0) {
+          if (items.length > 0 || mode === 'recommendations') {
             nextCachedSteps.set(cacheKey, items)
           }
           return { mode, items }
@@ -318,6 +320,9 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
         citedByCount: citationsResult.items.length > 0
           ? citationsResult.items.length
           : work.citedByCount,
+        recommendedWorksCount: recommendationsResult.items.length > 0
+          ? recommendationsResult.items.length
+          : work.recommendedWorksCount,
       }
       const latestState = get()
       const nextCachedMetadata = new Map(latestState.cachedWorkMetadata)
@@ -374,7 +379,7 @@ export const useDiscoverStore = create<DiscoverStoreState>((set, get) => ({
       nextCachedSteps.set(cacheKey, items)
       const nextJourney: DiscoverJourney = {
         id: crypto.randomUUID(),
-        name: `${mode === 'references' ? 'References' : 'Citations'} of ${sourceWork.firstAuthorLabel}`,
+        name: `${mode === 'references' ? 'References' : mode === 'citations' ? 'Citations' : 'Recommendations'} of ${sourceWork.firstAuthorLabel}`,
         steps: [{
           id: crypto.randomUUID(),
           sourceWork: applyJourneyStarState(applyTagState(sourceWork, get().workTags), get().activeJourney),

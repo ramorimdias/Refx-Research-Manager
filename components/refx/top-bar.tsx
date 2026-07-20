@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, Cloud, DownloadCloud, Eye, PencilLine, RefreshCw, Search, Settings, Unplug, UploadCloud } from 'lucide-react'
+import { AlertTriangle, Cloud, DownloadCloud, Eye, PencilLine, RefreshCw, Search, Settings, Unplug, UploadCloud, WifiOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -14,6 +14,7 @@ import { getRemoteVaultDisplayMessage } from '@/lib/remote-vault-copy'
 import * as repo from '@/lib/repositories/local-db'
 import { useRuntimeActions } from '@/lib/stores/runtime-store'
 import { toast } from 'sonner'
+import { useOnlineStatus } from '@/lib/hooks/use-online-status'
 import {
   getRemoteVaultStatusSnapshot,
   getRemoteVaultSyncPhaseSnapshot,
@@ -136,6 +137,7 @@ export function TopBar() {
   const [remoteVaultStatus, setRemoteVaultStatus] = useState(getRemoteVaultStatusSnapshot)
   const [remoteVaultSyncPhase, setRemoteVaultSyncPhase] = useState(getRemoteVaultSyncPhaseSnapshot)
   const [remoteVaultSyncState, setRemoteVaultSyncState] = useState(getRemoteVaultSyncQueueSnapshot)
+  const isOnline = useOnlineStatus()
   const globalSearchQuery = useUiStore((state) => state.globalSearchQuery)
   const setGlobalSearchQuery = useUiStore((state) => state.setGlobalSearchQuery)
   const setPersistentSearch = useUiStore((state) => state.setPersistentSearch)
@@ -192,6 +194,17 @@ export function TopBar() {
       </div>
 
       <div className="flex items-center gap-2">
+        {!isOnline ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className="flex h-9 items-center gap-1.5 rounded-full border border-slate-300 bg-slate-100 px-3 text-xs font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200">
+                <WifiOff className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Offline</span>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>Internet-dependent features are unavailable until you reconnect.</TooltipContent>
+          </Tooltip>
+        ) : null}
         {canRequestEditing ? (
           <Button
             type="button"

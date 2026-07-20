@@ -50,6 +50,10 @@ type SemanticScholarReferenceEntry = {
   citingPaper?: SemanticScholarListPaper
 }
 
+type SemanticScholarRecommendationsResponse = {
+  recommendedPapers?: SemanticScholarListPaper[]
+}
+
 const stepCache = new Map<string, DiscoverWork[]>()
 
 export function clearDiscoverStepCache() {
@@ -138,11 +142,12 @@ function isAbortError(error: unknown) {
   return error instanceof DOMException && error.name === 'AbortError'
 }
 
-async function fetchJson<T>(url: string, signal?: AbortSignal, headers?: HeadersInit): Promise<T | null> {
+async function fetchJson<T>(url: string, signal?: AbortSignal, headers?: HeadersInit, requestInit?: RequestInit): Promise<T | null> {
   return enqueue(
     url,
     async () => {
       const response = await fetch(url, {
+        ...requestInit,
         headers: {
           Accept: 'application/json',
           ...(headers ?? {}),
@@ -255,7 +260,7 @@ function openAlexToDiscoverWork(work: OpenAlexWorkWithGraph): DiscoverWork {
   }
 }
 
-function semanticScholarPaperToDiscoverWork(paper: SemanticScholarListPaper, relationKind: 'reference' | 'citation'): DiscoverWork {
+function semanticScholarPaperToDiscoverWork(paper: SemanticScholarListPaper, relationKind: 'reference' | 'citation' | 'recommendation'): DiscoverWork {
   const authors = (paper.authors ?? []).map((entry) => entry.name?.trim() ?? '').filter(Boolean)
   const doi = normalizeDoi(paper.externalIds?.DOI)
   return {
@@ -348,7 +353,21 @@ export async function mergeLocalRelations(
 
 async function fetchSemanticScholarStep(sourceWork: DiscoverWork, mode: DiscoverMode, apiKey?: string, signal?: AbortSignal) {
   const id = sourceWork.semanticScholarId
-    ?? (normalizeDoi(sourceWork.doi) ? `DOI:${normalizeDoi(sourceWork.doi)}` : encodeURIComponent(sourceWork.title))
+    ?? (normalizeDoi(sourceWork.doi) ? `DOI:${normalizeDoi(sourceWork.doi)}` : null)
+  if (!id) return []
+
+  if (mode === 'recommendations') {
+    const fields = 'title,year,authors,externalIds,citationCount,abstract,journal,venue,paperId'
+    const response = await fetchJson<SemanticScholarRecommendationsResponse>(
+      `https://api.semanticscholar.org/recommendations/v1/papers?limit=50&fields=${fields}`,
+      signal,
+      { 'x-api-key': apiKey ?? '', 'content-type': 'application/json' },
+      { method: 'POST', body: JSON.stringify({ positivePaperIds: [id], negativePaperIds: [] }) },
+    )
+    return (response?.recommendedPapers ?? [])
+      .map((paper) => semanticScholarPaperToDiscoverWork(paper, 'recommendation'))
+  }
+
   const path = mode === 'references' ? 'references' : 'citations'
   const response = await fetchJson<{ data?: SemanticScholarReferenceEntry[] }>(
     `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(id)}/${path}?fields=title,year,authors,externalIds,citationCount,abstract,journal,venue,paperId`,
@@ -483,7 +502,7 @@ export async function fetchDiscoverStep(
   let items: DiscoverWork[] = []
 
   try {
-    items = await fetchOpenAlexStep(sourceWork, mode, signal)
+    items = mode === 'recommendations' ? [] : await fetchOpenAlexStep(sourceWork, mode, signal)
   } catch (error) {
     if (isAbortError(error)) throw error
     console.warn(`OpenAlex discover ${mode} failed:`, error)

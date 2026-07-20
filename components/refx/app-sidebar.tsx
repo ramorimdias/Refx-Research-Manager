@@ -35,6 +35,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { useT } from '@/lib/localization'
+import { useOnlineStatus } from '@/lib/hooks/use-online-status'
 
 const mainNavItems = [
   { href: '/', labelKey: 'nav.home', icon: Home },
@@ -44,8 +45,8 @@ const mainNavItems = [
   { href: '/notes', labelKey: 'nav.notes', icon: StickyNote },
   { href: '/comments', labelKey: 'nav.comments', icon: MessageSquareText },
   { href: '/maps', labelKey: 'nav.maps', icon: Waypoints },
-  { href: '/discover', labelKey: 'nav.discover', icon: Telescope },
-  { href: '/metadata', labelKey: 'nav.metadata', icon: CloudDownload },
+  { href: '/discover', labelKey: 'nav.discover', icon: Telescope, networkDependent: true },
+  { href: '/metadata', labelKey: 'nav.metadata', icon: CloudDownload, networkDependent: true },
 ]
 
 function BrandMark({ className }: { className?: string }) {
@@ -94,6 +95,7 @@ export function AppSidebar() {
   const activeLibraryId = useLibraryStore((state) => state.activeLibraryId)
   const setActiveLibrary = useLibraryStore((state) => state.setActiveLibrary)
   const libraries = useLibraryStore((state) => state.libraries)
+  const isOnline = useOnlineStatus()
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -155,13 +157,17 @@ export function AppSidebar() {
               {mainNavItems.map((item) => {
                 const isActive = pathname === item.href || 
                   (item.href !== '/' && pathname.startsWith(item.href))
+                const unavailable = item.networkDependent && !isOnline
                 
                 const navLink = (
                   <Link
                     key={item.href}
                     href={item.href}
+                    aria-disabled={unavailable}
+                    onClick={(event) => { if (unavailable) event.preventDefault() }}
                     className={cn(
                       'grid grid-cols-[1rem_minmax(0,1fr)] items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors',
+                      unavailable && 'cursor-not-allowed opacity-40 grayscale',
                       isActive
                         ? 'bg-sidebar-accent text-sidebar-accent-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.25)]'
                         : 'text-sidebar-foreground/62 hover:bg-sidebar-accent/65 hover:text-sidebar-foreground'

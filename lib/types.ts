@@ -392,7 +392,7 @@ export interface TopicCluster {
   color: string
 }
 
-export type DiscoverMode = 'references' | 'citations'
+export type DiscoverMode = 'references' | 'citations' | 'recommendations'
 
 export type DiscoverExternalTag = 'favorite' | 'interesting' | 'save_for_later'
 
@@ -415,10 +415,11 @@ export type DiscoverWork = {
   url?: string | null
   citedByCount?: number | null
   referencedWorksCount?: number | null
+  recommendedWorksCount?: number | null
   inLibrary: boolean
   libraryDocumentId?: string | null
   userTags?: DiscoverExternalTag[]
-  relationKind?: 'reference' | 'citation' | 'manual_link' | 'auto_link'
+  relationKind?: 'reference' | 'citation' | 'recommendation' | 'manual_link' | 'auto_link'
   fromLocalLibrary?: boolean
   isStarred?: boolean
 }

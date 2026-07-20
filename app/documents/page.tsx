@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import * as QRCode from 'qrcode'
 import { Button } from '@/components/ui/button'
+import { useOnlineStatus } from '@/lib/hooks/use-online-status'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -595,6 +596,7 @@ function RealDocumentDetailPage({
   autoSearchMetadata: boolean
   returnTo: string | null
 }) {
+  const isOnline = useOnlineStatus()
   const params = useSearchParams()
   const router = useRouter()
   const t = useT()
@@ -1859,7 +1861,7 @@ function RealDocumentDetailPage({
                 <div className="mb-4 flex justify-end">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                    <Button variant="outline" size="sm" onClick={() => void handleFetchOnlineMetadata()} disabled={isFetchingOnlineMetadata} data-tour-id="documents-fetch-metadata">
+                    <Button variant="outline" size="sm" onClick={() => void handleFetchOnlineMetadata()} disabled={!isOnline || isFetchingOnlineMetadata} data-tour-id="documents-fetch-metadata">
                       <Globe className="mr-2 h-4 w-4" />
                       {isFetchingOnlineMetadata ? 'Searchingâ€¦' : 'Find Metadata Online'}
                     </Button>
@@ -2600,6 +2602,7 @@ function RealDocumentDetailPage({
                     onClick={() => void runMetadataCandidateSearch()}
                     disabled={
                       isFetchingOnlineMetadata
+                      || !isOnline
                       || metadataProviders.length === 0
                       || (
                         metadataSearchField === 'doi'

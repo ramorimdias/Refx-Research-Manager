@@ -96,7 +96,14 @@ function radialPosition(index: number, total: number, canvasWidth: number, canva
   }
 
   const angle = (Math.PI * 2 * index) / total
-  const radius = Math.max(140, 100 + total * 8)
+  const availableRadius = Math.max(
+    72,
+    Math.min(
+      (canvasWidth - NODE_SIZE) / 2 - CANVAS_SAFE_MARGIN,
+      (canvasHeight - NODE_SIZE) / 2 - CANVAS_SAFE_MARGIN,
+    ),
+  )
+  const radius = Math.min(Math.max(120, 100 + total * 8), availableRadius)
 
   return {
     x: (canvasWidth - NODE_SIZE) / 2 + Math.cos(angle) * radius,
@@ -176,11 +183,13 @@ function DiscoverBubble({
       <div
         className={cn(
           'flex h-[48px] w-[48px] items-center justify-center rounded-full border border-slate-700 bg-background shadow-sm outline outline-4 outline-offset-0 outline-white transition-[background-color,border-color,box-shadow,outline-color,opacity,transform] duration-500 ease-out dark:border-slate-500 dark:bg-slate-950 dark:outline-slate-950',
-          isSource && 'border-amber-400 shadow-[0_0_0_10px_rgba(251,191,36,0.16)]',
-          isSelected && !isSource && 'border-transparent shadow-[0_0_0_10px_rgba(251,191,36,0.16)]',
+          isSource && relationMode === 'recommendations' && 'border-emerald-700 shadow-[0_0_0_10px_rgba(4,120,87,0.16)]',
+          isSource && relationMode !== 'recommendations' && 'border-amber-400 shadow-[0_0_0_10px_rgba(251,191,36,0.16)]',
+          isSelected && !isSource && relationMode === 'recommendations' && 'border-transparent shadow-[0_0_0_10px_rgba(4,120,87,0.16)]',
+          isSelected && !isSource && relationMode !== 'recommendations' && 'border-transparent shadow-[0_0_0_10px_rgba(251,191,36,0.16)]',
           isSelected && !isSource && relationMode === 'references' && 'bg-[radial-gradient(circle_at_center,rgba(191,219,254,0.92)_0%,rgba(219,234,254,0.82)_45%,rgba(255,255,255,0.98)_100%)] dark:bg-[radial-gradient(circle_at_center,rgba(96,165,250,0.48)_0%,rgba(37,99,235,0.28)_48%,rgba(15,23,42,0.98)_100%)]',
           isSelected && !isSource && relationMode === 'citations' && 'bg-[radial-gradient(circle_at_center,rgba(254,202,202,0.92)_0%,rgba(254,226,226,0.82)_45%,rgba(255,255,255,0.98)_100%)] dark:bg-[radial-gradient(circle_at_center,rgba(251,113,133,0.46)_0%,rgba(225,29,72,0.26)_48%,rgba(15,23,42,0.98)_100%)]',
-          isSelected && !isSource && relationMode !== 'references' && relationMode !== 'citations' && 'bg-[radial-gradient(circle_at_center,rgba(253,230,138,0.9)_0%,rgba(254,243,199,0.82)_45%,rgba(255,255,255,0.98)_100%)] dark:bg-[radial-gradient(circle_at_center,rgba(251,191,36,0.48)_0%,rgba(180,83,9,0.24)_48%,rgba(15,23,42,0.98)_100%)]',
+          isSelected && !isSource && relationMode === 'recommendations' && 'bg-[radial-gradient(circle_at_center,rgba(167,243,208,0.9)_0%,rgba(209,250,229,0.82)_45%,rgba(255,255,255,0.98)_100%)] dark:bg-[radial-gradient(circle_at_center,rgba(52,211,153,0.48)_0%,rgba(6,78,59,0.3)_48%,rgba(15,23,42,0.98)_100%)]',
           !isSource && relationMode === 'references' && 'shadow-[inset_0_0_0_2px_rgba(59,130,246,0.55),inset_0_0_18px_rgba(59,130,246,0.22)]',
           !isSource && relationMode === 'citations' && 'shadow-[inset_0_0_0_2px_rgba(239,68,68,0.55),inset_0_0_18px_rgba(239,68,68,0.22)]',
           work.inLibrary && 'ring-2 ring-emerald-300/70',
@@ -210,7 +219,7 @@ function DiscoverBubble({
         ) : null}
         {showSourceIcon ? (
           <div className="relative flex items-center justify-center">
-            <BookOpen className="h-5 w-5 text-amber-700 dark:text-amber-200" strokeWidth={2.1} />
+            <BookOpen className={cn('h-5 w-5', relationMode === 'recommendations' ? 'text-emerald-800 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-200')} strokeWidth={2.1} />
             {relationMode !== 'starred' ? (
               <span className="absolute -bottom-3 rounded-full border border-amber-300 bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-none text-amber-700 shadow-sm dark:border-amber-500/40 dark:bg-slate-950 dark:text-amber-200">
                 {linkedCount ?? 0}
@@ -408,6 +417,16 @@ export function DiscoverMap({
           width: Math.max(0, canvasWidth - (sourceLeftX + NODE_SIZE + ZONE_GAP) - CANVAS_SAFE_MARGIN),
           height: Math.max(0, canvasHeight - (CANVAS_SAFE_MARGIN + NODE_SIZE + 12) - CANVAS_SAFE_MARGIN),
         })
+        : mode === 'recommendations'
+          ? packItemsInZone(sortedItems, {
+            // Recommendations are a flat set of candidates, so keep them in a
+            // compact grid instead of a large radial ring that can overflow
+            // short canvases (especially when the result list is long).
+            left: CANVAS_SAFE_MARGIN,
+            top: CANVAS_SAFE_MARGIN + NODE_SIZE + 12,
+            width: Math.max(0, canvasWidth - CANVAS_SAFE_MARGIN * 2),
+            height: Math.max(0, canvasHeight - (CANVAS_SAFE_MARGIN + NODE_SIZE + 12) - CANVAS_SAFE_MARGIN),
+          })
         : sortedItems.map((work, index) => {
           const position = radialPosition(index, sortedItems.length, canvasWidth, canvasHeight)
           return { work, x: position.x, y: position.y, relationMode: mode, isSource: false }

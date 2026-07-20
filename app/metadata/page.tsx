@@ -17,6 +17,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useOnlineStatus } from '@/lib/hooks/use-online-status'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -193,6 +194,7 @@ function buildSavePayload(input: {
 }
 
 export default function MetadataWorkspacePage() {
+  const isOnline = useOnlineStatus()
   const t = useT()
   const libraries = useLibraryStore((state) => state.libraries)
   const activeLibraryId = useLibraryStore((state) => state.activeLibraryId)
@@ -790,7 +792,7 @@ export default function MetadataWorkspacePage() {
                         }
                         void runDoiCandidateSearch(currentDocument, doi)
                       }}
-                      disabled={isFetchingCandidates}
+                      disabled={!isOnline || isFetchingCandidates}
                     >
                       <Globe className="mr-2 h-4 w-4" />
                       {isFetchingCandidates ? t('metadataPage.searching') : t('metadataPage.refresh')}

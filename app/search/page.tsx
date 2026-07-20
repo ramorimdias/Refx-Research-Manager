@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Filter, Loader2, Plus, Search as SearchIcon, X } from 'lucide-react'
+import { ExternalLink, Filter, Globe, Library, Loader2, Plus, Search as SearchIcon, Sparkles, X } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { EmptyState } from '@/components/refx/common'
 import { PageHeader } from '@/components/refx/page-header'
 import { parseFlexibleSearchTerms } from '@/lib/services/document-processing'
@@ -24,6 +25,14 @@ import { saveHomeRecentSearch } from '@/lib/home-dashboard'
 import { useDocumentStore } from '@/lib/stores/document-store'
 import { useLibraryStore } from '@/lib/stores/library-store'
 import { useUiStore } from '@/lib/stores/ui-store'
+import { cn } from '@/lib/utils'
+import { useOnlineStatus } from '@/lib/hooks/use-online-status'
+import { searchScholarlyWorks, type ScholarlySearchResult } from '@/lib/services/scholarly-search-service'
+import { useDocumentActions } from '@/lib/stores/document-store'
+import { open as openFileDialog } from '@/lib/tauri/client'
+import { toast } from 'sonner'
+import { expandScholarlyQuery, rerankScholarlyResults } from '@/lib/services/scholarly-ai-service'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 type SearchResult = {
   document: Document
@@ -121,6 +130,10 @@ function parseInitialSimpleQuery(params: URLSearchParams) {
 
 function parseQueryMode(params: URLSearchParams) {
   return params.get('mode') === 'complex' ? 'complex' : 'simple'
+}
+
+function parseSearchSource(params: URLSearchParams): 'library' | 'scholarly' {
+  return params.get('source') === 'internet' ? 'scholarly' : 'library'
 }
 
 function parseGroupJoinOperator(params: URLSearchParams): GroupJoinOperator {
@@ -258,7 +271,7 @@ function SearchTourDemo() {
           </Card>
 
           <div className="space-y-4" data-tour-id="search-results">
-            <Card>
+                <Card>
               <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
                 <div>
                   <p className="text-sm text-muted-foreground">Sample results</p>
@@ -418,6 +431,7 @@ function RealSearchPage() {
     [paramString],
   )
   const initialMode = useMemo(() => parseQueryMode(new URLSearchParams(paramString)), [paramString])
+  const initialSearchSource = useMemo(() => parseSearchSource(new URLSearchParams(paramString)), [paramString])
   const initialGroupJoinOperator = useMemo(() => parseGroupJoinOperator(new URLSearchParams(paramString)), [paramString])
   const initialSimpleQuery = useMemo(() => parseInitialSimpleQuery(new URLSearchParams(paramString)), [paramString])
   const initialSelectedLibraryIds = useMemo(() => parseSelectedLibraryIds(new URLSearchParams(paramString)), [paramString])
@@ -442,6 +456,29 @@ function RealSearchPage() {
   const [totalToSearch, setTotalToSearch] = useState(0)
   const [searchStatus, setSearchStatus] = useState('')
   const searchRunId = useRef(0)
+  const isOnline = useOnlineStatus()
+  const { importDocuments, updateDocument } = useDocumentActions()
+  const [searchMode, setSearchMode] = useState<'library' | 'scholarly'>(initialSearchSource)
+  const [scholarlyResults, setScholarlyResults] = useState<ScholarlySearchResult[]>([])
+  const [isScholarlySearching, setIsScholarlySearching] = useState(false)
+  const [scholarlySearchRequested, setScholarlySearchRequested] = useState(false)
+  const [aiExpansionEnabled, setAiExpansionEnabled] = useState(false)
+  const [aiRerankEnabled, setAiRerankEnabled] = useState(false)
+  const [isAiSearching, setIsAiSearching] = useState(false)
+  const [aiLoadingStage, setAiLoadingStage] = useState<'expanding' | 'fetching' | 'ranking' | null>(null)
+  const [aiSearchError, setAiSearchError] = useState('')
+  const [aiExpandedQueries, setAiExpandedQueries] = useState<string[]>([])
+  const [scholarlyError, setScholarlyError] = useState('')
+  const [importedScholarlyIds, setImportedScholarlyIds] = useState<string[]>([])
+  const [scholarlyYearFrom, setScholarlyYearFrom] = useState('')
+  const [scholarlyYearTo, setScholarlyYearTo] = useState('')
+  const [scholarlyDateFilter, setScholarlyDateFilter] = useState<'all' | 'this_year' | 'since_previous' | 'custom'>('all')
+  const [scholarlySort, setScholarlySort] = useState<'relevance' | 'date'>('relevance')
+  const [scholarlySource, setScholarlySource] = useState<'all' | ScholarlySearchResult['source']>('all')
+  const [excludeLibraryWorks, setExcludeLibraryWorks] = useState(false)
+  const [expandedScholarlyIds, setExpandedScholarlyIds] = useState<string[]>([])
+  const [scholarlyImportTarget, setScholarlyImportTarget] = useState<ScholarlySearchResult | null>(null)
+  const [isImportingScholarly, setIsImportingScholarly] = useState(false)
 
   const selectedLibraryIds = persistentSearch.selectedLibraryIds
   const readingStage = persistentSearch.readingStage
@@ -474,6 +511,7 @@ function RealSearchPage() {
   )
 
   useEffect(() => {
+    setSearchMode(initialSearchSource)
     setQueryMode(initialMode)
     setSimpleQueryInput(initialSimpleQuery)
     setDraftGroupJoinOperator(initialGroupJoinOperator)
@@ -497,7 +535,15 @@ function RealSearchPage() {
       groupJoinOperator: initialMode === 'simple' ? 'AND' : initialGroupJoinOperator,
       selectedLibraryIds: initialSelectedLibraryIds,
     })
-  }, [hasExplicitNoLibraries, initialGroupJoinOperator, initialGroups, initialMode, initialSelectedLibraryIds, initialSimpleQuery, libraries, persistentSearch.favoriteOnly, persistentSearch.flexibility, persistentSearch.metadataStatus, persistentSearch.readingStage, setGlobalSearchQuery, setPersistentSearch])
+  }, [hasExplicitNoLibraries, initialGroupJoinOperator, initialGroups, initialMode, initialSearchSource, initialSelectedLibraryIds, initialSimpleQuery, libraries, persistentSearch.favoriteOnly, persistentSearch.flexibility, persistentSearch.metadataStatus, persistentSearch.readingStage, setGlobalSearchQuery, setPersistentSearch])
+
+  const changeSearchMode = (nextMode: 'library' | 'scholarly') => {
+    setSearchMode(nextMode)
+    const nextParams = new URLSearchParams(window.location.search)
+    if (nextMode === 'scholarly') nextParams.set('source', 'internet')
+    else nextParams.delete('source')
+    router.replace(`/search${nextParams.toString() ? `?${nextParams.toString()}` : ''}`)
+  }
 
   const filteredDocuments = useMemo(() => {
     return documents.filter((document) => {
@@ -563,6 +609,7 @@ function RealSearchPage() {
   const applySimpleSearch = (nextQuery: string, navigation: 'push' | 'replace' = 'replace') => {
     const trimmedQuery = nextQuery.trim()
     const nextParams = buildQueryParams({ mode: 'simple', query: trimmedQuery })
+    if (searchMode === 'scholarly') nextParams.set('source', 'internet')
 
     setGlobalSearchQuery(trimmedQuery)
     setPersistentSearch({
@@ -661,6 +708,121 @@ function RealSearchPage() {
     }
   }, [executedSearchQuery, filteredDocuments.length, flexibility, searchableDocumentIds, searchableDocumentsById, t])
 
+  useEffect(() => {
+    if (!scholarlySearchRequested || searchMode !== 'scholarly' || !isOnline || !executedSimpleQuery.trim()) {
+      setScholarlyResults([])
+      setScholarlyError('')
+      return
+    }
+    const controller = new AbortController()
+    setIsScholarlySearching(true)
+    setScholarlyError('')
+    setAiSearchError('')
+    const currentYear = new Date().getFullYear()
+    const apiYearFrom = scholarlyDateFilter === 'this_year' ? currentYear : scholarlyDateFilter === 'since_previous' ? currentYear - 1 : scholarlyDateFilter === 'custom' && scholarlyYearFrom ? Number.parseInt(scholarlyYearFrom, 10) : undefined
+    const apiYearTo = scholarlyDateFilter === 'this_year' ? currentYear : scholarlyDateFilter === 'custom' && scholarlyYearTo ? Number.parseInt(scholarlyYearTo, 10) : undefined
+    const run = async () => {
+      setIsScholarlySearching(true)
+      let searchQuery = executedSimpleQuery
+      if (aiExpansionEnabled) {
+        setIsAiSearching(true)
+        setAiLoadingStage('expanding')
+        const expanded = await expandScholarlyQuery(executedSimpleQuery).catch((error) => { setAiSearchError(error instanceof Error ? error.message : 'AI query expansion failed.'); return [] })
+        if (controller.signal.aborted) return
+        setAiExpandedQueries(expanded)
+        searchQuery = [executedSimpleQuery, ...expanded].join(' OR ')
+      } else setAiExpandedQueries([])
+      setAiLoadingStage('fetching')
+      let results = await searchScholarlyWorks(searchQuery, { signal: controller.signal, limit: 50, yearFrom: apiYearFrom, yearTo: apiYearTo })
+      // Some provider query parsers reject long AI-expanded OR expressions.
+      // Retry the original query so one provider cannot disappear silently.
+      if (aiExpansionEnabled && !results.some((result) => result.source === 'Semantic Scholar')) {
+        const originalResults = await searchScholarlyWorks(executedSimpleQuery, { signal: controller.signal, limit: 50, yearFrom: apiYearFrom, yearTo: apiYearTo })
+        const seen = new Set(results.map((result) => (result.doi ?? result.title).toLowerCase()))
+        results = [...results, ...originalResults.filter((result) => {
+          const key = (result.doi ?? result.title).toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })]
+      }
+      if (controller.signal.aborted) return
+      setAiLoadingStage(aiRerankEnabled ? 'ranking' : null)
+      const ranked = aiRerankEnabled ? await rerankScholarlyResults(executedSimpleQuery, results).catch((error) => { setAiSearchError(error instanceof Error ? error.message : 'AI result ranking failed.'); return results }) : results
+      if (controller.signal.aborted) return
+      setScholarlyResults(ranked)
+      setIsAiSearching(false)
+      setAiLoadingStage(null)
+      setIsScholarlySearching(false)
+    }
+    void run()
+      .catch((error) => { if (!controller.signal.aborted) setScholarlyError(error instanceof Error ? error.message : 'Scholarly search failed.') })
+      .finally(() => { if (!controller.signal.aborted) { setIsAiSearching(false); setAiLoadingStage(null); setIsScholarlySearching(false) } })
+    return () => controller.abort()
+  }, [aiExpansionEnabled, aiRerankEnabled, executedSimpleQuery, isOnline, scholarlyDateFilter, scholarlySearchRequested, scholarlyYearFrom, scholarlyYearTo, searchMode])
+
+  const filteredScholarlyResults = useMemo(() => {
+    const from = Number.parseInt(scholarlyYearFrom, 10)
+    const to = Number.parseInt(scholarlyYearTo, 10)
+    const currentYear = new Date().getFullYear()
+    const recentCutoff = scholarlyDateFilter === 'this_year' ? currentYear : scholarlyDateFilter === 'since_previous' ? currentYear - 1 : null
+    const libraryDoiSet = new Set(documents.map((document) => document.doi?.trim().toLowerCase()).filter(Boolean))
+    const libraryTitleSet = new Set(documents.map((document) => document.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).filter(Boolean))
+    const filtered = scholarlyResults.filter((result) => {
+      if (scholarlySource !== 'all' && result.source !== scholarlySource) return false
+      if (Number.isFinite(from) && (!result.year || result.year < from)) return false
+      if (Number.isFinite(to) && (!result.year || result.year > to)) return false
+      if (recentCutoff != null && (!result.year || result.year < recentCutoff)) return false
+      if (scholarlyDateFilter === 'custom' && ((!result.year) || (scholarlyYearFrom && result.year < Number.parseInt(scholarlyYearFrom, 10)) || (scholarlyYearTo && result.year > Number.parseInt(scholarlyYearTo, 10)))) return false
+      if (excludeLibraryWorks) {
+        const normalizedTitle = result.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+        if ((result.doi && libraryDoiSet.has(result.doi.trim().toLowerCase())) || libraryTitleSet.has(normalizedTitle)) return false
+      }
+      return true
+    })
+    if (scholarlySort === 'date') {
+      return filtered.sort((left, right) => {
+        const yearDifference = (right.year ?? 0) - (left.year ?? 0)
+        return yearDifference || (right.relevanceScore ?? 0) - (left.relevanceScore ?? 0)
+      })
+    }
+    return filtered
+  }, [documents, excludeLibraryWorks, scholarlyDateFilter, scholarlyResults, scholarlySort, scholarlySource, scholarlyYearFrom, scholarlyYearTo])
+
+  const importScholarlyPdf = async (result: ScholarlySearchResult, selectedPath?: string) => {
+    if (!selectedPath) return
+    setIsImportingScholarly(true)
+    try {
+      const imported = await importDocuments([selectedPath])
+      const importedDocument = imported.imported[0]
+      if (importedDocument) {
+        // The search result is authoritative for this import. Reapply it after
+        // ingestion so local PDF extraction cannot replace the selected work.
+        await updateDocument(importedDocument.id, {
+          title: result.title,
+          authors: result.authors,
+          year: result.year,
+          abstract: result.abstract,
+          doi: result.doi,
+        })
+        setImportedScholarlyIds((current) => [...current, result.id])
+        toast.success('PDF imported with the scholarly search metadata.')
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not import this PDF.')
+    } finally {
+      setIsImportingScholarly(false)
+      setScholarlyImportTarget(null)
+    }
+  }
+
+  const chooseScholarlyPdf = async () => {
+    if (!scholarlyImportTarget) return
+    const selected = await openFileDialog({ multiple: false, filters: [{ name: 'PDF documents', extensions: ['pdf'] }], title: 'Choose the PDF for this scholarly result' })
+    if (!selected || Array.isArray(selected)) return
+    await importScholarlyPdf(scholarlyImportTarget, selected)
+  }
+
   const updateGroup = (groupId: string, updates: Partial<KeywordGroup>) => {
     setDraftGroups((current) =>
       current.map((group) => (group.id === groupId ? { ...group, ...updates } : group)),
@@ -714,6 +876,17 @@ function RealSearchPage() {
   }
 
   const submitSearch = () => {
+    if (searchMode === 'scholarly') {
+      const query = queryMode === 'simple'
+        ? simpleQueryInput
+        : flattenKeywords(normalizeGroups(draftGroups.map((group) => ({
+          ...group,
+          keywords: normalizeKeywords([...group.keywords, ...(groupInputs[group.id]?.trim() ? [groupInputs[group.id]] : [])]),
+        })))).join(' ')
+      setScholarlySearchRequested(true)
+      applySimpleSearch(query, 'push')
+      return
+    }
     if (queryMode === 'simple') {
       applySimpleSearch(simpleQueryInput, 'push')
       return
@@ -812,17 +985,17 @@ function RealSearchPage() {
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-6 overflow-hidden p-4 md:p-6">
+    <div className="box-border flex h-[calc(100dvh-4rem)] min-h-0 flex-col gap-6 overflow-hidden p-4 md:p-6">
         <div className="sticky top-0 z-20 -mx-4 bg-background/95 px-4 pb-1 pt-1 backdrop-blur md:-mx-6 md:px-6">
         <PageHeader
           icon={<SearchIcon className="h-6 w-6" />}
           title={t('searchPage.title')}
-          subtitle={t('searchPage.subtitleCompact')}
+          subtitle={searchMode === 'scholarly' ? t('searchPage.subtitleInternet') : t('searchPage.subtitleCompact')}
         />
         </div>
 
-        <div className="grid min-h-0 flex-1 gap-6 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Card className="h-fit self-start overflow-hidden" data-tour-id="search-query">
+        <div className="grid min-h-0 flex-1 items-start gap-6 overflow-hidden lg:grid-cols-[320px_minmax(0,1fr)]">
+          <Card className="sticky top-0 h-fit max-h-full self-start overflow-hidden" data-tour-id="search-query">
             <CardContent className="space-y-5 overflow-y-auto pt-6 lg:max-h-[calc(100vh-8.5rem)] lg:[scrollbar-gutter:stable]">
               <form
                 className="space-y-4"
@@ -832,26 +1005,26 @@ function RealSearchPage() {
                 }}
               >
                 <div className="space-y-2">
+                  <div role="tablist" aria-label="Search source" className="flex rounded-xl border bg-muted/50 p-1 shadow-inner">
+                    <button type="button" role="tab" aria-selected={searchMode === 'library'} onClick={() => changeSearchMode('library')} className={cn('flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all', searchMode === 'library' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+                      <Library className="h-4 w-4" />
+                      <span>My libraries</span>
+                    </button>
+                    <button type="button" role="tab" aria-selected={searchMode === 'scholarly'} onClick={() => changeSearchMode('scholarly')} disabled={!isOnline} className={cn('flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all', searchMode === 'scholarly' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground', !isOnline && 'cursor-not-allowed opacity-40')}>
+                      <Globe className="h-4 w-4" />
+                      <span>Internet</span>
+                    </button>
+                  </div>
                   <SearchHelpTooltip content={t('searchPage.queryModeHelp')}>
                     <label className="text-sm font-medium">{t('searchPage.queryMode')}</label>
                   </SearchHelpTooltip>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      type="button"
-                      variant={queryMode === 'simple' ? 'default' : 'outline'}
-                      onClick={() => switchMode('simple')}
-                      data-tour-id="search-simple-button"
-                    >
+                  <div role="tablist" aria-label={t('searchPage.queryMode')} className="flex rounded-xl border bg-muted/50 p-1 shadow-inner">
+                    <button type="button" role="tab" aria-selected={queryMode === 'simple'} onClick={() => switchMode('simple')} data-tour-id="search-simple-button" className={cn('flex flex-1 items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition-all', queryMode === 'simple' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
                       {t('searchPage.simple')}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={queryMode === 'complex' ? 'default' : 'outline'}
-                      onClick={() => switchMode('complex')}
-                      data-tour-id="search-complex-button"
-                    >
+                    </button>
+                    <button type="button" role="tab" aria-selected={queryMode === 'complex'} onClick={() => switchMode('complex')} data-tour-id="search-complex-button" className={cn('flex flex-1 items-center justify-center rounded-lg px-3 py-2 text-sm font-medium transition-all', queryMode === 'complex' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
                       {t('searchPage.complex')}
-                    </Button>
+                    </button>
                   </div>
                 </div>
 
@@ -863,12 +1036,12 @@ function RealSearchPage() {
                   </div>
 
                   {queryMode === 'simple' ? (
-                    <div className="space-y-3 rounded-xl border p-3">
+                    <div className="space-y-2">
                       <SearchHelpTooltip content={t('searchPage.simpleHelp')}>
-                        <label className="text-sm font-medium">{t('searchPage.quickSearch')}</label>
+                        <label className="text-xs font-medium text-muted-foreground">{t('searchPage.quickSearch')}</label>
                       </SearchHelpTooltip>
-                      <div className="flex gap-2">
-                        <div className="relative flex-1">
+                      <div className="flex items-center gap-1.5 rounded-xl border bg-card p-1.5 shadow-sm">
+                        <div className="relative min-w-0 flex-1">
                           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                           <Input
                             value={simpleQueryInput}
@@ -879,11 +1052,16 @@ function RealSearchPage() {
                                 submitSearch()
                               }
                             }}
-                            className="pl-9"
+                            className="h-9 border-0 bg-transparent pl-9 shadow-none focus-visible:ring-0"
                             placeholder={t('searchPage.quickSearchPlaceholder')}
                           />
                         </div>
-                        <Button type="button" onClick={submitSearch} disabled={simpleQueryInput.trim().length === 0}>
+                        {searchMode === 'scholarly' ? (
+                          <Button type="button" variant={aiExpansionEnabled ? 'default' : 'ghost'} size="icon" className="h-9 w-9 shrink-0 rounded-lg" aria-label="Enable AI query expansion" title="AI query expansion" onClick={() => setAiExpansionEnabled((current) => !current)} disabled={!isOnline}>
+                            <Sparkles className="h-4 w-4" />
+                          </Button>
+                        ) : null}
+                        <Button type="button" size="sm" className="h-9 shrink-0 rounded-lg px-3" onClick={submitSearch} disabled={simpleQueryInput.trim().length === 0}>
                           {t('searchPage.search')}
                         </Button>
                       </div>
@@ -973,6 +1151,46 @@ function RealSearchPage() {
                 )}
               </form>
 
+              {(scholarlySearchRequested && (aiLoadingStage || aiExpandedQueries.length > 0 || aiSearchError)) ? (
+                <Collapsible defaultOpen className="mb-3 rounded-xl border border-violet-200 bg-violet-50/60 shadow-sm dark:border-violet-500/30 dark:bg-violet-950/20">
+                  <CollapsibleTrigger className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-semibold text-violet-900 dark:text-violet-200"><span className="flex items-center gap-2"><Sparkles className="h-4 w-4" />AI search enhancements</span><span className="text-xs font-normal">Details</span></CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-2 px-3 pb-3">
+                  {aiExpansionEnabled ? <><p className="text-xs text-muted-foreground"><span className="font-medium">Original:</span> {executedSimpleQuery}</p>{aiLoadingStage === 'expanding' ? <p className="text-xs font-medium text-violet-800 dark:text-violet-200">Expanding reasoning with AI…</p> : aiLoadingStage === 'fetching' ? <p className="text-xs font-medium text-violet-800 dark:text-violet-200">Fetching from Semantic Scholar and OpenAlex…</p> : aiLoadingStage === 'ranking' ? <p className="text-xs font-medium text-violet-800 dark:text-violet-200">Ranking results with AI…</p> : <div className="flex flex-wrap gap-1.5">{aiExpandedQueries.length > 0 ? aiExpandedQueries.map((phrase) => <Badge key={phrase} variant="outline" className="border-violet-300 bg-background text-violet-800 dark:border-violet-500/50 dark:text-violet-200">{phrase}</Badge>) : <span className="text-xs text-muted-foreground">No phrases were generated.</span>}</div>}</> : null}
+                  {aiRerankEnabled ? <p className="text-xs text-muted-foreground">AI smart sort is enabled for the retrieved results.</p> : null}
+                  {aiSearchError ? <p className="text-xs text-red-700 dark:text-red-300">{aiSearchError}</p> : null}
+                  </CollapsibleContent>
+                </Collapsible>
+              ) : null}
+              {searchMode === 'scholarly' ? (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" className="w-full justify-between rounded-xl bg-muted/10 px-3 font-medium" data-tour-id="scholarly-filters"><span className="flex items-center gap-2"><Filter className="h-4 w-4 text-muted-foreground" />Scholarly filters</span><span className="text-xs font-normal text-muted-foreground">Refine</span></Button>
+                  </PopoverTrigger>
+                  <PopoverContent side="right" align="start" className="w-[min(22rem,calc(100vw-2rem))] space-y-3 rounded-2xl p-4">
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <Button type="button" size="sm" variant={scholarlyDateFilter === 'this_year' ? 'default' : 'outline'} className="h-auto min-h-9 whitespace-nowrap px-1.5 py-1.5 text-[11px] leading-tight" onClick={() => setScholarlyDateFilter((current) => current === 'this_year' ? 'all' : 'this_year')}>This year · {new Date().getFullYear()}</Button>
+                    <Button type="button" size="sm" variant={scholarlyDateFilter === 'since_previous' ? 'default' : 'outline'} className="h-auto min-h-9 whitespace-nowrap px-1.5 py-1.5 text-[11px] leading-tight" onClick={() => setScholarlyDateFilter((current) => current === 'since_previous' ? 'all' : 'since_previous')}>Since {new Date().getFullYear() - 1}</Button>
+                    <Button type="button" size="sm" variant={scholarlyDateFilter === 'custom' ? 'default' : 'outline'} className="h-auto min-h-9 whitespace-nowrap px-1.5 py-1.5 text-[11px] leading-tight" onClick={() => setScholarlyDateFilter((current) => current === 'custom' ? 'all' : 'custom')}>Custom</Button>
+                  </div>
+                  {scholarlyDateFilter === 'custom' ? <div className="grid grid-cols-2 gap-2"><div><label className="text-xs text-muted-foreground">From</label><Input inputMode="numeric" placeholder="2015" value={scholarlyYearFrom} onChange={(event) => setScholarlyYearFrom(event.target.value.replace(/\D/g, '').slice(0, 4))} /></div><div><label className="text-xs text-muted-foreground">To</label><Input inputMode="numeric" placeholder={`${new Date().getFullYear()}`} value={scholarlyYearTo} onChange={(event) => setScholarlyYearTo(event.target.value.replace(/\D/g, '').slice(0, 4))} /></div></div> : null}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <Button type="button" size="sm" variant={scholarlySort === 'relevance' ? 'default' : 'outline'} onClick={() => setScholarlySort('relevance')}>Sort by relevance</Button>
+                    <Button type="button" size="sm" variant={scholarlySort === 'date' ? 'default' : 'outline'} onClick={() => setScholarlySort('date')}>Sort by date</Button>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg bg-muted/30 px-2.5 py-2 text-sm transition-colors hover:bg-muted/50">
+                    <Checkbox checked={aiRerankEnabled} onCheckedChange={(checked) => setAiRerankEnabled(checked === true)} disabled={!isOnline} />
+                    <span><span className="block font-medium">AI smart sort</span><span className="block text-xs text-muted-foreground">Re-rank results and explain relevance</span></span>
+                  </label>
+                  <div><label className="text-xs text-muted-foreground">Source</label><Select value={scholarlySource} onValueChange={(value) => setScholarlySource(value as typeof scholarlySource)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">All sources</SelectItem><SelectItem value="Semantic Scholar">Semantic Scholar</SelectItem><SelectItem value="OpenAlex">OpenAlex</SelectItem></SelectContent></Select></div>
+                  <label className="flex cursor-pointer items-start gap-2 rounded-lg bg-muted/30 px-2.5 py-2 text-sm transition-colors hover:bg-muted/50">
+                    <Checkbox checked={excludeLibraryWorks} onCheckedChange={(checked) => setExcludeLibraryWorks(checked === true)} />
+                    <span><span className="block font-medium">Exclude works already in my libraries</span><span className="block text-xs text-muted-foreground">Hide DOI or title matches already saved</span></span>
+                  </label>
+                  {excludeLibraryWorks ? <p className="text-xs leading-5 text-muted-foreground">These filters apply to the scholarly results only.</p> : null}
+                  </PopoverContent>
+                </Popover>
+              ) : null}
+              <div className={cn(searchMode === 'scholarly' && 'hidden')}>
               <div className="space-y-2" data-tour-id="search-filters">
                 <SearchHelpTooltip content={t('searchPage.flexibilityHelp')}>
                   <label className="text-sm font-medium">{t('searchPage.flexibility')}</label>
@@ -1036,10 +1254,49 @@ function RealSearchPage() {
               >
                 {draftFavoriteOnly ? t('searchPage.favoritesOnly') : t('searchPage.filterFavorites')}
               </Button>
+              </div>
             </CardContent>
           </Card>
 
-          <div className="min-h-0 space-y-4 overflow-y-auto pr-1 [scrollbar-gutter:stable]" data-tour-id="search-results">
+          <div className="h-full min-h-0 space-y-4 overflow-y-auto pr-2 [scrollbar-gutter:stable]" data-tour-id="search-results">
+            {searchMode === 'scholarly' ? (
+              <>
+                {!isOnline ? <EmptyState icon={SearchIcon} title="You are offline" description="Reconnect to search scholarly sources." /> : null}
+                {isScholarlySearching ? <Card><CardContent className="flex items-center gap-3 py-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin text-primary" /><span>Expanding reasoning with AI… fetching from Semantic Scholar and OpenAlex…</span></CardContent></Card> : null}
+                {scholarlyError ? <Card className="border-red-300"><CardContent className="py-4 text-sm text-red-700">{scholarlyError}</CardContent></Card> : null}
+                {!isScholarlySearching && isOnline && filteredScholarlyResults.length === 0 && !scholarlyError ? <EmptyState icon={SearchIcon} title="No scholarly results" description={scholarlyResults.length > 0 ? 'No results match the selected filters.' : 'Try a broader title, topic, or author query.'} /> : null}
+                {filteredScholarlyResults.map((result) => {
+                  const expanded = expandedScholarlyIds.includes(result.id)
+                  return <Card key={result.id}>
+                    <CardContent className={cn('flex cursor-pointer flex-col transition-colors hover:bg-muted/20', expanded ? 'gap-3 py-4' : 'gap-2 py-3')} onClick={() => setExpandedScholarlyIds((current) => expanded ? current.filter((id) => id !== result.id) : [...current, result.id])}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className={cn('font-semibold', expanded ? 'text-lg' : 'text-base')}>{result.title}</h3>
+                          <p className="mt-1 text-sm text-muted-foreground">{result.authors.join(', ') || 'Unknown authors'}{result.year ? ` • ${result.year}` : ''}{result.venue ? ` • ${result.venue}` : ''}</p>
+                        </div>
+                        <Badge variant="outline" className="shrink-0">{result.source}</Badge>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        {result.citationCount != null ? <Badge variant="secondary">{result.citationCount} citations</Badge> : null}
+                        {result.relevanceScore != null ? <Badge variant="outline">Match {result.relevanceScore}%</Badge> : null}
+                        {result.aiRelevanceScore != null ? <Badge variant="outline" className="border-violet-300 text-violet-700">AI {result.aiRelevanceScore}%</Badge> : null}
+                        {result.doi ? <Badge variant="outline">DOI {result.doi}</Badge> : null}
+                      </div>
+                      {result.abstract ? <p className={cn('text-sm leading-6 text-muted-foreground', !expanded && 'line-clamp-2')}>{result.abstract}</p> : null}
+                      {result.abstract ? <p className="text-xs font-medium text-primary">{expanded ? 'Hide abstract' : 'Show abstract'}</p> : null}
+                      {expanded && result.aiReason ? <p className="rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-900 dark:bg-violet-950/30 dark:text-violet-200">Why this result: {result.aiReason}</p> : null}
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" onClick={(event) => { event.stopPropagation(); setScholarlyImportTarget(result) }} disabled={importedScholarlyIds.includes(result.id) || libraries.length === 0}>
+                          {importedScholarlyIds.includes(result.id) ? 'Imported' : 'Add to library'}
+                        </Button>
+                        {result.url ? <Button type="button" size="sm" variant="outline" asChild><a href={result.url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}><ExternalLink className="mr-2 h-3.5 w-3.5" />Open source</a></Button> : null}
+                      </div>
+                    </CardContent>
+                  </Card>
+                })}
+              </>
+            ) : (
+              <>
             {executedGroups.length > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3">
                 <div>
@@ -1162,8 +1419,41 @@ function RealSearchPage() {
                 </Card>
               )
             })}
+              </>
+            )}
           </div>
         </div>
+        <Dialog open={Boolean(scholarlyImportTarget)} onOpenChange={(open) => { if (!open && !isImportingScholarly) setScholarlyImportTarget(null) }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add scholarly work to your library</DialogTitle>
+              <DialogDescription>{scholarlyImportTarget?.title}</DialogDescription>
+            </DialogHeader>
+            <div
+              className="flex min-h-40 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border bg-muted/20 p-6 text-center transition-colors hover:border-primary/50"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault()
+                const file = event.dataTransfer.files[0] as (File & { path?: string }) | undefined
+                if (!file || !/\.pdf$/i.test(file.name)) {
+                  toast.error('Please drop a PDF file.')
+                  return
+                }
+                if (file.path && scholarlyImportTarget) void importScholarlyPdf(scholarlyImportTarget, file.path)
+                else toast.info('Use Choose PDF to select a file from this computer.')
+              }}
+            >
+              <p className="text-sm font-medium">Drag and drop a PDF here</p>
+              <p className="text-xs text-muted-foreground">The PDF is required; the scholarly result supplies its metadata.</p>
+              <Button type="button" variant="outline" onClick={() => void chooseScholarlyPdf()} disabled={isImportingScholarly}>
+                {isImportingScholarly ? 'Importing…' : 'Choose PDF'}
+              </Button>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setScholarlyImportTarget(null)} disabled={isImportingScholarly}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
     </div>
   )
 }
