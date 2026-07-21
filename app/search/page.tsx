@@ -7,7 +7,7 @@ import { ExternalLink, Filter, Globe, Library, Loader2, Plus, Search as SearchIc
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Slider } from '@/components/ui/slider'
@@ -479,6 +479,7 @@ function RealSearchPage() {
   const [expandedScholarlyIds, setExpandedScholarlyIds] = useState<string[]>([])
   const [scholarlyImportTarget, setScholarlyImportTarget] = useState<ScholarlySearchResult | null>(null)
   const [isImportingScholarly, setIsImportingScholarly] = useState(false)
+  const [libraryPopoverOpen, setLibraryPopoverOpen] = useState(false)
 
   const selectedLibraryIds = persistentSearch.selectedLibraryIds
   const readingStage = persistentSearch.readingStage
@@ -639,7 +640,7 @@ function RealSearchPage() {
   useEffect(() => {
     const runId = ++searchRunId.current
 
-    if (!executedSearchQuery) {
+    if (searchMode !== 'library' || !executedSearchQuery) {
       setResults([])
       setIsSearching(false)
       setSearchedCount(0)
@@ -706,7 +707,7 @@ function RealSearchPage() {
         setSearchStatus('')
       }
     }
-  }, [executedSearchQuery, filteredDocuments.length, flexibility, searchableDocumentIds, searchableDocumentsById, t])
+  }, [executedSearchQuery, filteredDocuments.length, flexibility, searchableDocumentIds, searchableDocumentsById, searchMode, t])
 
   useEffect(() => {
     if (!scholarlySearchRequested || searchMode !== 'scholarly' || !isOnline || !executedSimpleQuery.trim()) {
@@ -1006,10 +1007,19 @@ function RealSearchPage() {
               >
                 <div className="space-y-2">
                   <div role="tablist" aria-label="Search source" className="flex rounded-xl border bg-muted/50 p-1 shadow-inner">
-                    <button type="button" role="tab" aria-selected={searchMode === 'library'} onClick={() => changeSearchMode('library')} className={cn('flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all', searchMode === 'library' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
-                      <Library className="h-4 w-4" />
-                      <span>My libraries</span>
-                    </button>
+                    <Popover open={libraryPopoverOpen} onOpenChange={setLibraryPopoverOpen}>
+                      <PopoverAnchor asChild>
+                        <button type="button" role="tab" aria-selected={searchMode === 'library'} onPointerDown={(event) => { if (searchMode !== 'library') event.preventDefault() }} onClick={() => { if (searchMode === 'library') setLibraryPopoverOpen(true); else changeSearchMode('library') }} className={cn('flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all', searchMode === 'library' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+                          <Library className="h-4 w-4" />
+                          <span>My libraries</span>
+                          <Badge variant="secondary" className="rounded-full px-1.5 text-[10px]">{draftSelectedLibraryIds.length}</Badge>
+                        </button>
+                      </PopoverAnchor>
+                      <PopoverContent side="right" align="start" className="w-72 rounded-2xl p-4">
+                        <div className="mb-3 text-sm font-semibold">Libraries to search</div>
+                        <MultiSelectDropdown label={t('searchPage.library')} options={libraryFilterOptions} selectedValues={draftSelectedLibraryIds} onChange={updateSelectedLibraries} allLabel={t('libraries.allLibraries')} t={t} />
+                      </PopoverContent>
+                    </Popover>
                     <button type="button" role="tab" aria-selected={searchMode === 'scholarly'} onClick={() => changeSearchMode('scholarly')} disabled={!isOnline} className={cn('flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all', searchMode === 'scholarly' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground', !isOnline && 'cursor-not-allowed opacity-40')}>
                       <Globe className="h-4 w-4" />
                       <span>Internet</span>
@@ -1191,6 +1201,11 @@ function RealSearchPage() {
                 </Popover>
               ) : null}
               <div className={cn(searchMode === 'scholarly' && 'hidden')}>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" className="w-full justify-between rounded-xl bg-muted/10 px-3 font-medium"><span className="flex items-center gap-2"><Filter className="h-4 w-4 text-muted-foreground" />Search filters</span><span className="text-xs font-normal text-muted-foreground">Refine</span></Button>
+                </PopoverTrigger>
+                <PopoverContent side="right" align="start" className="w-[min(22rem,calc(100vw-2rem))] space-y-4 rounded-2xl p-4">
               <div className="space-y-2" data-tour-id="search-filters">
                 <SearchHelpTooltip content={t('searchPage.flexibilityHelp')}>
                   <label className="text-sm font-medium">{t('searchPage.flexibility')}</label>
@@ -1208,18 +1223,6 @@ function RealSearchPage() {
                     onValueChange={([value]) => setDraftFlexibility(value ?? 0)}
                   />
                 </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">{t('searchPage.library')}</label>
-                <MultiSelectDropdown
-                  label={t('searchPage.library')}
-                  options={libraryFilterOptions}
-                  selectedValues={draftSelectedLibraryIds}
-                  onChange={updateSelectedLibraries}
-                  allLabel={t('libraries.allLibraries')}
-                  t={t}
-                />
               </div>
 
               <div className="space-y-2">
@@ -1254,6 +1257,8 @@ function RealSearchPage() {
               >
                 {draftFavoriteOnly ? t('searchPage.favoritesOnly') : t('searchPage.filterFavorites')}
               </Button>
+                </PopoverContent>
+              </Popover>
               </div>
             </CardContent>
           </Card>

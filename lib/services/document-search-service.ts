@@ -1047,6 +1047,7 @@ async function ensureIndexSynchronized(
   state: SearchIndexState,
   documents: repo.DbDocument[],
   onProgress?: (update: SearchProgressUpdate) => void,
+  scopeDocumentIds?: Set<string> | null,
 ) {
   const documentsById = new Map(documents.map((document) => [document.id, document]))
   let changed = false
@@ -1064,8 +1065,15 @@ async function ensureIndexSynchronized(
 
   emitProgress('Checking indexed document text…')
 
+  const needsSynchronization = documents.some((document) => (
+    !state.index.has(document.id)
+    || document.indexingStatus !== 'complete'
+    || !document.textHash
+  ))
+  if (!needsSynchronization) return false
+
   for (const indexedId of Object.keys(state.indexedTextHashes)) {
-    if (!documentsById.has(indexedId)) {
+    if ((!scopeDocumentIds || scopeDocumentIds.has(indexedId)) && !documentsById.has(indexedId)) {
       changed = (await discardDocument(state, indexedId)) || changed
     }
   }
@@ -1243,7 +1251,10 @@ export async function searchDocuments(query: DocumentSearchQuery, options: Searc
       total: searchableDocuments.length,
     })
 
-    const synchronized = await ensureIndexSynchronized(state, documents, options.onProgress)
+    // Synchronize only the selected search scope. The persistent index may
+    // contain other libraries, but they are neither read nor rescored for a
+    // scoped search.
+    const synchronized = await ensureIndexSynchronized(state, searchableDocuments, options.onProgress, allowedIds)
     if (synchronized) {
       await persistSearchIndexState(state)
     }
