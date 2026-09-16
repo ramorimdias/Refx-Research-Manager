@@ -259,6 +259,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-assets
+          retention-days: 1
           path: |
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.exe
@@ -326,6 +327,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-release-assets
+          retention-days: 1
           path: |
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.app
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.zip
