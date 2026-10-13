@@ -5,17 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ReaderToolbarIconButton } from '@/components/refx/reader-toolbar-icon-button'
+import { READER_COLOR_OPTIONS, type ReaderColorId } from '@/lib/services/reader-annotation-service'
 import { cn } from '@/lib/utils'
-
-const READER_COLOR_OPTIONS = [
-  { id: 'yellow', highlight: '#fde047', note: '#f59e0b' },
-  { id: 'blue', highlight: '#7dd3fc', note: '#0ea5e9' },
-  { id: 'red', highlight: '#fda4af', note: '#ef4444' },
-  { id: 'green', highlight: '#86efac', note: '#22c55e' },
-  { id: 'purple', highlight: '#d8b4fe', note: '#a855f7' },
-] as const
-
-type ReaderColorId = (typeof READER_COLOR_OPTIONS)[number]['id']
 
 function ReaderColorPalette({
   selectedColorId,
@@ -95,6 +86,7 @@ function ReaderToolbarColorIndicator({
 
 type ReaderToolbarActionsProps = {
   canUsePreciseViewer: boolean
+  canWriteAnnotations: boolean
   viewerMode: 'pdfjs' | 'native' | 'unavailable'
   isHighlightPickerOpen: boolean
   onHighlightPickerOpenChange: (open: boolean) => void
@@ -139,6 +131,7 @@ type ReaderToolbarActionsProps = {
 
 export function ReaderToolbarActions({
   canUsePreciseViewer,
+  canWriteAnnotations,
   viewerMode,
   isHighlightPickerOpen,
   onHighlightPickerOpenChange,
@@ -187,7 +180,7 @@ export function ReaderToolbarActions({
         <PopoverTrigger asChild>
           <ReaderToolbarIconButton
             label="Highlight colors"
-            disabled={!canUsePreciseViewer}
+            disabled={!canUsePreciseViewer || !canWriteAnnotations}
             aria-pressed={isHighlightMode || isHighlightDeleteMode}
             className={cn((isHighlightMode || isHighlightDeleteMode) && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
             data-tour-id="reader-highlight"
@@ -252,7 +245,7 @@ export function ReaderToolbarActions({
         <PopoverTrigger asChild>
           <ReaderToolbarIconButton
             label="Note colors"
-            disabled={!canUsePreciseViewer}
+            disabled={!canUsePreciseViewer || !canWriteAnnotations}
             aria-pressed={isSelectingCommentPosition || isNoteDeleteMode}
             className={cn((isSelectingCommentPosition || isNoteDeleteMode) && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary')}
             data-tour-id="reader-notes"
@@ -334,9 +327,22 @@ export function ReaderToolbarActions({
       >
         <Type className="h-4 w-4" />
       </ReaderToolbarIconButton>
+      {!canWriteAnnotations ? (
+        <Badge
+          variant="outline"
+          title="Request editing access from the top bar before creating or deleting annotations."
+          className="shrink-0 border-sky-300 bg-sky-50 text-sky-900 text-xs"
+        >
+          View-only - request editing access
+        </Badge>
+      ) : null}
       {viewerMode === 'native' ? (
-        <Badge variant="outline" className="shrink-0 border-amber-300 bg-amber-50 text-amber-900 text-xs">
-          Basic preview only
+        <Badge
+          variant="outline"
+          title="Area highlights are unavailable because the precise PDF viewer could not be loaded."
+          className="shrink-0 border-amber-300 bg-amber-50 text-amber-900 text-xs"
+        >
+          Basic preview - annotations unavailable
         </Badge>
       ) : null}
       <div className="ml-auto flex shrink-0 items-center gap-1">

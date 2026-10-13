@@ -133,8 +133,20 @@ export function AppShell({ children }: AppShellProps) {
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
-        <main className="min-w-0 flex-1 overflow-auto bg-background" data-refx-main>
-          <div key={pathname} className="refx-page-stage min-h-full">
+        <main
+          className={cn(
+            'min-h-0 min-w-0 flex-1 bg-background',
+            pathname === '/reader/view' ? 'overflow-hidden' : 'overflow-auto',
+          )}
+          data-refx-main
+        >
+          <div
+            key={pathname}
+            className={cn(
+              'refx-page-stage',
+              pathname === '/reader/view' ? 'h-full min-h-0 overflow-hidden' : 'min-h-full',
+            )}
+          >
             {children}
           </div>
         </main>

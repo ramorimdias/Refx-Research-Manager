@@ -112,6 +112,7 @@ interface AppState {
   rightPanelOpen: boolean
   initialize: () => Promise<void>
   refreshData: () => Promise<void>
+  refreshAnnotations: () => Promise<void>
   setSidebarCollapsed: (collapsed: boolean) => void
   setActiveLibrary: (id: string | null) => void
   setActiveDocument: (id: string | null) => void
@@ -274,6 +275,7 @@ function syncDesktopData(data: Awaited<ReturnType<typeof fetchDesktopData>>) {
 const appActions = {} as Pick<AppState,
   | 'initialize'
   | 'refreshData'
+  | 'refreshAnnotations'
   | 'setSidebarCollapsed'
   | 'setActiveLibrary'
   | 'setActiveDocument'
@@ -367,6 +369,28 @@ appActions.refreshData = async () => {
   }
 
   syncDesktopData(await fetchDesktopData())
+}
+
+appActions.refreshAnnotations = async () => {
+  if (!useRuntimeStore.getState().isDesktopApp) {
+    useRuntimeStore.setState({ annotations: [] })
+    return
+  }
+
+  const annotations = await repo.listAllAnnotations()
+  useRuntimeStore.setState({ annotations })
+
+  const annotationCounts = annotations.reduce<Record<string, number>>((acc, annotation) => {
+    acc[annotation.documentId] = (acc[annotation.documentId] ?? 0) + 1
+    return acc
+  }, {})
+
+  useDocumentStore.setState((state) => ({
+    documents: state.documents.map((document) => ({
+      ...document,
+      commentCount: annotationCounts[document.id] ?? 0,
+    })),
+  }))
 }
 
 appActions.setSidebarCollapsed = (collapsed) => useUiStore.getState().setSidebarCollapsed(collapsed)

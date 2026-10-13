@@ -33,6 +33,7 @@
     "createUpdaterArtifacts": true,
     "targets": [
       "msi",
+      "nsis",
       "dmg",
       "app"
     ],
@@ -47,7 +48,10 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
+      "timestampUrl": "",
+      "nsis": {
+        "installMode": "currentUser"
+      }
     },
     "macOS": {
       "entitlements": null,

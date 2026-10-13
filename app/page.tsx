@@ -428,7 +428,7 @@ export default function HomePage() {
 
         return {
           id: `annotation-${annotation.id}`,
-          title: annotation.kind === 'highlight' || annotation.kind === 'area'
+          title: annotation.kind === 'highlight' || annotation.kind === 'area' || annotation.kind === 'area_highlight'
             ? t('home.highlightCreated')
             : t('home.annotationCreated'),
           detail: `${document.title}${annotation.pageNumber ? ` - ${t('home.page', { page: annotation.pageNumber })}` : ''}`,

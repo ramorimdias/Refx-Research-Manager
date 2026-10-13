@@ -158,12 +158,13 @@ This runs:
 
 Configured targets:
 - `msi` (Windows installer)
+- `nsis` (Windows setup executable; per-user install without admin rights)
 - `dmg` + `app` (macOS)
 
 Output location:
 - `src-tauri/target/release/bundle/`
 
-### Windows-only: step-by-step test + build for MSI
+### Windows-only: build MSI and no-admin NSIS installers
 
 If you are building on a Windows machine and want to validate locally before sharing an installer, use this sequence:
 
@@ -192,7 +193,7 @@ If you are building on a Windows machine and want to validate locally before sha
    - importing a PDF works
    - app restarts without DB errors
 
-4. **Create a production MSI build:**
+4. **Create production Windows installers:**
 
    ```powershell
    pnpm tauri:build
@@ -200,26 +201,28 @@ If you are building on a Windows machine and want to validate locally before sha
 
    This runs the configured static frontend build (`TAURI_ENV=1 pnpm build`) and then Tauri bundling.
 
-5. **Find the generated Windows installer:**
+5. **Find the generated Windows installers:**
 
    ```text
    src-tauri\target\release\bundle\msi\
+   src-tauri\target\release\bundle\nsis\
    ```
 
-   You should see an `.msi` file for the current app version.
+   The `.exe` in the `nsis` folder installs Refx for the current user under `%LOCALAPPDATA%` and does not require administrator rights. The `.msi` remains available for managed or system-wide installs and may require administrator rights.
 
 6. **Installer validation checklist (recommended):**
-   - Run the `.msi` installer.
+   - Run the NSIS `.exe` installer as a standard user to confirm it does not request elevation.
    - Launch Refx from Start Menu.
    - Verify app opens with expected window title (`Refx - Research Library`).
    - Import at least one PDF and reopen app to confirm data persists.
+   - Confirm MSI and NSIS installations receive updates using their matching installer type.
    - Uninstall and reinstall to verify clean install behavior.
 
 7. **If build fails, verify first:**
    - `cargo --version`, `rustc --version`
    - `pnpm --version`, `node --version`
    - Visual Studio Build Tools C++ workload is installed
-   - You are building on Windows for MSI output
+   - You are building on Windows for MSI and NSIS output
 
 8. **Fix common Windows packaging errors (`icons/icon.ico` / `package.metadata`):**
 

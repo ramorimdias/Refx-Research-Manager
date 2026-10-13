@@ -9,6 +9,7 @@ const cargoTomlPath = join(repoRoot, 'src-tauri', 'Cargo.toml')
 const appVersionPath = join(repoRoot, 'lib', 'app-version.ts')
 const bundleDir = join(repoRoot, 'src-tauri', 'target', 'release', 'bundle')
 const msiDir = join(bundleDir, 'msi')
+const nsisDir = join(bundleDir, 'nsis')
 const envLocalPath = join(repoRoot, '.env.local')
 
 const nextVersion = process.argv[2]?.trim()
@@ -94,28 +95,35 @@ function parseGithubRepoFullName(remoteUrl) {
 }
 
 function findReleaseAssets(version, productName) {
-  if (!existsSync(msiDir)) {
-    console.error(`Release aborted: bundle directory not found: ${msiDir}`)
-    process.exit(1)
+  for (const directory of [msiDir, nsisDir]) {
+    if (!existsSync(directory)) {
+      console.error(`Release aborted: bundle directory not found: ${directory}`)
+      process.exit(1)
+    }
   }
 
   const installerPrefix = `${productName}_${version}_`
-  const installerName = capture('powershell', [
+  const findInstallerName = (directory, pattern) => capture('powershell', [
     '-NoProfile',
     '-Command',
-    `Get-ChildItem -Path '${msiDir.replace(/'/g, "''")}' -Filter '${installerPrefix}*.msi' | Sort-Object Name | Select-Object -Last 1 -ExpandProperty Name`,
+    `Get-ChildItem -Path '${directory.replace(/'/g, "''")}' -Filter '${installerPrefix}${pattern}' | Sort-Object Name | Select-Object -Last 1 -ExpandProperty Name`,
   ])
 
-  if (!installerName) {
-    console.error(`Release aborted: could not find MSI installer for ${productName} ${version}`)
+  const msiInstallerName = findInstallerName(msiDir, '*.msi')
+  const nsisInstallerName = findInstallerName(nsisDir, '*.exe')
+
+  if (!msiInstallerName || !nsisInstallerName) {
+    console.error(`Release aborted: could not find both MSI and NSIS installers for ${productName} ${version}`)
     process.exit(1)
   }
 
-  const installerPath = join(msiDir, installerName)
-  const signaturePath = `${installerPath}.sig`
+  const msiInstallerPath = join(msiDir, msiInstallerName)
+  const msiSignaturePath = `${msiInstallerPath}.sig`
+  const nsisInstallerPath = join(nsisDir, nsisInstallerName)
+  const nsisSignaturePath = `${nsisInstallerPath}.sig`
   const latestManifestPath = join(msiDir, 'latest.json')
 
-  for (const filePath of [installerPath, signaturePath, latestManifestPath]) {
+  for (const filePath of [msiInstallerPath, msiSignaturePath, nsisInstallerPath, nsisSignaturePath, latestManifestPath]) {
     if (!existsSync(filePath)) {
       console.error(`Release aborted: missing release asset: ${filePath}`)
       process.exit(1)
@@ -123,8 +131,10 @@ function findReleaseAssets(version, productName) {
   }
 
   return [
-    { name: installerName, path: installerPath, contentType: 'application/x-msi' },
-    { name: `${installerName}.sig`, path: signaturePath, contentType: 'application/octet-stream' },
+    { name: msiInstallerName, path: msiInstallerPath, contentType: 'application/x-msi' },
+    { name: `${msiInstallerName}.sig`, path: msiSignaturePath, contentType: 'application/octet-stream' },
+    { name: nsisInstallerName, path: nsisInstallerPath, contentType: 'application/vnd.microsoft.portable-executable' },
+    { name: `${nsisInstallerName}.sig`, path: nsisSignaturePath, contentType: 'application/octet-stream' },
     { name: 'latest.json', path: latestManifestPath, contentType: 'application/json' },
   ]
 }

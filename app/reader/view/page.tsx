@@ -37,20 +37,25 @@ import {
   type PdfWord,
   type SearchOccurrence,
 } from '@/lib/services/document-processing'
+import {
+  AREA_HIGHLIGHT_KIND,
+  getReaderColorOption,
+  hexToRgba,
+  isReaderColorId,
+  parseAreaHighlight as parseReaderAreaHighlight,
+  READER_COLOR_OPTIONS,
+  serializeAreaHighlightContent,
+  type ReaderAreaHighlight,
+  type ReaderColorId,
+} from '@/lib/services/reader-annotation-service'
 import { findDocumentPageHits, type DocumentSearchQuery } from '@/lib/services/document-search-service'
 import { DETACHED_READER_QUERY_VALUE, openDetachedReaderWindow } from '@/lib/services/reader-window-service'
 import { parseAreaNoteAnchor, parseNoteAnchorColor, serializeAreaNoteAnchor, serializePointNoteAnchor, type NoteAreaRect } from '@/lib/services/document-note-anchor-service'
 import { cn } from '@/lib/utils'
+import { normalizeErrorMessage } from '@/lib/utils/error'
 import { useT } from '@/lib/localization'
 import { useDocumentActions, useDocumentStore } from '@/lib/stores/document-store'
 import { useRuntimeState } from '@/lib/stores/runtime-store'
-
-type ReaderAreaHighlight = {
-  id: string
-  pageNumber: number
-  rect: { x: number; y: number; width: number; height: number }
-  color: string
-}
 
 function isMacLikeWebKitEnvironment() {
   if (typeof navigator === 'undefined') return false
@@ -91,6 +96,14 @@ function getAdvancedViewerFallbackMessage(error: unknown) {
 
 type ReaderPrintMode = 'original' | 'highlights' | 'highlights-notes'
 
+type HighlightDragState = {
+  start: { x: number; y: number }
+  documentId: string
+  pageNumber: number
+  color: string
+  pointerId: number
+}
+
 const READER_HIGHLIGHT_COLOR_KEY = 'refx-reader-highlight-color'
 const READER_NOTE_COLOR_KEY = 'refx-reader-note-color'
 const READER_VIEW_STATE_KEY_PREFIX = 'refx-reader-view-state'
@@ -100,34 +113,6 @@ const READER_MIN_INTERNAL_ZOOM = 25
 const READER_MAX_INTERNAL_ZOOM = 375
 const READER_BUTTON_ZOOM_STEP = 15
 const READER_WHEEL_ZOOM_STEP = 2
-
-const READER_COLOR_OPTIONS = [
-  { id: 'yellow', highlight: '#fde047', note: '#f59e0b' },
-  { id: 'blue', highlight: '#7dd3fc', note: '#0ea5e9' },
-  { id: 'red', highlight: '#fda4af', note: '#ef4444' },
-  { id: 'green', highlight: '#86efac', note: '#22c55e' },
-  { id: 'purple', highlight: '#d8b4fe', note: '#a855f7' },
-] as const
-
-type ReaderColorId = (typeof READER_COLOR_OPTIONS)[number]['id']
-
-function isReaderColorId(value: string): value is ReaderColorId {
-  return READER_COLOR_OPTIONS.some((option) => option.id === value)
-}
-
-function getReaderColorOption(id: ReaderColorId) {
-  return READER_COLOR_OPTIONS.find((option) => option.id === id) ?? READER_COLOR_OPTIONS[0]
-}
-
-function hexToRgba(hex: string, alpha: number) {
-  const normalized = hex.replace('#', '')
-  if (normalized.length !== 6) return hex
-  const red = Number.parseInt(normalized.slice(0, 2), 16)
-  const green = Number.parseInt(normalized.slice(2, 4), 16)
-  const blue = Number.parseInt(normalized.slice(4, 6), 16)
-  if ([red, green, blue].some((value) => Number.isNaN(value))) return hex
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
-}
 
 function ReaderColorPalette({
   selectedColorId,
@@ -273,41 +258,6 @@ function hasSelectedText() {
   return Boolean(window.getSelection?.()?.toString().trim())
 }
 
-function parseAreaHighlight(annotation: repo.DbAnnotation): ReaderAreaHighlight | null {
-  if (annotation.kind !== 'highlight') return null
-  if (!annotation.content) return null
-
-  try {
-    const parsed = JSON.parse(annotation.content) as {
-      rect?: { x?: number; y?: number; width?: number; height?: number }
-      color?: string
-    }
-
-    if (
-      typeof parsed.rect?.x !== 'number'
-      || typeof parsed.rect?.y !== 'number'
-      || typeof parsed.rect?.width !== 'number'
-      || typeof parsed.rect?.height !== 'number'
-    ) {
-      return null
-    }
-
-    return {
-      id: annotation.id,
-      pageNumber: annotation.pageNumber,
-      rect: {
-        x: clamp01(parsed.rect.x),
-        y: clamp01(parsed.rect.y),
-        width: clamp01(parsed.rect.width),
-        height: clamp01(parsed.rect.height),
-      },
-      color: parsed.color ?? '#facc15',
-    }
-  } catch {
-    return null
-  }
-}
-
 function getFloatingHintStyle(
   cursor: { x: number; y: number },
   pageSize: { width: number; height: number },
@@ -373,7 +323,7 @@ function RealReaderViewPage() {
   const returnTo = params.get('returnTo') ?? ''
   const isDetachedReaderWindow = params.get('detached') === DETACHED_READER_QUERY_VALUE
   const documents = useDocumentStore((state) => state.documents)
-  const { notes, annotations, loadNotes, refreshData, isDesktopApp } = useRuntimeState()
+  const { notes, annotations, loadNotes, refreshData, refreshAnnotations, isDesktopApp, remoteVaultStatus } = useRuntimeState()
   const { scanDocumentsOcr, setActiveDocument, updateDocument } = useDocumentActions()
   const document = useMemo(() => documents.find((entry) => entry.id === id) ?? null, [documents, id])
   const [resolvedFilePath, setResolvedFilePath] = useState<string | null>(null)
@@ -398,6 +348,8 @@ function RealReaderViewPage() {
   const [isPrintOptionsOpen, setIsPrintOptionsOpen] = useState(false)
   const [isHighlightMode, setIsHighlightMode] = useState(false)
   const [isHighlightDeleteMode, setIsHighlightDeleteMode] = useState(false)
+  const [highlightMutation, setHighlightMutation] = useState<'idle' | 'saving' | 'deleting'>('idle')
+  const [highlightError, setHighlightError] = useState<string | null>(null)
   const [isPrinting, setIsPrinting] = useState(false)
   const [isHighlightPickerOpen, setIsHighlightPickerOpen] = useState(false)
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -444,8 +396,8 @@ function RealReaderViewPage() {
   const initializedDocumentIdRef = useRef<string | null>(null)
   const routeSelectionKeyRef = useRef<string | null>(null)
   const notePlacementStartRef = useRef<{ x: number; y: number } | null>(null)
-  const highlightDragStartRef = useRef<{ x: number; y: number } | null>(null)
-  const [draftHighlightRect, setDraftHighlightRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
+  const highlightDragStartRef = useRef<HighlightDragState | null>(null)
+  const [draftHighlightRect, setDraftHighlightRect] = useState<ReaderAreaHighlight['rect'] | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -820,6 +772,7 @@ function RealReaderViewPage() {
     [page, searchOccurrences],
   )
   const canUsePreciseViewer = viewerMode === 'pdfjs' && Boolean(pdfDocument)
+  const canWriteAnnotations = !remoteVaultStatus?.enabled || remoteVaultStatus.isWritable
   const showViewerLoading =
     Boolean(activeFilePath)
     && (isPdfLoading || (!canUsePreciseViewer && !embeddedPdfUrl && !hasViewerTimedOut))
@@ -919,22 +872,12 @@ function RealReaderViewPage() {
     }
     return grouped
   }, [allPageNumbers, id, notes])
-  const currentPageAreaHighlights = useMemo(
-    () =>
-      (id
-        ? annotations
-            .filter((annotation) => annotation.documentId === id && annotation.pageNumber === page)
-            .map(parseAreaHighlight)
-            .filter((annotation): annotation is ReaderAreaHighlight => Boolean(annotation))
-        : []),
-    [annotations, id, page],
-  )
   const areaHighlightsByPage = useMemo(() => {
     const grouped = new Map<number, ReaderAreaHighlight[]>()
     if (!id) return grouped
     for (const annotation of annotations) {
       if (annotation.documentId !== id || annotation.pageNumber == null) continue
-      const parsed = parseAreaHighlight(annotation)
+      const parsed = parseReaderAreaHighlight(annotation)
       if (!parsed) continue
       const currentEntries = grouped.get(annotation.pageNumber) ?? []
       currentEntries.push(parsed)
@@ -1723,7 +1666,7 @@ function RealReaderViewPage() {
       try {
         const allAreaHighlights = annotations
         .filter((annotation) => annotation.documentId === currentDocument.id)
-        .map(parseAreaHighlight)
+        .map(parseReaderAreaHighlight)
         .filter((annotation): annotation is ReaderAreaHighlight => Boolean(annotation))
 
       const areaHighlightsByPage = new Map<number, ReaderAreaHighlight[]>()
@@ -2129,7 +2072,7 @@ function RealReaderViewPage() {
   }
 
   const updateDraftHighlightRect = (event: React.PointerEvent<HTMLDivElement>) => {
-    const start = highlightDragStartRef.current
+    const start = highlightDragStartRef.current?.start
 
     const bounds = event.currentTarget.getBoundingClientRect()
     if (bounds.width <= 0 || bounds.height <= 0) return
@@ -2149,22 +2092,34 @@ function RealReaderViewPage() {
     })
   }
 
+  const getHighlightPointerPosition = (event: React.PointerEvent<HTMLDivElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect()
+    if (bounds.width <= 0 || bounds.height <= 0) return null
+
+    return {
+      x: clamp01((event.clientX - bounds.left) / bounds.width),
+      y: clamp01((event.clientY - bounds.top) / bounds.height),
+    }
+  }
+
   const handleHighlightPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!isHighlightMode || isHighlightDeleteMode || !canUsePreciseViewer) return
+    if (!isHighlightMode || isHighlightDeleteMode || !canUsePreciseViewer || !canWriteAnnotations || !id || highlightMutation !== 'idle') return
     if (event.button !== 0) return
 
-    const bounds = event.currentTarget.getBoundingClientRect()
-    if (bounds.width <= 0 || bounds.height <= 0) return
+    const start = getHighlightPointerPosition(event)
+    if (!start) return
 
     event.preventDefault()
     event.stopPropagation()
 
-    const start = {
-      x: clamp01((event.clientX - bounds.left) / bounds.width),
-      y: clamp01((event.clientY - bounds.top) / bounds.height),
+    setHighlightError(null)
+    highlightDragStartRef.current = {
+      start,
+      documentId: id,
+      pageNumber: page,
+      color: selectedHighlightColor.highlight,
+      pointerId: event.pointerId,
     }
-
-    highlightDragStartRef.current = start
     setHighlightPlacementCursor(start)
     setDraftHighlightRect({
       x: start.x,
@@ -2181,51 +2136,65 @@ function RealReaderViewPage() {
   }
 
   const handleHighlightPointerEnd = async (event: React.PointerEvent<HTMLDivElement>) => {
-    const start = highlightDragStartRef.current
-    if (!start) return
+    const drag = highlightDragStartRef.current
+    if (!drag) return
+    const start = drag.start
 
     event.preventDefault()
     event.stopPropagation()
 
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+    if (event.pointerId === drag.pointerId && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
 
-    updateDraftHighlightRect(event)
-
-    const rect = draftHighlightRect
-      ?? {
-        x: start.x,
-        y: start.y,
-        width: 0,
-        height: 0,
-      }
-
+    // Derive the final rectangle from the pointer-up event itself. React state
+    // updates from the last pointer-move may not have committed yet (notably
+    // for fast drags in Safari), which previously made valid drags look empty.
+    const end = getHighlightPointerPosition(event) ?? start
+    const rect = {
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    }
     highlightDragStartRef.current = null
     setHighlightPlacementCursor(null)
     setDraftHighlightRect(null)
 
-    if (!id || !isDesktopApp) return
+    if (!isDesktopApp || !canWriteAnnotations) return
     if (rect.width < 0.01 || rect.height < 0.01) return
 
-    await repo.createAnnotation({
-      documentId: id,
-      pageNumber: page,
-      kind: 'highlight',
-      content: JSON.stringify({
-        rect,
-        color: selectedHighlightColor.highlight,
-      }),
-    })
-    await refreshData()
-    setIsHighlightDeleteMode(false)
-    setHighlightPlacementCursor(null)
+    setHighlightMutation('saving')
+    setHighlightError(null)
+    try {
+      await repo.createAnnotation({
+        documentId: drag.documentId,
+        pageNumber: drag.pageNumber,
+        kind: AREA_HIGHLIGHT_KIND,
+        content: serializeAreaHighlightContent(rect, drag.color),
+      })
+      await refreshAnnotations()
+      setIsHighlightDeleteMode(false)
+    } catch (error) {
+      setHighlightError(normalizeErrorMessage(error, 'Unable to save the highlight. Please try again.'))
+    } finally {
+      setHighlightMutation('idle')
+    }
   }
 
   const handleDeleteAreaHighlight = async (highlightId: string) => {
-    if (!isDesktopApp) return
-    await repo.deleteAnnotation(highlightId)
-    await refreshData()
+    if (!isDesktopApp || highlightMutation !== 'idle') return
+
+    setHighlightMutation('deleting')
+    setHighlightError(null)
+    try {
+      await repo.deleteAnnotation(highlightId)
+      await refreshAnnotations()
+    } catch (error) {
+      setHighlightError(normalizeErrorMessage(error, 'Unable to delete the highlight. Please try again.'))
+    } finally {
+      setHighlightMutation('idle')
+    }
   }
 
   const handleStartNewComment = () => {
@@ -2250,7 +2219,25 @@ function RealReaderViewPage() {
     setDraftHighlightRect(null)
     setHighlightPlacementCursor(null)
     highlightDragStartRef.current = null
+    setHighlightError(null)
   }
+
+  useEffect(() => {
+    if (!isHighlightMode && !isHighlightDeleteMode) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setIsHighlightMode(false)
+      setIsHighlightDeleteMode(false)
+      setDraftHighlightRect(null)
+      setHighlightPlacementCursor(null)
+      highlightDragStartRef.current = null
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isHighlightDeleteMode, isHighlightMode])
 
   const activateHighlightPlacementMode = (colorId = selectedHighlightColor.id) => {
     deactivateTextSelectionMode()
@@ -2258,6 +2245,7 @@ function RealReaderViewPage() {
     setSelectedHighlightColorId(colorId)
     setIsHighlightDeleteMode(false)
     setIsHighlightMode(true)
+    setHighlightError(null)
     setDraftHighlightRect(null)
     setHighlightPlacementCursor(null)
     highlightDragStartRef.current = null
@@ -2465,10 +2453,11 @@ function RealReaderViewPage() {
 
   return (
     <>
-      <ResizablePanelGroup direction="horizontal" className="h-full">
-      <ResizablePanel defaultSize={74} minSize={45}>
-        <div className="flex h-full flex-1 flex-col">
-        <div className="flex flex-nowrap items-center gap-1 overflow-x-auto border-b px-2 py-2">
+      <div className="h-full min-h-0 overflow-hidden">
+      <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+      <ResizablePanel defaultSize={74} minSize={45} className="min-h-0">
+        <div className="flex h-full min-h-0 flex-1 flex-col">
+        <div className="sticky top-0 z-40 flex shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b bg-background/95 px-2 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <ReaderNavigationToolbar
             backLabel={backLabel}
             onBack={() => {
@@ -2513,6 +2502,7 @@ function RealReaderViewPage() {
           />
           <ReaderToolbarActions
             canUsePreciseViewer={canUsePreciseViewer}
+            canWriteAnnotations={canWriteAnnotations}
             viewerMode={viewerMode}
             isHighlightPickerOpen={isHighlightPickerOpen}
             onHighlightPickerOpenChange={setIsHighlightPickerOpen}
@@ -2555,7 +2545,22 @@ function RealReaderViewPage() {
             hasOcrText={document.hasOcrText}
           />
         </div>
-        <div ref={readerViewportRef} className="flex-1 overflow-auto bg-muted/30 p-4">
+        <div ref={readerViewportRef} className="min-h-0 flex-1 overflow-auto bg-muted/30 p-4">
+          {highlightMutation !== 'idle' || highlightError ? (
+            <div
+              className={cn(
+                'mx-auto mb-3 max-w-5xl rounded-md border px-3 py-2 text-sm',
+                highlightError
+                  ? 'border-red-300 bg-red-50 text-red-900'
+                  : 'border-border bg-background text-muted-foreground',
+              )}
+              role={highlightError ? 'alert' : undefined}
+              aria-live="polite"
+            >
+              {highlightError
+                ?? (highlightMutation === 'saving' ? 'Saving highlight...' : 'Deleting highlight...')}
+            </div>
+          ) : null}
           {searchQuery.trim() && currentPageOccurrences.length > 0 && !hasExactHighlightOverlay && viewerMode === 'pdfjs' && (
                 <div className="mx-auto mb-3 max-w-5xl rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                  Showing page-level matches for this page.
@@ -2770,7 +2775,7 @@ function RealReaderViewPage() {
         </div>
       </ResizablePanel>
       <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={26} minSize={18} maxSize={45}>
+      <ResizablePanel defaultSize={26} minSize={18} maxSize={45} className="min-h-0">
         <div className="flex h-full flex-col border-l">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           <ReaderSearchPanel
@@ -2823,6 +2828,7 @@ function RealReaderViewPage() {
         </div>
       </ResizablePanel>
       </ResizablePanelGroup>
+      </div>
       <AlertDialog open={isDeleteCommentDialogOpen} onOpenChange={setIsDeleteCommentDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

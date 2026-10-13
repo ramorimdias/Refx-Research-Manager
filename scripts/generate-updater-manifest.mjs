@@ -14,26 +14,27 @@ function normalizeRepoReleaseBase(endpoint, version) {
   return `${match[1]}/releases/download/v${version}`
 }
 
-function findWindowsArtifact(msiDir, productName, version) {
-  if (!existsSync(msiDir)) {
-    throw new Error(`Bundle directory not found: ${msiDir}`)
+function findWindowsArtifact(bundleType, productName, version, extension) {
+  const bundleTypeDir = join(bundleDir, bundleType)
+  if (!existsSync(bundleTypeDir)) {
+    throw new Error(`Bundle directory not found: ${bundleTypeDir}`)
   }
 
   const prefix = `${productName}_${version}_`
-  const installer = readdirSync(msiDir).find((file) => file.startsWith(prefix) && file.endsWith('.msi'))
+  const installer = readdirSync(bundleTypeDir).find((file) => file.startsWith(prefix) && file.endsWith(extension))
   if (!installer) {
-    throw new Error(`No MSI installer found for ${productName} ${version}`)
+    throw new Error(`No ${bundleType.toUpperCase()} installer found for ${productName} ${version}`)
   }
 
   const signatureFile = `${installer}.sig`
-  const signaturePath = join(msiDir, signatureFile)
+  const signaturePath = join(bundleTypeDir, signatureFile)
   if (!existsSync(signaturePath)) {
     throw new Error(`Missing updater signature for ${installer}`)
   }
 
   return {
     installer,
-    installerPath: join(msiDir, installer),
+    installerPath: join(bundleTypeDir, installer),
     signature: readFileSync(signaturePath, 'utf8').trim(),
   }
 }
@@ -47,8 +48,8 @@ if (!productName || !version || !endpoint) {
   throw new Error('Missing productName, version, or updater endpoint in tauri.conf.json')
 }
 
-const msiDir = join(bundleDir, 'msi')
-const artifact = findWindowsArtifact(msiDir, productName, version)
+const msiArtifact = findWindowsArtifact('msi', productName, version, '.msi')
+const nsisArtifact = findWindowsArtifact('nsis', productName, version, '.exe')
 const releaseBase = normalizeRepoReleaseBase(endpoint, version)
 
 const manifest = {
@@ -56,9 +57,18 @@ const manifest = {
   notes: `Refx ${version} is available.`,
   pub_date: new Date().toISOString(),
   platforms: {
+    // Keep the legacy key pointed at MSI for builds that predate bundle-type selection.
     'windows-x86_64': {
-      signature: artifact.signature,
-      url: `${releaseBase}/${encodeURIComponent(basename(artifact.installerPath))}`,
+      signature: msiArtifact.signature,
+      url: `${releaseBase}/${encodeURIComponent(basename(msiArtifact.installerPath))}`,
+    },
+    'windows-x86_64-msi': {
+      signature: msiArtifact.signature,
+      url: `${releaseBase}/${encodeURIComponent(basename(msiArtifact.installerPath))}`,
+    },
+    'windows-x86_64-nsis': {
+      signature: nsisArtifact.signature,
+      url: `${releaseBase}/${encodeURIComponent(basename(nsisArtifact.installerPath))}`,
     },
   },
 }
@@ -66,7 +76,7 @@ const manifest = {
 const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`
 const manifestTargets = [
   join(bundleDir, 'latest.json'),
-  join(msiDir, 'latest.json'),
+  join(dirname(msiArtifact.installerPath), 'latest.json'),
 ]
 
 for (const target of manifestTargets) {

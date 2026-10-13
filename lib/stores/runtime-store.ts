@@ -12,6 +12,7 @@ export function useRuntimeState() {
     remoteVaultStatus: useAppStore((state) => state.remoteVaultStatus),
     loadNotes: useAppStore((state) => state.loadNotes),
     refreshData: useAppStore((state) => state.refreshData),
+    refreshAnnotations: useAppStore((state) => state.refreshAnnotations),
     initialize: useAppStore((state) => state.initialize),
   }
 }

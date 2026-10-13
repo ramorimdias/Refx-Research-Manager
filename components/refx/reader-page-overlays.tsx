@@ -4,6 +4,7 @@ import type { PointerEventHandler, RefCallback } from 'react'
 import type { DbNote } from '@/lib/repositories/local-db'
 import { buildDocumentCommentTitle } from '@/lib/services/document-comment-service'
 import type { PdfWord, SearchOccurrence } from '@/lib/services/document-processing'
+import { hexToRgba, type ReaderAreaHighlight } from '@/lib/services/reader-annotation-service'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/localization'
 
@@ -15,22 +16,6 @@ type ReaderSidebarComment = DbNote & {
     width: number
     height: number
   }
-}
-
-type ReaderAreaHighlight = {
-  id: string
-  rect: { x: number; y: number; width: number; height: number }
-  color: string
-}
-
-function hexToRgba(hex: string, alpha: number) {
-  const normalized = hex.replace('#', '')
-  if (normalized.length !== 6) return hex
-  const red = Number.parseInt(normalized.slice(0, 2), 16)
-  const green = Number.parseInt(normalized.slice(2, 4), 16)
-  const blue = Number.parseInt(normalized.slice(4, 6), 16)
-  if ([red, green, blue].some((value) => Number.isNaN(value))) return hex
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
 function getFloatingHintStyle(
@@ -431,6 +416,7 @@ export function ReaderPageOverlays({
               event.stopPropagation()
               onDisableHighlightDeleteMode()
             }}
+            aria-label={isHighlightDeleteMode ? 'Delete area highlight' : 'Area highlight'}
             title={isHighlightDeleteMode ? 'Click to delete' : 'Highlight'}
           />
         ))}
