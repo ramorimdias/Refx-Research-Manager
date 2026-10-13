@@ -42,6 +42,7 @@ type GraphContextMenuState =
   | null
 
 type MapsWorkspaceCanvasProps = {
+  nodesDraggable: boolean
   visibleDocumentsCount: number
   edgesCount: number
   pendingConnectionDirection: 'outbound' | 'inbound' | null
@@ -92,6 +93,7 @@ type MapsWorkspaceCanvasProps = {
 }
 
 export function MapsWorkspaceCanvas({
+  nodesDraggable,
   visibleDocumentsCount,
   edgesCount,
   pendingConnectionDirection,
@@ -190,6 +192,7 @@ export function MapsWorkspaceCanvas({
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            nodesDraggable={nodesDraggable}
             onNodesChange={onNodesChange}
             onNodeDragStart={onNodeDragStart}
             onNodeDragStop={onNodeDragStop}

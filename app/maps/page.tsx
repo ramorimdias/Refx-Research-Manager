@@ -42,6 +42,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { toast } from 'sonner'
 import {
   Select,
   SelectContent,
@@ -75,6 +76,11 @@ import { formatReference } from '@/lib/services/work-reference-service'
 import type { Document, GraphView, GraphViewNodeLayout } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/localization'
+import {
+  getRemoteVaultStatusSnapshot,
+  subscribeRemoteVaultStatus,
+  type RemoteVaultStatus,
+} from '@/lib/remote-storage-state'
 import {
   MAP_EDGE_TYPES as FLOW_EDGE_TYPES,
   MAP_NODE_TYPES as FLOW_NODE_TYPES,
@@ -724,10 +730,12 @@ function MapsPageContent() {
   const [droppingDocumentIds, setDroppingDocumentIds] = useState<string[]>([])
   const [workingLayoutPositions, setWorkingLayoutPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [pendingDocumentPlacements, setPendingDocumentPlacements] = useState<Record<string, { x: number; y: number }>>({})
+  const [remoteVaultStatus, setRemoteVaultStatus] = useState<RemoteVaultStatus>(() => getRemoteVaultStatusSnapshot())
   const dragConnectionSourceIdRef = useRef<string | null>(null)
   const dragConnectionHandleIdRef = useRef<string | null>(null)
   const dragConnectionCompletedRef = useRef(false)
   const draggingNodeIdsRef = useRef<Set<string>>(new Set())
+  const nodeDragStartPositionsRef = useRef(new Map<string, { x: number; y: number }>())
   const lastAutoFitKeyRef = useRef<string | null>(null)
   const pendingPlacementCommitIdsRef = useRef<Set<string>>(new Set())
   const recentlyRevealedDocumentIdRef = useRef<string | null>(null)
@@ -738,6 +746,8 @@ function MapsPageContent() {
   useEffect(() => {
     setGraphPreferences(readStoredGraphPreferences())
   }, [])
+
+  useEffect(() => subscribeRemoteVaultStatus(setRemoteVaultStatus), [])
 
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -1947,6 +1957,7 @@ function MapsPageContent() {
   const handleEdgesChange: OnEdgesChange = (changes) => onEdgesChange(changes)
   const handleNodeDragStart: NodeMouseHandler = (_, node) => {
     draggingNodeIdsRef.current.add(node.id)
+    nodeDragStartPositionsRef.current.set(node.id, { ...node.position })
     if (node.type === 'reference') {
       setSelectedDocumentId(null)
       setSelectedWorkReferenceId(node.id.replace('work-reference-node-', ''))
@@ -1963,6 +1974,8 @@ function MapsPageContent() {
   }
   const handleNodeDragStop: NodeDragHandler = async (_, node) => {
     draggingNodeIdsRef.current.delete(node.id)
+    const dragStartPosition = nodeDragStartPositionsRef.current.get(node.id)
+    nodeDragStartPositionsRef.current.delete(node.id)
     if (node.type === 'reference') {
       if (!activeLibraryId) return
 
@@ -1986,15 +1999,37 @@ function MapsPageContent() {
 
     if (node.type !== 'document') return
     if (activeGraphViewId) {
+      if (remoteVaultStatus.enabled && !remoteVaultStatus.isWritable) {
+        if (dragStartPosition) {
+          setNodes((currentNodes) => currentNodes.map((currentNode) => (
+            currentNode.id === node.id
+              ? { ...currentNode, position: dragStartPosition }
+              : currentNode
+          )))
+        }
+        return
+      }
+
       const existingLayout = graphViewLayoutMap.get(node.id)
-      await upsertGraphViewNodeLayout({
-        graphViewId: activeGraphViewId,
-        documentId: node.id,
-        x: node.position.x,
-        y: node.position.y,
-        pinned: existingLayout?.pinned ?? false,
-        hidden: false,
-      })
+      try {
+        await upsertGraphViewNodeLayout({
+          graphViewId: activeGraphViewId,
+          documentId: node.id,
+          x: node.position.x,
+          y: node.position.y,
+          pinned: existingLayout?.pinned ?? false,
+          hidden: false,
+        })
+      } catch (error) {
+        if (dragStartPosition) {
+          setNodes((currentNodes) => currentNodes.map((currentNode) => (
+            currentNode.id === node.id
+              ? { ...currentNode, position: dragStartPosition }
+              : currentNode
+          )))
+        }
+        toast.error(error instanceof Error ? error.message : 'Could not save the map layout.')
+      }
       return
     }
 
@@ -2801,6 +2836,7 @@ function MapsPageContent() {
       </div>
 
       <MapsWorkspaceCanvas
+        nodesDraggable={!activeGraphViewId || !remoteVaultStatus.enabled || remoteVaultStatus.isWritable}
         visibleDocumentsCount={visibleDocuments.length}
         edgesCount={edges.length}
         pendingConnectionDirection={pendingConnectionDirection}

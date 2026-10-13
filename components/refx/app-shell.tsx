@@ -26,6 +26,7 @@ export function AppShell({ children }: AppShellProps) {
   const { isDesktopApp } = useRuntimeState()
   const isDetachedReaderWindow =
     pathname === '/reader/view' && searchParams.get('detached') === DETACHED_READER_QUERY_VALUE
+  const isFullHeightWorkspace = pathname === '/reader/view' || pathname === '/maps'
   const [isDragActive, setIsDragActive] = useState(false)
   const dragDepthRef = useRef(0)
 
@@ -136,7 +137,7 @@ export function AppShell({ children }: AppShellProps) {
         <main
           className={cn(
             'min-h-0 min-w-0 flex-1 bg-background',
-            pathname === '/reader/view' ? 'overflow-hidden' : 'overflow-auto',
+            isFullHeightWorkspace ? 'overflow-hidden' : 'overflow-auto',
           )}
           data-refx-main
         >
@@ -144,7 +145,7 @@ export function AppShell({ children }: AppShellProps) {
             key={pathname}
             className={cn(
               'refx-page-stage',
-              pathname === '/reader/view' ? 'h-full min-h-0 overflow-hidden' : 'min-h-full',
+              isFullHeightWorkspace ? 'h-full min-h-0 overflow-hidden' : 'min-h-full',
             )}
           >
             {children}
