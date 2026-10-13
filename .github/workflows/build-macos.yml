@@ -61,6 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-build-universal
+          retention-days: 1
           path: |
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.app
             src-tauri/target/universal-apple-darwin/release/bundle/**/*.zip
