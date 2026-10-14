@@ -413,6 +413,8 @@ export function parseDocumentClassification(document: ClassificationSource) {
       || candidate.provider === 'google_full'
       || candidate.provider === 'openai_page1'
       || candidate.provider === 'openai_full'
+      || candidate.provider === 'qwen_page1'
+      || candidate.provider === 'qwen_full'
       || candidate.provider === 'anthropic_page1'
       || candidate.provider === 'anthropic_full'
       || candidate.provider === 'local_heuristic'

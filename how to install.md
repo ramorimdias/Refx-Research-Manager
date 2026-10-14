@@ -66,6 +66,19 @@ xcode-select --install
 pnpm install
 ```
 
+## Configure Qwen 3.6 (internal use)
+
+Qwen calls go through the server route `/api/qwen/v1/*`; the browser and desktop clients never receive the Cloudflare Access Client ID or Client Secret. The production proxy runs as a separate Next.js container on the VM at `https://refx.667764.xyz`, routed behind Traefik while the existing static site remains on Nginx. Its server-only environment is stored at `/opt/docker/apps/refx-qwen-proxy/.env.qwen` with mode `0600`. For local development, copy `.env.example` to `.env.local` and configure server-only values there:
+
+- `QWEN_API_BASE_URL` — defaults to `https://llm.667764.xyz/v1`.
+- `QWEN_MODEL` — default model when a chat request omits one; defaults to `qwen3.6:35b`.
+- `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` — Cloudflare Access service-token credentials. Add them as server environment secrets, never as `NEXT_PUBLIC_*` variables or GitHub build variables.
+- `QWEN_ENABLER_PASSWORD` — shared internal password required by the proxy. Enter this in **Settings → Research & AI → Document AI → Qwen (Cloudflare Access)**, then choose **Save and enable Qwen**. The app stores this feature password locally; it is separate from the Cloudflare service token.
+
+The proxy server is deployed with the stack in `deploy/qwen-proxy/compose.yaml`; do not deploy the Qwen API route as a static export. The static website shares the `https://refx.667764.xyz` origin, and Tauri packages use the public, non-secret `NEXT_PUBLIC_QWEN_PROXY_URL=https://refx.667764.xyz`. The desktop release workflows read this value from a GitHub Actions repository variable. `QWEN_PROXY_ALLOWED_ORIGINS` can add frontend origins if a desktop build uses a custom origin.
+
+The app server attaches the service-token headers only to requests sent upstream to the Qwen endpoint. It supports model listing and chat completions, passes chat response streams through, and reports missing server credentials or upstream `401`/`403` responses without retrying unauthenticated. Browser CORS is only between the client and our app proxy; the browser no longer calls the Access-protected LLM host directly.
+
 ---
 
 ## Clone and sync the repo in Visual Studio Code (Windows)

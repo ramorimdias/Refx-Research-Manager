@@ -17,6 +17,7 @@ import {
   Loader2,
   Minus,
   Plus,
+  RefreshCw,
   Save,
   Search,
   Smartphone,
@@ -64,7 +65,11 @@ import {
   type DocumentMetadataCandidate,
 } from '@/lib/services/document-enrichment-service'
 import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
-import { scanDocumentForDoiReferences } from '@/lib/services/document-doi-reference-service'
+import {
+  scanDocumentForDoiOccurrences,
+  scanDocumentForDoiReferences,
+  type DocumentDoiOccurrence,
+} from '@/lib/services/document-doi-reference-service'
 import { extractLocalPdfMetadata, extractNormalizedDoi, hasUsableMetadataTitle } from '@/lib/services/document-metadata-service'
 import { loadPdfJsModule } from '@/lib/services/document-processing'
 import { convertFileSrc, isTauri, open as openFileDialog, readFile } from '@/lib/tauri/client'
@@ -125,6 +130,7 @@ type DocumentPdfPreviewProps = {
   document: RefxDocument
   initialMode?: 'manual' | 'auto'
   fixedPage?: number
+  highlightOccurrence?: DocumentDoiOccurrence | null
   showPageControls?: boolean
   showZoomControls?: boolean
   viewportClassName?: string
@@ -134,6 +140,7 @@ function DocumentPdfPreview({
   document,
   initialMode = 'manual',
   fixedPage,
+  highlightOccurrence,
   showPageControls = true,
   showZoomControls = true,
   viewportClassName,
@@ -164,6 +171,12 @@ function DocumentPdfPreview({
     setZoom(100)
     setIsPreviewEnabled(isAutoPreview)
   }, [document.id, fixedPage, isAutoPreview])
+
+  useEffect(() => {
+    if (!highlightOccurrence?.pageNumber) return
+    setPage(highlightOccurrence.pageNumber)
+    setIsPreviewEnabled(true)
+  }, [highlightOccurrence])
 
   useEffect(() => {
     if (!isAutoPreview) return
@@ -394,6 +407,21 @@ function DocumentPdfPreview({
                 }}
               >
                 <canvas ref={canvasRef} className="block bg-white shadow-sm" />
+                {highlightOccurrence?.pageNumber === page
+                  ? highlightOccurrence.rects.map((rect, index) => (
+                      <div
+                        key={`${highlightOccurrence.doi}-${index}`}
+                        aria-hidden="true"
+                        className="pointer-events-none absolute z-10 rounded-sm bg-yellow-300/55 outline outline-1 outline-amber-500/90"
+                        style={{
+                          left: rect.left * zoom / 100,
+                          top: rect.top * zoom / 100,
+                          width: rect.width * zoom / 100,
+                          height: rect.height * zoom / 100,
+                        }}
+                      />
+                    ))
+                  : null}
                 {isRendering ? (
                   <div className="absolute inset-0 flex items-center justify-center bg-background/60 text-sm text-muted-foreground">
                     Renderingâ€¦
@@ -653,6 +681,11 @@ function RealDocumentDetailPage({
   const [metadataSearchValue, setMetadataSearchValue] = useState('')
   const [metadataSearchAuthorValue, setMetadataSearchAuthorValue] = useState('')
   const [pdfPreviewMode, setPdfPreviewMode] = useState<'manual' | 'auto'>('manual')
+  const [pdfPreviewPage, setPdfPreviewPage] = useState(1)
+  const [documentDoiOccurrences, setDocumentDoiOccurrences] = useState<DocumentDoiOccurrence[]>([])
+  const [selectedDocumentDoiOccurrence, setSelectedDocumentDoiOccurrence] = useState<DocumentDoiOccurrence | null>(null)
+  const [isScanningDocumentDois, setIsScanningDocumentDois] = useState(false)
+  const [documentDoiScanError, setDocumentDoiScanError] = useState('')
   const [bibtexInput, setBibtexInput] = useState('')
   const [metadataProviders, setMetadataProviders] = useState<MetadataCandidateProvider[]>([
     'semantic_scholar',
@@ -680,7 +713,6 @@ function RealDocumentDetailPage({
   const [newSuggestedTagNames, setNewSuggestedTagNames] = useState<string[]>([])
   const [classificationMode, setClassificationMode] = useState<StoredAppSettings['advancedClassificationMode']>(DEFAULT_APP_SETTINGS.advancedClassificationMode)
   const [isClassifyingDocument, setIsClassifyingDocument] = useState(false)
-  const [isClassifyingDocumentWithAi, setIsClassifyingDocumentWithAi] = useState(false)
   const [classificationStatusMessage, setClassificationStatusMessage] = useState('')
 
   const [detailsExpanded, setDetailsExpanded] = useState(true)
@@ -863,6 +895,47 @@ function RealDocumentDetailPage({
     return () => window.clearTimeout(timeoutId)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [document, isMetadataDialogOpen, autoSearchMetadata])
+
+  useEffect(() => {
+    if (!document || !isMetadataDialogOpen) return
+    let cancelled = false
+
+    const scanDocument = async () => {
+      setIsScanningDocumentDois(true)
+      setDocumentDoiScanError('')
+      try {
+        let filePath = document.filePath
+        if (isTauri() && filePath) {
+          try {
+            filePath = await repo.ensureDocumentPdfInStorage(document.id) ?? filePath
+          } catch {
+            // Continue with the current path and persisted text if storage lookup fails.
+          }
+        }
+
+        const occurrences = await scanDocumentForDoiOccurrences({
+          id: document.id,
+          extractedTextPath: document.extractedTextPath,
+          searchText: document.searchText,
+          filePath,
+        })
+        if (cancelled) return
+        setDocumentDoiOccurrences(occurrences)
+        setSelectedDocumentDoiOccurrence(null)
+      } catch (error) {
+        if (cancelled) return
+        setDocumentDoiOccurrences([])
+        setDocumentDoiScanError(error instanceof Error ? error.message : 'Could not scan this document for DOIs.')
+      } finally {
+        if (!cancelled) setIsScanningDocumentDois(false)
+      }
+    }
+
+    void scanDocument()
+    return () => {
+      cancelled = true
+    }
+  }, [document, isMetadataDialogOpen])
 
   const relationItems = useMemo(() => {
     if (!document) {
@@ -1235,7 +1308,7 @@ function RealDocumentDetailPage({
       previousSuggestedTagNamesRef.current = nextSuggestedTagNames
       setAiTagStatus(
         result.keywords.length > 0
-          ? `Stored ${result.keywords.length} AI tag suggestion${result.keywords.length === 1 ? '' : 's'}${result.classificationStored ? ' and updated semantic classification.' : '.'}`
+          ? `Stored ${result.keywords.length} AI tag suggestion${result.keywords.length === 1 ? '' : 's'}${result.classificationStored ? ' and updated the topic classification.' : '.'}`
           : 'No AI keywords were returned for this document.',
       )
     } catch (error) {
@@ -1289,47 +1362,14 @@ function RealDocumentDetailPage({
           `${refreshedDocument.classification.category}: ${refreshedDocument.classification.topic} (${Math.round(refreshedDocument.classification.confidence * 100)}% confidence).`,
         )
       } else if (refreshedDocument.classificationStatus === 'failed') {
-        setClassificationStatusMessage(refreshedDocument.processingError ?? 'Semantic classification failed.')
+        setClassificationStatusMessage(refreshedDocument.processingError ?? 'Topic classification failed.')
       } else if (refreshedDocument.classificationStatus === 'skipped') {
-        setClassificationStatusMessage('Semantic classification was skipped for this document.')
+        setClassificationStatusMessage('Topic classification was skipped for this document.')
       } else {
         setClassificationStatusMessage('Document classification finished.')
       }
     } finally {
       setIsClassifyingDocument(false)
-    }
-  }
-
-  const handleClassifyDocumentWithAi = async () => {
-    if (!document || !documentCanBeClassified) return
-
-    setTagsExpanded(true)
-    setIsClassifyingDocumentWithAi(true)
-    setClassificationStatusMessage('')
-    try {
-      const result = await detectAndStoreDocumentKeywords(document.id, { forceAi: true })
-      await refreshData()
-      const refreshedDocument = useDocumentStore.getState().documents.find((entry) => entry.id === document.id)
-      if (!refreshedDocument) {
-        setClassificationStatusMessage(t('documentDetailPage.aiClassificationFinished'))
-        return
-      }
-
-      if (refreshedDocument.classificationStatus === 'complete' && refreshedDocument.classification) {
-        setClassificationStatusMessage(
-          `${refreshedDocument.classification.category}: ${refreshedDocument.classification.topic} (${Math.round(refreshedDocument.classification.confidence * 100)}% confidence).`,
-        )
-      } else if (refreshedDocument.classificationStatus === 'failed') {
-        setClassificationStatusMessage(refreshedDocument.processingError ?? t('documentDetailPage.aiClassificationFailed'))
-      } else if (result.classificationStored) {
-        setClassificationStatusMessage(t('documentDetailPage.aiClassificationFinished'))
-      } else {
-        setClassificationStatusMessage(t('documentDetailPage.aiClassificationNotSaved'))
-      }
-    } catch (error) {
-      setClassificationStatusMessage(normalizeErrorMessage(error, 'Could not classify this document with AI.'))
-    } finally {
-      setIsClassifyingDocumentWithAi(false)
     }
   }
 
@@ -1388,7 +1428,9 @@ function RealDocumentDetailPage({
     if (!document) return
     if (document.documentType === 'pdf' && document.filePath && isTauri()) {
       setPdfPreviewMode('auto')
+      setPdfPreviewPage(1)
     }
+    setSelectedDocumentDoiOccurrence(null)
     const hasDoi = doi.trim().length > 0
     const nextMode = hasDoi ? 'doi' : 'title_author'
     const nextSearchValue = hasDoi ? doi.trim() : title.trim()
@@ -1413,6 +1455,35 @@ function RealDocumentDetailPage({
   }
 
   const selectedMetadataCandidate = metadataCandidates.find((candidate) => candidate.id === selectedMetadataCandidateId) ?? metadataCandidates[0] ?? null
+
+  const groupedDocumentDoiOccurrences = useMemo(() => {
+    const groups = new Map<string, { doi: string; occurrences: DocumentDoiOccurrence[] }>()
+    for (const occurrence of documentDoiOccurrences) {
+      const key = occurrence.doi.toLowerCase()
+      const group = groups.get(key) ?? { doi: occurrence.doi, occurrences: [] }
+      group.occurrences.push(occurrence)
+      groups.set(key, group)
+    }
+    return Array.from(groups.values())
+  }, [documentDoiOccurrences])
+
+  const handleSelectDocumentDoiOccurrence = (occurrence: DocumentDoiOccurrence) => {
+    setSelectedDocumentDoiOccurrence(occurrence)
+    if (occurrence.pageNumber) {
+      setPdfPreviewPage(occurrence.pageNumber)
+      setPdfPreviewMode('auto')
+    }
+  }
+
+  const handleSearchFoundDoi = (group: { doi: string; occurrences: DocumentDoiOccurrence[] }) => {
+    const occurrence = group.occurrences.find((entry) => entry === selectedDocumentDoiOccurrence)
+      ?? group.occurrences[0]
+    if (occurrence) handleSelectDocumentDoiOccurrence(occurrence)
+    setMetadataSearchField('doi')
+    setMetadataSearchValue(group.doi)
+    setMetadataDoiSearchFailed(false)
+    void runMetadataCandidateSearch({ field: 'doi', value: group.doi, authorValue: '' })
+  }
 
   const handleApplyMetadataCandidate = async (
     mode: 'fill_missing' | 'replace_unlocked',
@@ -1838,7 +1909,8 @@ function RealDocumentDetailPage({
               <DocumentPdfPreview
                 document={document}
                 initialMode={pdfPreviewMode}
-                fixedPage={pdfPreviewMode === 'auto' ? 1 : undefined}
+                fixedPage={pdfPreviewMode === 'auto' ? pdfPreviewPage : undefined}
+                highlightOccurrence={selectedDocumentDoiOccurrence}
               />
             </div>
           ) : null}
@@ -2148,13 +2220,14 @@ function RealDocumentDetailPage({
                         variant="outline"
                         size="sm"
                         className="h-9 w-9 px-0"
+                        aria-label="Refresh local tags"
                         onClick={() => void handleRefreshLocalTags()}
                         disabled={isFetchingAiTags || !isDesktopApp}
                       >
                         {isFetchingAiTags ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <Search className="h-4 w-4" />
+                          <RefreshCw className="h-4 w-4" />
                         )}
                       </Button>
                     </TooltipTrigger>
@@ -2167,6 +2240,7 @@ function RealDocumentDetailPage({
                         variant="outline"
                         size="sm"
                         className="h-9 w-9 px-0"
+                        aria-label={t('documentDetailPage.generateAiTagsAndTopic')}
                         onClick={() => void handleFetchTagsWithAi()}
                         disabled={isFetchingAiTags || !isDesktopApp}
                       >
@@ -2177,7 +2251,7 @@ function RealDocumentDetailPage({
                         )}
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" sideOffset={8}>Fetch tags with AI</TooltipContent>
+                    <TooltipContent side="top" sideOffset={8}>{t('documentDetailPage.generateAiTagsAndTopic')}</TooltipContent>
                   </Tooltip>
                   <CollapsibleTrigger asChild>
                     <Button
@@ -2359,28 +2433,6 @@ function RealDocumentDetailPage({
                               : t('documentDetailPage.reclassifyLocal')}
                           </TooltipContent>
                         </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void handleClassifyDocumentWithAi()}
-                              disabled={
-                                isClassifyingDocumentWithAi
-                                || !documentCanBeClassified
-                                || document.classificationStatus === 'processing'
-                              }
-                            >
-                              {isClassifyingDocumentWithAi ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Sparkles className="h-4 w-4" />
-                              )}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" sideOffset={8}>{t('documentDetailPage.classifyAi')}</TooltipContent>
-                        </Tooltip>
                       </div>
                     </div>
                     {classificationMode === 'off' ? (
@@ -2404,20 +2456,6 @@ function RealDocumentDetailPage({
                             {Math.round(document.classification.confidence * 100)}% confidence
                           </span>
                         </div>
-                        {document.classification.matchedKeywords && document.classification.matchedKeywords.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {document.classification.matchedKeywords.map((keyword) => (
-                              <TagChip key={keyword} name={keyword} className="max-w-[260px]" />
-                            ))}
-                          </div>
-                        ) : null}
-                        {document.classification.suggestedTags && document.classification.suggestedTags.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {document.classification.suggestedTags.map((tag) => (
-                              <TagChip key={tag.name} name={tag.name} />
-                            ))}
-                          </div>
-                        ) : null}
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">{t('documentDetailPage.noClassificationSaved')}</p>
@@ -2594,6 +2632,80 @@ function RealDocumentDetailPage({
                     Results are prioritized as Semantic Scholar, OpenAlex, then Crossref.
                   </p>
                 </div>
+
+              <div className="mt-4 space-y-3 rounded-lg border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium">DOIs found in this document</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {isScanningDocumentDois
+                        ? 'Scanning document text and PDF pages…'
+                        : `${groupedDocumentDoiOccurrences.length} unique DOI${groupedDocumentDoiOccurrences.length === 1 ? '' : 's'} found`}
+                    </p>
+                  </div>
+                  {selectedDocumentDoiOccurrence?.pageNumber && selectedDocumentDoiOccurrence.rects.length > 0 ? (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
+                      Highlighted in preview
+                    </span>
+                  ) : null}
+                </div>
+
+                {documentDoiScanError ? (
+                  <p className="text-xs text-destructive">{documentDoiScanError}</p>
+                ) : null}
+
+                {groupedDocumentDoiOccurrences.length > 0 ? (
+                  <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                    {groupedDocumentDoiOccurrences.map((group) => (
+                      <div key={group.doi.toLowerCase()} className="space-y-2 rounded-md border border-border/70 p-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <code className="break-all text-xs font-medium">{group.doi}</code>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleSearchFoundDoi(group)}
+                            disabled={isFetchingOnlineMetadata || !isOnline || metadataProviders.length === 0}
+                          >
+                            <Search className="mr-1.5 h-3.5 w-3.5" />
+                            Search this DOI
+                          </Button>
+                        </div>
+                        {group.occurrences.map((occurrence, index) => (
+                          <button
+                            key={`${group.doi}-${occurrence.pageNumber ?? 'text'}-${index}`}
+                            type="button"
+                            aria-pressed={selectedDocumentDoiOccurrence === occurrence}
+                            className={cn(
+                              'block w-full rounded-md border px-2.5 py-2 text-left transition-colors',
+                              selectedDocumentDoiOccurrence === occurrence
+                                ? 'border-amber-500/70 bg-amber-50 dark:bg-amber-500/10'
+                                : 'border-transparent bg-muted/35 hover:border-border hover:bg-muted/60',
+                            )}
+                            onClick={() => handleSelectDocumentDoiOccurrence(occurrence)}
+                          >
+                            <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+                              {occurrence.pageNumber ? `Page ${occurrence.pageNumber}` : 'Text occurrence'}
+                              {group.occurrences.length > 1 ? ` · Occurrence ${index + 1}` : ''}
+                            </span>
+                            <span className="break-words text-xs leading-relaxed text-muted-foreground">
+                              {occurrence.contextBefore}
+                              <mark className="rounded-sm bg-yellow-300/80 px-0.5 font-semibold text-foreground dark:bg-yellow-400/35">
+                                {occurrence.doi}
+                              </mark>
+                              {occurrence.contextAfter}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ) : !isScanningDocumentDois && !documentDoiScanError ? (
+                  <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+                    No DOI strings found in the available document text.
+                  </p>
+                ) : null}
+              </div>
 
                 <div className="mt-4 flex justify-end">
                   <Button

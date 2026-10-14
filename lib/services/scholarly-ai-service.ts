@@ -1,5 +1,6 @@
 import { getResolvedAiApiKey, loadAppSettings } from '@/lib/app-settings'
 import type { ScholarlySearchResult } from '@/lib/services/scholarly-search-service'
+import { getQwenDefaultModel, requestQwenOpenAi } from '@/lib/services/qwen-openai-client'
 
 type AiJson = { expandedQueries?: unknown; ranking?: unknown }
 
@@ -27,6 +28,9 @@ async function askProvider(prompt: string) {
     const key = getResolvedAiApiKey('openai', settings)
     if (!key) return null
     response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` }, body: JSON.stringify({ model: settings.aiModel || 'gpt-4o-mini', temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'user', content: prompt }] }) })
+  } else if (settings.aiProvider === 'qwen') {
+    if (!getResolvedAiApiKey('qwen', settings)) return null
+    response = await requestQwenOpenAi('chat/completions', settings.qwenProxyPassword, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.aiModel || getQwenDefaultModel(), temperature: 0.1, response_format: { type: 'json_object' }, messages: [{ role: 'user', content: prompt }] }) })
   } else {
     const key = getResolvedAiApiKey('anthropic', settings)
     if (!key) return null
@@ -36,7 +40,7 @@ async function askProvider(prompt: string) {
   const payload = await response.json()
   const text = settings.aiProvider === 'google'
     ? payload?.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? '').join('')
-    : settings.aiProvider === 'openai' ? payload?.choices?.[0]?.message?.content : payload?.content?.[0]?.text
+    : settings.aiProvider === 'openai' || settings.aiProvider === 'qwen' ? payload?.choices?.[0]?.message?.content : payload?.content?.[0]?.text
   if (!text) throw new Error('AI provider returned an empty response.')
   const parsed = parseProviderJson(text)
   if (!parsed) throw new Error('AI provider returned an unreadable response. Try again or disable AI expansion.')

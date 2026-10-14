@@ -1,0 +1,38 @@
+name: refx-qwen-proxy
+
+services:
+  qwen-proxy:
+    image: refx-qwen-proxy:local
+    build:
+      context: ../..
+      dockerfile: deploy/qwen-proxy/Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: ../../.env.qwen
+        required: true
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    expose:
+      - "3000"
+    networks:
+      - aio_network
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: aio_network
+      traefik.http.routers.refx-qwen-api.rule: "Host(`refx.667764.xyz`) && PathPrefix(`/api/qwen/v1`)"
+      traefik.http.routers.refx-qwen-api.entrypoints: websecure
+      traefik.http.routers.refx-qwen-api.tls: "true"
+      traefik.http.routers.refx-qwen-api.tls.certresolver: letsencrypt
+      traefik.http.routers.refx-qwen-api.priority: "1000"
+      traefik.http.routers.refx-qwen-api.service: refx-qwen-api
+      traefik.http.services.refx-qwen-api.loadbalancer.server.port: "3000"
+
+networks:
+  aio_network:
+    external: true

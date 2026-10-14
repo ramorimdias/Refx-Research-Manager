@@ -38,6 +38,8 @@ export type DetectedDocumentKeywordsResult = {
     | 'google_full'
     | 'openai_page1'
     | 'openai_full'
+    | 'qwen_page1'
+    | 'qwen_full'
     | 'anthropic_page1'
     | 'anthropic_full'
   classificationStored?: boolean
@@ -219,7 +221,7 @@ async function extractKeywordsWithGemini(args: {
                   'Otherwise infer 5 to 12 concise research keywords.',
                   'Include one short summary sentence.',
                   'Also infer a semantic topic classification for the document.',
-                  'Return JSON only with: {"keywords": string[], "summary": string, "classification": {"category": string, "topic": string, "confidence": number, "matchedKeywords": string[], "suggestedTags": string[]}}.',
+                  'Return JSON only with: {"keywords": string[], "summary": string, "classification": {"category": string, "topic": string, "confidence": number, "matchedKeywords": string[]}}.',
                   '',
                   args.text,
                 ].join('\n'),
@@ -378,6 +380,8 @@ function getRemoteSource(provider: RemoteAiProvider, mode: 'page1' | 'full') {
       return mode === 'full' ? 'google_full' : 'google_page1'
     case 'openai':
       return mode === 'full' ? 'openai_full' : 'openai_page1'
+    case 'qwen':
+      return mode === 'full' ? 'qwen_full' : 'qwen_page1'
     case 'anthropic':
       return mode === 'full' ? 'anthropic_full' : 'anthropic_page1'
     default:
@@ -506,8 +510,12 @@ export async function detectAndStoreDocumentKeywords(
         ? 'Google AI'
         : remoteProvider === 'openai'
           ? 'OpenAI'
-          : 'Anthropic'
-      throw new Error(`${providerLabel} API key is not configured.`)
+          : remoteProvider === 'qwen'
+            ? 'Qwen Cloudflare Access credentials'
+            : 'Anthropic'
+        throw new Error(remoteProvider === 'qwen'
+          ? 'Enter the Qwen feature password in Settings to enable Qwen.'
+        : `${providerLabel} API key is not configured.`)
     }
     const fallbackKeywords = await extractKeywordsWithKeyBert(keywordInput)
     return storeKeywords(document, fallbackKeywords, 'local_heuristic', undefined, 'local')
@@ -523,6 +531,7 @@ export async function detectAndStoreDocumentKeywords(
     mode: extractionMode,
     text: textForProvider,
     apiKey,
+      qwenProxyPassword: settings.qwenProxyPassword,
     model: settings.aiModel,
   })
 

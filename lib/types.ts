@@ -52,6 +52,8 @@ export type SemanticClassificationProvider =
   | 'google_full'
   | 'openai_page1'
   | 'openai_full'
+  | 'qwen_page1'
+  | 'qwen_full'
   | 'anthropic_page1'
   | 'anthropic_full'
   | 'gemini_page1'

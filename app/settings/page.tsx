@@ -121,6 +121,7 @@ export default function SettingsPage() {
   const [crossrefTest, setCrossrefTest] = useState<ApiTestState>({ status: 'idle' })
   const [semanticScholarTest, setSemanticScholarTest] = useState<ApiTestState>({ status: 'idle' })
   const [aiApiTest, setAiApiTest] = useState<ApiTestState>({ status: 'idle' })
+  const [qwenProxyPasswordDraft, setQwenProxyPasswordDraft] = useState('')
   const [restoreTargetPath, setRestoreTargetPath] = useState<string | null>(null)
   const [isRestoreWarningOpen, setIsRestoreWarningOpen] = useState(false)
   const [isClearDataDialogOpen, setIsClearDataDialogOpen] = useState(false)
@@ -152,10 +153,10 @@ export default function SettingsPage() {
     switch (locale) {
       case 'pt-BR':
         return {
-          advancedClassification: 'Classificacao semantica avancada',
-          advancedClassificationDescription: 'Classificacao opcional de topico apos a sugestao de tags.',
+          advancedClassification: 'Classificacao local de topicos',
+          advancedClassificationDescription: 'Classificador local opcional. A classificacao por IA e gerada junto com as sugestoes de tags.',
           disabled: 'Desativado',
-          localHeuristic: 'Heuristica local',
+          localHeuristic: 'Regras locais de topicos',
           ocrScan: 'Leitura OCR',
           ocrScanDescription: 'Escaneie documentos armazenados e salve o estado de OCR e busca.',
           ocrEligible: '{count} documento{suffix} elegivel para OCR disponivel.',
@@ -170,26 +171,26 @@ export default function SettingsPage() {
           ocrFinishedSomeFailed: 'Leitura OCR concluida. {complete} concluidos, {failed} falharam.',
           ocrFinished: 'Leitura OCR concluida para {count} documento{suffix}.',
           ocrRunningStatus: 'Escaneando OCR: {finished}/{total} concluidos, {processing} em andamento.',
-          semanticClassificationTitle: 'Classificacao semantica',
-          semanticClassificationDescription: 'Execute a classificacao de topicos em documentos que ja tenham texto extraido ou OCR.',
-          semanticClassificationDisabled: 'A classificacao semantica esta desativada no momento.',
-          classificationEligible: '{count} documento{suffix} elegivel para classificacao disponivel.',
-          classifyAll: 'Classificar tudo',
-          classifying: 'Classificando...',
-          classificationProgress: 'Progresso da classificacao',
-          enableClassificationFirst: 'Ative primeiro a classificacao semantica para executar esta acao.',
-          noEligibleClassification: 'Nenhum documento elegivel precisa de classificacao semantica agora.',
-          preparingClassification: 'Preparando a classificacao semantica para {count} documento{suffix}...',
-          classificationFinishedSomeFailed: 'Classificacao semantica concluida. {complete} concluidos, {failed} falharam.',
-          classificationFinished: 'Classificacao semantica concluida para {count} documento{suffix}.',
-          classificationRunningStatus: 'Classificando documentos: {finished}/{total} concluidos, {processing} em andamento.',
+          semanticClassificationTitle: 'Classificacao local de topicos',
+          semanticClassificationDescription: 'Execute o classificador local em documentos que ja tenham texto extraido ou OCR.',
+          semanticClassificationDisabled: 'A classificacao local de topicos esta desativada no momento.',
+          classificationEligible: '{count} documento{suffix} elegivel para classificacao local.',
+          classifyAll: 'Classificar tudo localmente',
+          classifying: 'Classificando localmente...',
+          classificationProgress: 'Progresso da classificacao local',
+          enableClassificationFirst: 'Ative primeiro a classificacao local de topicos para executar esta acao.',
+          noEligibleClassification: 'Nenhum documento elegivel precisa de classificacao local agora.',
+          preparingClassification: 'Preparando a classificacao local para {count} documento{suffix}...',
+          classificationFinishedSomeFailed: 'Classificacao local concluida. {complete} concluidos, {failed} falharam.',
+          classificationFinished: 'Classificacao local concluida para {count} documento{suffix}.',
+          classificationRunningStatus: 'Classificando localmente: {finished}/{total} concluidos, {processing} em andamento.',
         }
       case 'fr':
         return {
-          advancedClassification: 'Classification semantique avancee',
-          advancedClassificationDescription: 'Classification de sujet optionnelle apres la suggestion de tags.',
+          advancedClassification: 'Classification locale des sujets',
+          advancedClassificationDescription: 'Classification locale facultative. La classification par IA est generee avec les suggestions de tags.',
           disabled: 'Desactive',
-          localHeuristic: 'Heuristique locale',
+          localHeuristic: 'Regles locales des sujets',
           ocrScan: 'Analyse OCR',
           ocrScanDescription: 'Analysez les documents stockes et conservez l etat OCR et recherche.',
           ocrEligible: '{count} document{suffix} eligible a l OCR disponible.',
@@ -204,26 +205,26 @@ export default function SettingsPage() {
           ocrFinishedSomeFailed: 'Analyse OCR terminee. {complete} termines, {failed} echoues.',
           ocrFinished: 'Analyse OCR terminee pour {count} document{suffix}.',
           ocrRunningStatus: 'Analyse OCR: {finished}/{total} termines, {processing} en cours.',
-          semanticClassificationTitle: 'Classification semantique',
-          semanticClassificationDescription: 'Lancez la classification thematique sur les documents qui ont deja du texte extrait ou OCR.',
-          semanticClassificationDisabled: 'La classification semantique est actuellement desactivee.',
-          classificationEligible: '{count} document{suffix} eligible a la classification disponible.',
-          classifyAll: 'Tout classifier',
-          classifying: 'Classification...',
-          classificationProgress: 'Progression de la classification',
-          enableClassificationFirst: 'Activez d abord la classification semantique pour lancer cette action.',
-          noEligibleClassification: 'Aucun document eligible n a besoin de classification semantique pour le moment.',
-          preparingClassification: 'Preparation de la classification semantique pour {count} document{suffix}...',
-          classificationFinishedSomeFailed: 'Classification semantique terminee. {complete} termines, {failed} echoues.',
-          classificationFinished: 'Classification semantique terminee pour {count} document{suffix}.',
-          classificationRunningStatus: 'Classification des documents: {finished}/{total} termines, {processing} en cours.',
+          semanticClassificationTitle: 'Classification locale des sujets',
+          semanticClassificationDescription: 'Lancez le classificateur local sur les documents avec du texte extrait ou OCR.',
+          semanticClassificationDisabled: 'La classification locale des sujets est desactivee.',
+          classificationEligible: '{count} document{suffix} eligible a la classification locale.',
+          classifyAll: 'Tout classifier localement',
+          classifying: 'Classification locale...',
+          classificationProgress: 'Progression de la classification locale',
+          enableClassificationFirst: 'Activez d abord la classification locale des sujets pour lancer cette action.',
+          noEligibleClassification: 'Aucun document eligible n a besoin de classification locale pour le moment.',
+          preparingClassification: 'Preparation de la classification locale pour {count} document{suffix}...',
+          classificationFinishedSomeFailed: 'Classification locale terminee. {complete} termines, {failed} echoues.',
+          classificationFinished: 'Classification locale terminee pour {count} document{suffix}.',
+          classificationRunningStatus: 'Classification locale: {finished}/{total} termines, {processing} en cours.',
         }
       default:
         return {
-          advancedClassification: 'Advanced Semantic Classification',
-          advancedClassificationDescription: 'Optional topic classification after tag suggestion.',
+          advancedClassification: 'Local Topic Classification',
+          advancedClassificationDescription: 'Optional local-only classifier. AI topic classification is generated together with AI tag suggestions.',
           disabled: 'Disabled',
-          localHeuristic: 'Local Heuristic',
+          localHeuristic: 'Local Topic Rules',
           ocrScan: 'OCR Scan',
           ocrScanDescription: 'Scan stored documents and persist OCR/search state.',
           ocrEligible: '{count} OCR-eligible document{suffix} available.',
@@ -238,19 +239,19 @@ export default function SettingsPage() {
           ocrFinishedSomeFailed: 'OCR scan finished. {complete} completed, {failed} failed.',
           ocrFinished: 'OCR scan finished for {count} document{suffix}.',
           ocrRunningStatus: 'Scanning OCR: {finished}/{total} finished, {processing} in progress.',
-          semanticClassificationTitle: 'Semantic Classification',
-          semanticClassificationDescription: 'Run topic classification on documents that already have extracted or OCR text.',
-          semanticClassificationDisabled: 'Semantic classification is currently disabled.',
-          classificationEligible: '{count} classification-eligible document{suffix} available.',
-          classifyAll: 'Classify All',
-          classifying: 'Classifying...',
-          classificationProgress: 'Classification progress',
-          enableClassificationFirst: 'Enable semantic classification first to run this action.',
-          noEligibleClassification: 'No eligible documents need semantic classification right now.',
-          preparingClassification: 'Preparing semantic classification for {count} document{suffix}...',
-          classificationFinishedSomeFailed: 'Semantic classification finished. {complete} completed, {failed} failed.',
-          classificationFinished: 'Semantic classification finished for {count} document{suffix}.',
-          classificationRunningStatus: 'Classifying documents: {finished}/{total} finished, {processing} in progress.',
+          semanticClassificationTitle: 'Local Topic Classification',
+          semanticClassificationDescription: 'Run the local classifier on documents that already have extracted or OCR text.',
+          semanticClassificationDisabled: 'Local topic classification is currently disabled.',
+          classificationEligible: '{count} document{suffix} need local topic classification.',
+          classifyAll: 'Classify All Locally',
+          classifying: 'Classifying locally...',
+          classificationProgress: 'Local classification progress',
+          enableClassificationFirst: 'Enable local topic classification first to run this action.',
+          noEligibleClassification: 'No eligible documents need local topic classification right now.',
+          preparingClassification: 'Preparing local classification for {count} document{suffix}...',
+          classificationFinishedSomeFailed: 'Local classification finished. {complete} completed, {failed} failed.',
+          classificationFinished: 'Local classification finished for {count} document{suffix}.',
+          classificationRunningStatus: 'Classifying locally: {finished}/{total} finished, {processing} in progress.',
         }
     }
   }, [locale])
@@ -535,9 +536,15 @@ export default function SettingsPage() {
     setSettings((current) => ({ ...current, [key]: value }))
   }
   const selectedAiProvider = settings.aiProvider
-  const selectedAiModelOptions = selectedAiProvider === 'local' ? [] : availableAiModels
+  const selectedAiModelOptions = selectedAiProvider === 'local'
+    ? []
+    : selectedAiProvider === 'qwen' && availableAiModels.length === 0
+      ? [{ value: settings.aiModel || getDefaultAiModel('qwen'), label: settings.aiModel || getDefaultAiModel('qwen') }]
+      : availableAiModels
   const selectedAiModelDescription = selectedAiProvider === 'local'
     ? 'The built-in extractor runs fully offline.'
+    : selectedAiProvider === 'qwen'
+      ? 'Uses the configured OpenAI-compatible Qwen endpoint.'
     : selectedAiModelOptions.find((option) => option.value === settings.aiModel)?.description ?? 'Choose the preferred AI model.'
 
   const runApiTest = async (
@@ -573,6 +580,13 @@ export default function SettingsPage() {
       return
     }
 
+    if (selectedAiProvider === 'qwen' && !settings.qwenProxyPassword.trim()) {
+      setAvailableAiModels([])
+      setAiModelsError('Enter the Qwen feature password below to enable Qwen.')
+      setIsLoadingAiModels(false)
+      return
+    }
+
     const resolvedApiKey = getResolvedAiApiKey(selectedAiProvider, settings).trim()
     if (!resolvedApiKey) {
       setAvailableAiModels([])
@@ -585,7 +599,7 @@ export default function SettingsPage() {
       setIsLoadingAiModels(true)
       setAiModelsError(null)
       try {
-        const models = await fetchAvailableAiModels(selectedAiProvider, resolvedApiKey)
+        const models = await fetchAvailableAiModels(selectedAiProvider, resolvedApiKey, settings.qwenProxyPassword)
         if (cancelled) return
         setAvailableAiModels(models)
         if (models.length > 0 && !models.some((option) => option.value === settings.aiModel)) {
@@ -611,6 +625,7 @@ export default function SettingsPage() {
     settings.openaiApiKey,
     settings.anthropicApiKey,
     settings.geminiApiKey,
+    settings.qwenProxyPassword,
   ])
 
   useEffect(() => {
@@ -1536,11 +1551,78 @@ export default function SettingsPage() {
 
                     <div className={cn('space-y-2 rounded-lg border border-border/60 p-3', settings.aiProvider === 'local' ? 'bg-muted/20' : 'bg-background')}>
                       <div className="flex items-center gap-2">
-                        <Label className="text-sm font-medium">API key</Label>
-                        <SettingsHelp content="Only needed for remote providers. Leave blank to keep remote AI disabled." />
+                        <Label className="text-sm font-medium">{settings.aiProvider === 'qwen' ? 'Qwen feature password' : 'API key'}</Label>
+                        <SettingsHelp content={settings.aiProvider === 'qwen'
+                          ? 'This password is sent to the app backend to enable Qwen. Cloudflare service-token credentials remain on the server.'
+                          : 'Only needed for remote providers. Leave blank to keep remote AI disabled.'} />
                       </div>
                       {settings.aiProvider === 'local' ? (
                         <p className="text-xs text-muted-foreground">No API key is required for the local heuristic extractor.</p>
+                      ) : settings.aiProvider === 'qwen' ? (
+                        <div className="space-y-3">
+                          <div className="space-y-1.5">
+                            <Label htmlFor="qwen-proxy-password" className="text-xs">Qwen feature password</Label>
+                            <Input
+                              id="qwen-proxy-password"
+                              type="password"
+                              autoComplete="new-password"
+                              value={qwenProxyPasswordDraft}
+                              onChange={(event) => setQwenProxyPasswordDraft(event.target.value)}
+                              placeholder={settings.qwenProxyPassword ? 'A password is saved. Enter a replacement to change it.' : 'Enter the Qwen feature password'}
+                            />
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={!qwenProxyPasswordDraft.trim()}
+                              onClick={() => {
+                                updateSettings('qwenProxyPassword', qwenProxyPasswordDraft.trim())
+                                setQwenProxyPasswordDraft('')
+                                setAiApiTest({ status: 'success', message: 'Qwen feature password saved locally. Qwen is enabled.' })
+                              }}
+                            >
+                              Save and enable Qwen
+                            </Button>
+                            {settings.qwenProxyPassword ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  updateSettings('qwenProxyPassword', '')
+                                  setQwenProxyPasswordDraft('')
+                                  setAvailableAiModels([])
+                                  setAiModelsError('Enter the Qwen feature password below to enable Qwen.')
+                                  setAiApiTest({ status: 'idle' })
+                                }}
+                              >
+                                Forget saved password
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!settings.qwenProxyPassword || aiApiTest.status === 'testing'}
+                              onClick={() => void runApiTest(
+                                setAiApiTest,
+                                async () => {
+                                  const models = await fetchAvailableAiModels('qwen', 'ollama', settings.qwenProxyPassword)
+                                  if (models.length === 0) throw new Error('Qwen accepted the request but returned no usable models.')
+                                },
+                                'Qwen API connection is working.',
+                              )}
+                            >
+                              {aiApiTest.status === 'testing' ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+                              {aiApiTest.status === 'testing' ? 'Testing...' : 'Test connection'}
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            The feature password is stored in this device’s local app settings and sent only to the app backend. Cloudflare Access Client ID and Client Secret are never sent to or stored by the client.
+                          </p>
+                          {apiTestMessage(aiApiTest)}
+                        </div>
                       ) : (
                         <Input
                           type="password"
@@ -1568,7 +1650,7 @@ export default function SettingsPage() {
                           placeholder="Leave blank to keep remote AI disabled."
                         />
                       )}
-                      {settings.aiProvider !== 'local' ? (
+                      {settings.aiProvider !== 'local' && settings.aiProvider !== 'qwen' ? (
                         <>
                           <Button
                             type="button"
@@ -1611,7 +1693,7 @@ export default function SettingsPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Label className="text-sm font-medium">Auto request remote AI on import</Label>
-                        <SettingsHelp content="Use the selected remote provider automatically on import when the daily limit allows it. Local heuristic remains the fallback." />
+                        <SettingsHelp content="Use the selected remote provider automatically on import when the daily limit allows it. One AI pass generates both tag suggestions and topic classification; local heuristics remain the fallback." />
                       </div>
                       <Checkbox
                         checked={settings.autoGeminiOnImport}

@@ -37,7 +37,6 @@ type RawPdfMetadataSignals = {
   title?: string
   authors?: string[]
   year?: number
-  doi?: string
 }
 
 type FirstPageMetadataSignals = {
@@ -127,82 +126,63 @@ function splitAuthors(raw?: string) {
     .filter(Boolean)
 }
 
-const DOI_STOP_WORDS = [
-  'received',
-  'accepted',
-  'available',
-  'corresponding',
-  'contents',
-  'sciencedirect',
-  'journal',
-  'article',
-  'published',
-  'revised',
-  'online',
-  'homepage',
-  'author',
-  'address',
-  'email',
-  'e-mail',
-  'abstract',
-  'keywords',
-  'introduction',
-]
+function trimDoiBoundaryPunctuation(value: string) {
+  let suffix = value.replace(/[.,;:!?]+$/g, '')
 
-function trimTrailingDoiNoise(value: string) {
-  let suffix = value
-    .replace(/[)\]}>,;:"']+$/g, '')
-    .replace(/\s+/g, '')
-    .trim()
-
-  for (const word of DOI_STOP_WORDS) {
-    const pattern = new RegExp(`${word}.*$`, 'i')
-    suffix = suffix.replace(pattern, '')
+  while (suffix.endsWith(')')) {
+    const openingParentheses = (suffix.match(/\(/g) ?? []).length
+    const closingParentheses = (suffix.match(/\)/g) ?? []).length
+    if (closingParentheses <= openingParentheses) break
+    suffix = suffix.slice(0, -1)
   }
 
-  suffix = suffix.replace(/(?:fig|table|vol|issue|pages?)\.?$/i, '')
-  suffix = suffix.replace(/[^A-Z0-9\-._;()/:]+$/i, '')
-  suffix = suffix.replace(/[-._;:/()]+$/g, '')
   return suffix
 }
 
 function findDoiCandidates(input: string) {
-  const matches: string[] = []
-  const prefixPattern = /\b(?:doi:\s*)?(10\.\d{4,9})\s*\/\s*/gi
+  const candidates: Array<{ doi: string; explicitlyLabeled: boolean }> = []
+  // A DOI suffix is an identifier token, not arbitrary prose. Keeping it
+  // whitespace-free prevents the parser from absorbing headings and body text.
+  const doiPattern = /\b(?:doi\s*:\s*)?(10\.\d{4,9})\s*\/\s*([A-Z0-9][A-Z0-9._;()/:+%-]*)/gi
 
-  for (const match of input.matchAll(prefixPattern)) {
+  for (const match of input.matchAll(doiPattern)) {
     const prefix = match[1]
-    const matchText = match[0] ?? ''
-    const start = (match.index ?? 0) + matchText.length
-    const tail = input.slice(start, start + 180)
-    if (!tail) continue
+    const suffix = trimDoiBoundaryPunctuation(match[2] ?? '')
+    if (suffix.length < 1) continue
 
-    const compactTail = tail.replace(/[\u200B-\u200D\uFEFF]/g, '')
-    const suffixMatch = compactTail.match(/^([A-Z0-9\-._;()/:/\s]{3,180})/i)?.[1] ?? ''
-    const suffix = trimTrailingDoiNoise(suffixMatch)
-    if (!suffix) continue
-
-    matches.push(`${prefix}/${suffix}`)
+    const start = match.index ?? 0
+    const precedingText = input.slice(Math.max(0, start - 24), start)
+    candidates.push({
+      doi: `${prefix}/${suffix}`,
+      explicitlyLabeled: /^doi\s*:/i.test(match[0] ?? '') || /doi\.org\/\s*$/i.test(precedingText),
+    })
   }
 
-  return matches
+  return candidates
 }
 
 export function extractNormalizedDoi(input?: string) {
   if (!input) return undefined
   const normalizedInput = input
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/%2f/gi, '/')
     .replace(/https?:\/\/(?:dx\.)?doi\.org\//gi, 'doi:')
   const candidates = findDoiCandidates(normalizedInput)
+  const orderedCandidates = [
+    ...candidates.filter((candidate) => candidate.explicitlyLabeled),
+    ...candidates.filter((candidate) => !candidate.explicitlyLabeled),
+  ]
 
-  for (const candidate of candidates) {
-    const slashIndex = candidate.indexOf('/')
+  for (const candidate of orderedCandidates) {
+    const slashIndex = candidate.doi.indexOf('/')
     if (slashIndex <= 0) continue
 
-    const prefix = candidate.slice(0, slashIndex)
-    const suffix = candidate.slice(slashIndex + 1)
-    if (!/^10\.\d{4,9}$/i.test(prefix) || suffix.length < 3) continue
-    if (!/[a-z0-9]$/i.test(suffix)) continue
+    const prefix = candidate.doi.slice(0, slashIndex)
+    const suffix = candidate.doi.slice(slashIndex + 1)
+    if (!/^10\.\d{4,9}$/i.test(prefix) || suffix.length < 1) continue
+    if (!/[a-z0-9)]$/i.test(suffix)) continue
+    if (suffix.endsWith(')') && (suffix.match(/\)/g) ?? []).length > (suffix.match(/\(/g) ?? []).length) continue
 
     return `${prefix}/${suffix}`
   }
@@ -361,7 +341,6 @@ async function readRawPdfMetadata(filePath: string): Promise<RawPdfMetadataSigna
     // Never derive a year from arbitrary PDF bytes: compressed streams routinely
     // contain accidental values such as 2016/2018 that are not document dates.
     year: rawCreationDate ? parseYear(cleanPdfField(rawCreationDate)) : undefined,
-    doi: parseDoi(text),
   }
 }
 
@@ -533,12 +512,12 @@ export async function extractLocalPdfMetadata(filePath: string, titleFallbackPat
     )
   }
 
-  const doi = rawMetadata.doi ?? firstPageMetadata.doi
+  const doi = firstPageMetadata.doi
   if (doi) {
     provenance.doi = provenanceEntry(
       'doi_regex',
-      rawMetadata.doi ? 'DOI regex over PDF byte sample.' : 'DOI regex over first-page text.',
-      rawMetadata.doi ? 0.92 : 0.88,
+      'DOI regex over first-page text.',
+      0.9,
     )
   }
 
@@ -654,6 +633,17 @@ export function mergeExtractedMetadataIntoDocument(
   updates.metadataProvenance = serializeMetadataProvenance(provenance)
 
   return updates
+}
+
+export function mergeDetectedDoiIntoDocument(
+  document: Pick<DbDocument, 'title' | 'authors' | 'year' | 'doi' | 'citationKey' | 'pageCount' | 'abstractText' | 'tagSuggestions' | 'metadataProvenance' | 'metadataUserEditedFields'>,
+  doi: string,
+  detail: string,
+) {
+  return mergeExtractedMetadataIntoDocument(document, {
+    doi,
+    provenance: { doi: provenanceEntry('doi_regex', detail, 0.82) },
+  }, 'fill_missing')
 }
 
 export function markMetadataFieldsAsUserEdited(

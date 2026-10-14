@@ -2,6 +2,7 @@
 
 import type { AiProvider } from '@/lib/app-settings'
 import type { IncomingDocumentClassification } from '@/lib/services/document-classification-service'
+import { requestQwenOpenAi } from '@/lib/services/qwen-openai-client'
 
 export type DocumentAiMode = 'page1' | 'full'
 export type RemoteAiProvider = Exclude<AiProvider, 'local'>
@@ -22,6 +23,7 @@ type ExtractDocumentInsightsArgs = {
   provider: RemoteAiProvider
   model: string
   apiKey: string
+  qwenProxyPassword?: string
   mode: DocumentAiMode
 }
 
@@ -171,6 +173,59 @@ async function fetchGoogleInsights(args: ExtractDocumentInsightsArgs) {
   return parseDocumentInsightsPayload(rawText)
 }
 
+function buildOpenAiInsightsRequest(args: ExtractDocumentInsightsArgs) {
+  return {
+    model: args.model,
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'document_insights',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            keywords: { type: 'array', items: { type: 'string' } },
+            summary: { type: 'string' },
+            classification: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                category: { type: 'string' },
+                topic: { type: 'string' },
+                confidence: { type: 'number' },
+                matchedKeywords: { type: 'array', items: { type: 'string' } },
+                suggestedTags: { type: 'array', items: { type: 'string' } },
+              },
+              required: ['category', 'topic'],
+            },
+          },
+          required: ['keywords'],
+        },
+      },
+    },
+    messages: [
+      {
+        role: 'user',
+        content: buildPrompt(args.text, args.mode),
+      },
+    ],
+  }
+}
+
+async function parseOpenAiInsightsResponse(response: Response, providerName: string) {
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => '')
+    throw new Error(responseText || `${providerName} request failed (${response.status}).`)
+  }
+  const payload = await response.json()
+  const rawText = payload?.choices?.[0]?.message?.content?.trim()
+  if (!rawText) {
+    throw new Error(`${providerName} returned an empty response.`)
+  }
+
+  return parseDocumentInsightsPayload(rawText)
+}
+
 async function fetchOpenAiInsights(args: ExtractDocumentInsightsArgs) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -178,56 +233,18 @@ async function fetchOpenAiInsights(args: ExtractDocumentInsightsArgs) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${args.apiKey}`,
     },
-    body: JSON.stringify({
-      model: args.model,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'document_insights',
-          schema: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              keywords: { type: 'array', items: { type: 'string' } },
-              summary: { type: 'string' },
-              classification: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  category: { type: 'string' },
-                  topic: { type: 'string' },
-                  confidence: { type: 'number' },
-                  matchedKeywords: { type: 'array', items: { type: 'string' } },
-                  suggestedTags: { type: 'array', items: { type: 'string' } },
-                },
-                required: ['category', 'topic'],
-              },
-            },
-            required: ['keywords'],
-          },
-        },
-      },
-      messages: [
-        {
-          role: 'user',
-          content: buildPrompt(args.text, args.mode),
-        },
-      ],
-    }),
+    body: JSON.stringify(buildOpenAiInsightsRequest(args)),
   })
+  return parseOpenAiInsightsResponse(response, 'OpenAI')
+}
 
-  if (!response.ok) {
-    const responseText = await response.text().catch(() => '')
-    throw new Error(responseText || `OpenAI request failed (${response.status}).`)
-  }
-
-  const payload = await response.json()
-  const rawText = payload?.choices?.[0]?.message?.content?.trim()
-  if (!rawText) {
-    throw new Error('OpenAI returned an empty response.')
-  }
-
-  return parseDocumentInsightsPayload(rawText)
+async function fetchQwenInsights(args: ExtractDocumentInsightsArgs) {
+  const response = await requestQwenOpenAi('chat/completions', args.qwenProxyPassword ?? '', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildOpenAiInsightsRequest(args)),
+  })
+  return parseOpenAiInsightsResponse(response, 'Qwen')
 }
 
 async function fetchAnthropicInsights(args: ExtractDocumentInsightsArgs) {
@@ -273,6 +290,7 @@ async function fetchAnthropicInsights(args: ExtractDocumentInsightsArgs) {
 export async function fetchAvailableAiModels(
   provider: RemoteAiProvider,
   apiKey: string,
+  qwenProxyPassword = '',
 ): Promise<AiModelOption[]> {
   if (!apiKey.trim()) return []
 
@@ -314,6 +332,17 @@ export async function fetchAvailableAiModels(
           label: entry.id,
         }))
     }
+    case 'qwen': {
+      const response = await requestQwenOpenAi('models', qwenProxyPassword)
+      const payload = await response.json()
+      const models = Array.isArray(payload?.data) ? payload.data : []
+      const options: AiModelOption[] = models
+        .filter((entry: { id?: string }) => typeof entry?.id === 'string')
+        .map((entry: { id: string }) => ({ value: entry.id, label: entry.id }))
+      const defaultModel = response.headers.get('X-Qwen-Default-Model')
+      if (defaultModel) options.sort((left, right) => Number(right.value === defaultModel) - Number(left.value === defaultModel))
+      return options
+    }
     case 'anthropic': {
       const response = await fetch('https://api.anthropic.com/v1/models', {
         headers: {
@@ -342,7 +371,9 @@ export async function extractDocumentInsights(args: ExtractDocumentInsightsArgs)
   }
 
   if (!args.apiKey.trim()) {
-    throw new Error(`${args.provider} API key is not configured.`)
+    throw new Error(args.provider === 'qwen'
+      ? 'Enter the Qwen feature password in Settings to enable Qwen.'
+      : `${args.provider} API key is not configured.`)
   }
 
   switch (args.provider) {
@@ -350,6 +381,8 @@ export async function extractDocumentInsights(args: ExtractDocumentInsightsArgs)
       return fetchGoogleInsights(args)
     case 'openai':
       return fetchOpenAiInsights(args)
+    case 'qwen':
+      return fetchQwenInsights(args)
     case 'anthropic':
       return fetchAnthropicInsights(args)
     default:

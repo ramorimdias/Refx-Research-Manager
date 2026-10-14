@@ -584,16 +584,38 @@ function RealReaderViewPage() {
 
       try {
         const pdfjs = await loadPdfJsModule()
-        const payload = document?.id ? await repo.loadDocumentPdfPayload(document.id) : null
-        let bytes = new Uint8Array(payload?.bytes ?? [])
-        if (!bytes.length && activeFilePath) {
-          bytes = new Uint8Array(await readFile(activeFilePath))
+        let pdfPath = activeFilePath
+        if (document?.id) {
+          try {
+            const normalizedPath = await repo.ensureDocumentPdfInStorage(document.id)
+            if (normalizedPath) {
+              pdfPath = normalizedPath
+              setResolvedFilePath(normalizedPath)
+            }
+          } catch (pathError) {
+            console.warn('Could not resolve the stored PDF path; trying the saved document path.', pathError)
+          }
         }
+
+        if (!pdfPath) {
+          throw new Error('Could not resolve a file path for this PDF.')
+        }
+
+        let bytes: Uint8Array
+        try {
+          // Match the Details preview path first; it reads through Tauri's filesystem plugin.
+          bytes = new Uint8Array(await readFile(pdfPath))
+        } catch (fileReadError) {
+          console.warn('Could not read the PDF through the filesystem plugin; trying app storage.', fileReadError)
+          const payload = document?.id ? await repo.loadDocumentPdfPayload(document.id) : null
+          bytes = new Uint8Array(payload?.bytes ?? [])
+          if (payload?.path) {
+            setResolvedFilePath(payload.path)
+          }
+        }
+
         if (!bytes.length) {
-          throw new Error('Could not load PDF bytes from desktop storage or the saved document path.')
-        }
-        if (payload?.path) {
-          setResolvedFilePath(payload.path)
+          throw new Error('The PDF file was read but contained no data.')
         }
         objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
         const task = pdfjs.getDocument({
@@ -2454,10 +2476,10 @@ function RealReaderViewPage() {
   return (
     <>
       <div className="h-full min-h-0 overflow-hidden">
-      <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
-      <ResizablePanel defaultSize={74} minSize={45} className="min-h-0">
-        <div className="flex h-full min-h-0 flex-1 flex-col">
-        <div className="sticky top-0 z-40 flex shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b bg-background/95 px-2 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 min-w-0 overflow-hidden">
+      <ResizablePanel defaultSize={74} minSize={45} className="min-h-0 min-w-0 overflow-hidden">
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="relative z-40 flex shrink-0 flex-nowrap items-center gap-1 overflow-x-auto border-b bg-background/95 px-2 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <ReaderNavigationToolbar
             backLabel={backLabel}
             onBack={() => {
@@ -2545,7 +2567,7 @@ function RealReaderViewPage() {
             hasOcrText={document.hasOcrText}
           />
         </div>
-        <div ref={readerViewportRef} className="min-h-0 flex-1 overflow-auto bg-muted/30 p-4">
+        <div ref={readerViewportRef} className="min-h-0 flex-1 overflow-auto overscroll-contain bg-muted/30 p-4">
           {highlightMutation !== 'idle' || highlightError ? (
             <div
               className={cn(
@@ -2775,8 +2797,8 @@ function RealReaderViewPage() {
         </div>
       </ResizablePanel>
       <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={26} minSize={18} maxSize={45} className="min-h-0">
-        <div className="flex h-full flex-col border-l">
+      <ResizablePanel defaultSize={26} minSize={18} maxSize={45} className="min-h-0 min-w-0 overflow-hidden">
+        <div className="flex h-full min-h-0 flex-col overflow-hidden border-l">
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
           <ReaderSearchPanel
             searchQuery={searchQuery}

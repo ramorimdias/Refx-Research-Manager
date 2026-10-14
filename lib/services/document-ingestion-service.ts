@@ -7,11 +7,11 @@ import { buildDocumentMetadataSeed, enrichDocumentMetadataOnline } from '@/lib/s
 import { rebuildCitationRelationsForDocument } from '@/lib/services/document-citation-relation-service'
 import { classifyDocumentSemantics } from '@/lib/services/document-classification-service'
 import { detectAndStoreDocumentKeywords } from '@/lib/services/document-keyword-service'
-import { extractLocalPdfMetadata, extractNormalizedDoi, mergeExtractedMetadataIntoDocument, type LocalPdfMetadata } from '@/lib/services/document-metadata-service'
+import { extractLocalPdfMetadata, extractNormalizedDoi, mergeDetectedDoiIntoDocument, mergeExtractedMetadataIntoDocument, type LocalPdfMetadata } from '@/lib/services/document-metadata-service'
 import { runDocumentOcr } from '@/lib/services/document-ocr-service'
 import { generateDocumentTagSuggestions } from '@/lib/services/document-tag-suggestion-service'
 import { extractDocumentText, indexDocument } from '@/lib/services/document-search-service'
-import { getDocumentPlainText } from '@/lib/services/document-text-service'
+import { readPersistedDocumentText } from '@/lib/services/document-text-service'
 import { dbDocumentToUi } from '@/lib/utils/document-mapper'
 import type { Document, DocumentProcessingStage, DocumentProcessingStageState, SemanticClassificationMode } from '@/lib/types'
 import { normalizeErrorMessage } from '@/lib/utils/error'
@@ -258,6 +258,29 @@ function metadataFilePath(context: ProcessingContext) {
   return context.importedFilePath ?? context.sourcePath
 }
 
+async function applyDetectedDoiFromOpeningText(
+  context: ProcessingContext,
+  text: string,
+  detail: string,
+) {
+  if (!context.documentId) return undefined
+  const doi = extractNormalizedDoi(text)
+  if (!doi) return undefined
+
+  const document = await repo.getDocumentById(context.documentId)
+  if (!document || document.doi) return undefined
+
+  const metadataUpdates = mergeDetectedDoiIntoDocument(document, doi, detail)
+  if (!metadataUpdates.doi) return undefined
+
+  await repo.updateDocumentMetadata(context.documentId, {
+    ...metadataUpdates,
+    processingUpdatedAt: nowIso(),
+  })
+  await refreshContextDocument(context)
+  return doi
+}
+
 async function applyMetadata(document: repo.DbDocument, metadata: LocalPdfMetadata) {
   const timestamp = nowIso()
   return repo.updateDocumentMetadata(document.id, {
@@ -319,28 +342,20 @@ async function runTextExtractionStage(
   try {
     await updateStageStart(context.documentId, stage)
     const extracted = await extractDocumentText(context.documentId)
-    const plainText = extracted.text.trim().length > 0
-      ? extracted.text
-      : await getDocumentPlainText({
-          id: context.documentId,
-          extractedTextPath: extracted.extractedTextPath,
-          searchText: extracted.text,
-        })
-
-    const extractedDoi = options.enableMetadataExtraction && !document.doi
-      ? extractNormalizedDoi(plainText)
+    const persistedText = await readPersistedDocumentText({
+      id: context.documentId,
+      extractedTextPath: extracted.extractedTextPath,
+    })
+    const firstNativePage = persistedText?.native?.pages.find((page) => page.pageNumber === 1)?.text
+    const openingText = firstNativePage || (extracted.pageCount <= 1 ? extracted.text : '')
+    const extractedDoi = options.enableMetadataExtraction
+      ? await applyDetectedDoiFromOpeningText(context, openingText, 'Recovered from the first page of extracted PDF text during import.')
       : undefined
-    if (extractedDoi) {
-      await repo.updateDocumentMetadata(context.documentId, {
-        doi: extractedDoi,
-        processingUpdatedAt: nowIso(),
-      })
-    }
 
     await refreshContextDocument(context)
     const detail = extracted.isOcrCandidate
-      ? `Persisted ${extracted.pageCount} page(s) of sparse text${extractedDoi ? ' and recovered a DOI from extracted text' : ''}, then marked the document as an OCR candidate.`
-      : `Persisted ${extracted.pageCount} page(s) of extracted text${extractedDoi ? ' and recovered a DOI from extracted text' : ''}.`
+      ? `Persisted ${extracted.pageCount} page(s) of sparse text${extractedDoi ? ' and recovered a DOI from the opening page' : ''}, then marked the document as an OCR candidate.`
+      : `Persisted ${extracted.pageCount} page(s) of extracted text${extractedDoi ? ' and recovered a DOI from the opening page' : ''}.`
     return stageCompleted(stage, startedAt, detail)
   } catch (error) {
     const stageError = await updateStageFailure(context.documentId, stage, error)
@@ -387,10 +402,19 @@ async function runOcrFallbackStage(
       return stageSkipped(stage, 'OCR completed without producing usable text.')
     }
 
+    const persistedText = context.document
+      ? await readPersistedDocumentText(context.document)
+      : null
+    const firstOcrPage = persistedText?.ocr?.pages.find((page) => page.pageNumber === 1)?.text
+      || (ocrResult.pageCount <= 1 ? persistedText?.ocr?.text : '')
+    const extractedDoi = options.enableMetadataExtraction
+      ? await applyDetectedDoiFromOpeningText(context, firstOcrPage ?? '', 'Recovered from OCR of the first page during import.')
+      : undefined
+
     return stageCompleted(
       stage,
       startedAt,
-      `OCR completed for ${ocrResult.pageCount} page(s) and promoted OCR text into the shared text store.`,
+      `OCR completed for ${ocrResult.pageCount} page(s) and promoted OCR text into the shared text store${extractedDoi ? '; recovered a DOI from the opening page' : ''}.`,
     )
   } catch (error) {
     const stageError = await updateStageFailure(context.documentId, stage, error)
@@ -501,7 +525,7 @@ async function runKeywordExtractionStage(
       return stageCompleted(stage, startedAt, 'Generated local keywords with the built-in extractor.')
     }
 
-    if (result.source === 'google_page1' || result.source === 'openai_page1' || result.source === 'anthropic_page1') {
+    if (result.source === 'google_page1' || result.source === 'openai_page1' || result.source === 'qwen_page1' || result.source === 'anthropic_page1') {
       return stageCompleted(stage, startedAt, 'Generated AI keywords from the first page.')
     }
 

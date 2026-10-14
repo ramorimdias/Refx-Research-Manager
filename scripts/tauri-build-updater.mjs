@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { createTauriQwenCspConfig } from './tauri-qwen-csp.mjs'
 
 const repoRoot = process.cwd()
 const updaterKeyPath = resolve(repoRoot, '.tauri', 'refx-updater.key')
@@ -41,12 +42,18 @@ if ((buildIcons.status ?? 1) !== 0) {
   process.exit(buildIcons.status ?? 1)
 }
 
-const tauriBuild = spawnSync(pnpmCommand, ['exec', 'tauri', 'build', ...forwardedBuildArgs], {
-  cwd: repoRoot,
-  env,
-  stdio: 'inherit',
-  shell: true,
-})
+const tauriConfigOverride = createTauriQwenCspConfig(repoRoot, env, { requireProxyUrl: true })
+let tauriBuild
+try {
+  tauriBuild = spawnSync(pnpmCommand, ['exec', 'tauri', 'build', ...forwardedBuildArgs, '--config', tauriConfigOverride.path], {
+    cwd: repoRoot,
+    env,
+    stdio: 'inherit',
+    shell: true,
+  })
+} finally {
+  tauriConfigOverride.cleanup()
+}
 
 if ((tauriBuild.status ?? 1) !== 0) {
   process.exit(tauriBuild.status ?? 1)

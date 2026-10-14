@@ -25,7 +25,7 @@
     "release": "node scripts/release-version.mjs",
     "release:build": "pnpm tauri:build",
     "tauri": "pnpm exec tauri",
-    "tauri:dev": "pnpm tauri:icons && pnpm exec tauri dev",
+    "tauri:dev": "node scripts/tauri-dev.mjs",
     "tauri:build": "node scripts/tauri-build-updater.mjs",
     "tauri:build:mac:universal": "node scripts/tauri-build-updater.mjs --target universal-apple-darwin",
     "tauri:build:update": "node scripts/tauri-build-updater.mjs",

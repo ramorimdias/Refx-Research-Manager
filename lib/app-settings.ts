@@ -2,19 +2,21 @@
 
 import * as repo from '@/lib/repositories/local-db'
 import type { AppLocale } from '@/lib/localization'
+import { getQwenDefaultModel } from '@/lib/services/qwen-openai-client'
 
 const ENV_SEMANTIC_SCHOLAR_API_KEY = process.env.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY ?? ''
 const ENV_GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? process.env.GEMINI_API_KEY ?? ''
 const ENV_OPENAI_API_KEY = process.env.NEXT_PUBLIC_OPENAI_API_KEY ?? process.env.OPENAI_API_KEY ?? ''
 const ENV_ANTHROPIC_API_KEY = process.env.NEXT_PUBLIC_ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? ''
 
-export type AiProvider = 'local' | 'google' | 'openai' | 'anthropic'
+export type AiProvider = 'local' | 'google' | 'openai' | 'anthropic' | 'qwen'
 
 export const AI_PROVIDER_OPTIONS = [
   { value: 'local', label: 'Local heuristic' },
   { value: 'google', label: 'Google' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
+  { value: 'qwen', label: 'Qwen (Cloudflare Access)' },
 ] as const
 
 export type StoredAppSettings = {
@@ -54,6 +56,7 @@ export type StoredAppSettings = {
   googleApiKey: string
   openaiApiKey: string
   anthropicApiKey: string
+  qwenProxyPassword: string
   keywordEngine: 'local_heuristic' | 'gemini'
   autoKeywordExtractionOnImport: boolean
   autoGeminiOnImport: boolean
@@ -98,6 +101,7 @@ export const DEFAULT_APP_SETTINGS: StoredAppSettings = {
   googleApiKey: '',
   openaiApiKey: '',
   anthropicApiKey: '',
+  qwenProxyPassword: '',
   keywordEngine: 'local_heuristic',
   autoKeywordExtractionOnImport: true,
   autoGeminiOnImport: false,
@@ -119,7 +123,7 @@ function normalizeKeywordEngine(value: StoredAppSettings['keywordEngine'] | 'loc
 }
 
 function normalizeAiProvider(value: string | undefined, fallbackKeywordEngine?: StoredAppSettings['keywordEngine'] | 'local_keybert') {
-  if (value === 'local' || value === 'google' || value === 'openai' || value === 'anthropic') return value
+  if (value === 'local' || value === 'google' || value === 'openai' || value === 'anthropic' || value === 'qwen') return value
   return normalizeKeywordEngine(fallbackKeywordEngine) === 'gemini' ? 'google' : 'local'
 }
 
@@ -131,6 +135,8 @@ export function getAiModelOptions(provider: Exclude<AiProvider, 'local'>) {
       return [{ value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini', description: 'Default fallback model' }]
     case 'anthropic':
       return [{ value: 'claude-3-5-haiku-latest', label: 'Claude 3.5 Haiku', description: 'Default fallback model' }]
+    case 'qwen':
+      return [{ value: getQwenDefaultModel(), label: getQwenDefaultModel(), description: 'Configured OpenAI-compatible Qwen model' }]
   }
 }
 
@@ -245,7 +251,8 @@ export function getResolvedGeminiApiKey(settings: Pick<StoredAppSettings, 'gemin
 
 export function getResolvedAiApiKey(
   provider: AiProvider,
-  settings: Pick<StoredAppSettings, 'googleApiKey' | 'openaiApiKey' | 'anthropicApiKey' | 'geminiApiKey'>,
+  settings: Pick<StoredAppSettings, 'googleApiKey' | 'openaiApiKey' | 'anthropicApiKey' | 'geminiApiKey'>
+    & Partial<Pick<StoredAppSettings, 'qwenProxyPassword'>>,
 ) {
   switch (provider) {
     case 'google':
@@ -254,6 +261,8 @@ export function getResolvedAiApiKey(
       return settings.openaiApiKey.trim() || ENV_OPENAI_API_KEY
     case 'anthropic':
       return settings.anthropicApiKey.trim() || ENV_ANTHROPIC_API_KEY
+    case 'qwen':
+      return settings.qwenProxyPassword?.trim() ? 'ollama' : ''
     case 'local':
     default:
       return ''
@@ -273,7 +282,11 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
     if (!raw) return DEFAULT_APP_SETTINGS
-    const parsed = parseValue<Partial<StoredAppSettings> & { autoFetchTagsWithAiOnImport?: boolean }>(raw, {})
+    const parsed = parseValue<Partial<StoredAppSettings> & { autoFetchTagsWithAiOnImport?: boolean; qwenAccessSecret?: string }>(raw, {})
+    if (parsed.qwenAccessSecret) {
+      delete parsed.qwenAccessSecret
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(parsed))
+    }
     const normalizedKeywordEngine = normalizeKeywordEngine(parsed.keywordEngine as StoredAppSettings['keywordEngine'] | 'local_keybert' | undefined)
     const aiProvider = normalizeAiProvider(typeof parsed.aiProvider === 'string' ? parsed.aiProvider : undefined, normalizedKeywordEngine)
     const googleApiKey = parsed.googleApiKey?.trim() ?? parsed.geminiApiKey?.trim() ?? DEFAULT_APP_SETTINGS.googleApiKey
@@ -296,6 +309,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       googleApiKey,
       openaiApiKey: parsed.openaiApiKey?.trim() ?? DEFAULT_APP_SETTINGS.openaiApiKey,
       anthropicApiKey: parsed.anthropicApiKey?.trim() ?? DEFAULT_APP_SETTINGS.anthropicApiKey,
+      qwenProxyPassword: parsed.qwenProxyPassword?.trim() ?? DEFAULT_APP_SETTINGS.qwenProxyPassword,
       keywordEngine: normalizedKeywordEngine,
       autoKeywordExtractionOnImport:
         parsed.autoKeywordExtractionOnImport ?? DEFAULT_APP_SETTINGS.autoKeywordExtractionOnImport,
@@ -315,6 +329,13 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
   }
 
   const stored = await repo.getSettings()
+  if (stored.qwenAccessSecret) {
+    try {
+      await repo.setSettings({ qwenAccessSecret: JSON.stringify('') })
+    } catch {
+      // A read-only remote vault must not prevent app settings from loading.
+    }
+  }
   const legacyAutoGeminiValue = stored.autoGeminiOnImport ?? stored.autoFetchTagsWithAiOnImport
   const normalizedKeywordEngine = normalizeKeywordEngine(parseValue(stored.keywordEngine, DEFAULT_APP_SETTINGS.keywordEngine) as StoredAppSettings['keywordEngine'] | 'local_keybert')
   const aiProvider = normalizeAiProvider(parseValue(stored.aiProvider, ''), normalizedKeywordEngine)
@@ -358,6 +379,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     googleApiKey,
     openaiApiKey: parseValue(stored.openaiApiKey, DEFAULT_APP_SETTINGS.openaiApiKey).trim(),
     anthropicApiKey: parseValue(stored.anthropicApiKey, DEFAULT_APP_SETTINGS.anthropicApiKey).trim(),
+    qwenProxyPassword: parseValue(stored.qwenProxyPassword, DEFAULT_APP_SETTINGS.qwenProxyPassword).trim(),
     keywordEngine: normalizedKeywordEngine,
     autoKeywordExtractionOnImport: parseValue(
       stored.autoKeywordExtractionOnImport,
@@ -422,6 +444,8 @@ export async function saveAppSettings(isDesktopApp: boolean, settings: StoredApp
     googleApiKey: JSON.stringify(settings.googleApiKey),
     openaiApiKey: JSON.stringify(settings.openaiApiKey),
     anthropicApiKey: JSON.stringify(settings.anthropicApiKey),
+    qwenProxyPassword: JSON.stringify(settings.qwenProxyPassword),
+    qwenAccessSecret: JSON.stringify(''),
     keywordEngine: JSON.stringify(settings.keywordEngine),
     autoKeywordExtractionOnImport: JSON.stringify(settings.autoKeywordExtractionOnImport),
     autoGeminiOnImport: JSON.stringify(settings.autoGeminiOnImport),
