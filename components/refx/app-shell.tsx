@@ -24,9 +24,10 @@ export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { isDesktopApp } = useRuntimeState()
+  const routePathname = pathname?.replace(/\/+$/, '') || '/'
   const isDetachedReaderWindow =
-    pathname === '/reader/view' && searchParams.get('detached') === DETACHED_READER_QUERY_VALUE
-  const isFullHeightWorkspace = pathname === '/reader/view' || pathname === '/maps'
+    routePathname === '/reader/view' && searchParams.get('detached') === DETACHED_READER_QUERY_VALUE
+  const isFullHeightWorkspace = routePathname === '/reader/view' || routePathname === '/maps'
   const [isDragActive, setIsDragActive] = useState(false)
   const dragDepthRef = useRef(0)
 

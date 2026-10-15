@@ -1255,7 +1255,11 @@ function RealReaderViewPage() {
     const isFullyVisible = pageRect.top >= paddedTop && pageRect.bottom <= paddedBottom
 
     if (!isFullyVisible) {
-      pageElement.scrollIntoView({ block: 'center' })
+      const nextScrollTop =
+        viewport.scrollTop
+        + (pageRect.top - viewportRect.top)
+        - ((viewport.clientHeight - pageRect.height) / 2)
+      viewport.scrollTo({ top: Math.max(0, nextScrollTop), behavior: 'auto' })
     }
   }, [page, visiblePageNumbers])
 
