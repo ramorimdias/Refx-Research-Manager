@@ -3,6 +3,7 @@
 import * as repo from '@/lib/repositories/local-db'
 import type { AppLocale } from '@/lib/localization'
 import { getQwenDefaultModel } from '@/lib/services/qwen-openai-client'
+import { setCurrentActorName } from '@/lib/actor-context'
 
 const ENV_SEMANTIC_SCHOLAR_API_KEY = process.env.NEXT_PUBLIC_SEMANTIC_SCHOLAR_API_KEY ?? ''
 const ENV_GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? process.env.GEMINI_API_KEY ?? ''
@@ -279,9 +280,15 @@ export function getResolvedSemanticScholarApiKey(
 
 export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppSettings> {
   if (!isDesktopApp) {
-    if (typeof window === 'undefined') return DEFAULT_APP_SETTINGS
+    if (typeof window === 'undefined') {
+      setCurrentActorName(DEFAULT_APP_SETTINGS.userName)
+      return DEFAULT_APP_SETTINGS
+    }
     const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-    if (!raw) return DEFAULT_APP_SETTINGS
+    if (!raw) {
+      setCurrentActorName(DEFAULT_APP_SETTINGS.userName)
+      return DEFAULT_APP_SETTINGS
+    }
     const parsed = parseValue<Partial<StoredAppSettings> & { autoFetchTagsWithAiOnImport?: boolean; qwenAccessSecret?: string }>(raw, {})
     if (parsed.qwenAccessSecret) {
       delete parsed.qwenAccessSecret
@@ -290,7 +297,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     const normalizedKeywordEngine = normalizeKeywordEngine(parsed.keywordEngine as StoredAppSettings['keywordEngine'] | 'local_keybert' | undefined)
     const aiProvider = normalizeAiProvider(typeof parsed.aiProvider === 'string' ? parsed.aiProvider : undefined, normalizedKeywordEngine)
     const googleApiKey = parsed.googleApiKey?.trim() ?? parsed.geminiApiKey?.trim() ?? DEFAULT_APP_SETTINGS.googleApiKey
-    return {
+    const settings: StoredAppSettings = {
       ...DEFAULT_APP_SETTINGS,
       ...parsed,
       locale: parsed.locale ?? DEFAULT_APP_SETTINGS.locale,
@@ -326,6 +333,8 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
       remoteLastPulledAt: parsed.remoteLastPulledAt ?? DEFAULT_APP_SETTINGS.remoteLastPulledAt,
       remoteLastPushedAt: parsed.remoteLastPushedAt ?? DEFAULT_APP_SETTINGS.remoteLastPushedAt,
     }
+    setCurrentActorName(settings.userName)
+    return settings
   }
 
   const stored = await repo.getSettings()
@@ -340,7 +349,7 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
   const normalizedKeywordEngine = normalizeKeywordEngine(parseValue(stored.keywordEngine, DEFAULT_APP_SETTINGS.keywordEngine) as StoredAppSettings['keywordEngine'] | 'local_keybert')
   const aiProvider = normalizeAiProvider(parseValue(stored.aiProvider, ''), normalizedKeywordEngine)
   const googleApiKey = parseValue(stored.googleApiKey, '').trim() || parseValue(stored.geminiApiKey, DEFAULT_APP_SETTINGS.geminiApiKey).trim()
-  return {
+  const settings: StoredAppSettings = {
     userName: parseValue(stored.userName, DEFAULT_APP_SETTINGS.userName),
     skipNamePrompt: parseValue(stored.skipNamePrompt, DEFAULT_APP_SETTINGS.skipNamePrompt),
     hasCompletedAppTour: parseValue(stored.hasCompletedAppTour, DEFAULT_APP_SETTINGS.hasCompletedAppTour),
@@ -404,9 +413,12 @@ export async function loadAppSettings(isDesktopApp: boolean): Promise<StoredAppS
     remoteLastPulledAt: parseValue(stored.remoteLastPulledAt, DEFAULT_APP_SETTINGS.remoteLastPulledAt),
     remoteLastPushedAt: parseValue(stored.remoteLastPushedAt, DEFAULT_APP_SETTINGS.remoteLastPushedAt),
   }
+  setCurrentActorName(settings.userName)
+  return settings
 }
 
 export async function saveAppSettings(isDesktopApp: boolean, settings: StoredAppSettings) {
+  setCurrentActorName(settings.userName)
   if (!isDesktopApp) {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings))

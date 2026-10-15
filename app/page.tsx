@@ -70,7 +70,7 @@ type DashboardActivity = {
   href: string
   occurredAt: Date
   icon: LucideIcon
-  category: 'library' | 'document' | 'note' | 'annotation' | 'finished' | 'relation' | 'graph-view' | 'reference' | 'work-reference' | 'journey'
+  category: 'library' | 'document' | 'comment' | 'note' | 'annotation' | 'finished' | 'relation' | 'graph-view' | 'reference' | 'work-reference' | 'journey'
   bundledItems?: DashboardActivity[]
 }
 
@@ -263,7 +263,8 @@ export default function HomePage() {
   const graphViews = useGraphStore((state) => state.graphViews)
   const relations = useRelationStore((state) => state.relations)
   const savedJourneys = useDiscoverStore((state) => state.savedJourneys)
-  const { notes, annotations, isDesktopApp } = useRuntimeState()
+  const { notes, annotations, isDesktopApp, remoteVaultStatus } = useRuntimeState()
+  const isSharedVaultActive = Boolean(remoteVaultStatus?.enabled)
   const { setActiveLibrary } = useLibraryActions()
 
   const [userName, setUserName] = useState('')
@@ -384,6 +385,10 @@ export default function HomePage() {
   const activities = useMemo<DashboardActivity[]>(() => {
     const documentsById = new Map(documents.map((document) => [document.id, document]))
     const librariesById = new Map(libraries.map((library) => [library.id, library]))
+    const withActor = (detail: string, name?: string) =>
+      isSharedVaultActive && name?.trim()
+        ? `${detail} · ${t('home.activityBy', { name: name.trim() })}`
+        : detail
 
     const libraryActivities = libraries.map((library) => ({
       id: `library-${library.id}`,
@@ -398,12 +403,27 @@ export default function HomePage() {
     const addedDocumentActivities = documents.map((document) => ({
       id: `document-added-${document.id}`,
       title: t('home.documentAdded'),
-      detail: `${document.title} - ${librariesById.get(document.libraryId)?.name ?? t('home.libraryFallback')}`,
+      detail: withActor(
+        `${document.title} - ${librariesById.get(document.libraryId)?.name ?? t('home.libraryFallback')}`,
+        document.createdBy,
+      ),
       href: getDocumentHref(document),
       occurredAt: document.createdAt,
       icon: FilePlus2,
       category: 'document' as const,
     }))
+
+    const commentActivities = documents
+      .filter((document) => document.commentaryUpdatedAt)
+      .map((document) => ({
+        id: `comment-${document.id}`,
+        title: t('home.commentUpdated'),
+        detail: withActor(document.title, document.commentaryUpdatedBy),
+        href: getDocumentCommentsHref(document),
+        occurredAt: document.commentaryUpdatedAt!,
+        icon: MessageSquareText,
+        category: 'comment' as const,
+      }))
 
     const noteActivities = notes.map((note) => {
       const latest = getLatestActivityTimestamp(new Date(note.createdAt), new Date(note.updatedAt))
@@ -413,7 +433,10 @@ export default function HomePage() {
       return {
         id: `note-${note.id}`,
         title: latest.isUpdated ? t('home.noteUpdated') : t('home.noteCreated'),
-        detail: documentTitle ? `${noteTitle} - ${documentTitle}` : noteTitle,
+        detail: withActor(
+          documentTitle ? `${noteTitle} - ${documentTitle}` : noteTitle,
+          latest.isUpdated ? note.updatedBy : note.createdBy,
+        ),
         href: note.documentId && documentsById.get(note.documentId) ? getDocumentHref(documentsById.get(note.documentId)!) : '/notes',
         occurredAt: latest.occurredAt,
         icon: StickyNote,
@@ -431,7 +454,10 @@ export default function HomePage() {
           title: annotation.kind === 'highlight' || annotation.kind === 'area' || annotation.kind === 'area_highlight'
             ? t('home.highlightCreated')
             : t('home.annotationCreated'),
-          detail: `${document.title}${annotation.pageNumber ? ` - ${t('home.page', { page: annotation.pageNumber })}` : ''}`,
+          detail: withActor(
+            `${document.title}${annotation.pageNumber ? ` - ${t('home.page', { page: annotation.pageNumber })}` : ''}`,
+            annotation.createdBy,
+          ),
           href: getDocumentHref(document),
           occurredAt: new Date(annotation.createdAt),
           icon: Highlighter,
@@ -529,6 +555,7 @@ export default function HomePage() {
       [
         ...libraryActivities,
         ...addedDocumentActivities,
+        ...commentActivities,
         ...noteActivities,
         ...annotationActivities,
         ...relationActivities,
@@ -540,7 +567,7 @@ export default function HomePage() {
       ].sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime()),
       t('home.bundledActivitySummary'),
     ).slice(0, 100)
-  }, [annotations, documents, graphViews, libraries, notes, recentJourneys, references, relations, t, workReferences])
+  }, [annotations, documents, graphViews, isSharedVaultActive, libraries, notes, recentJourneys, references, relations, t, workReferences])
 
   const recentlyOpened = useMemo(
     () => [...documents]
@@ -880,6 +907,10 @@ export default function HomePage() {
                   const noteTitle = note.title.trim() || t('home.untitledNote')
                   const linkedDocument = note.documentId ? documentsById.get(note.documentId) : null
                   const library = linkedDocument ? librariesById.get(linkedDocument.libraryId) : null
+                  const updatedBy = isSharedVaultActive
+                    ? note.updatedBy?.trim() || note.createdBy?.trim()
+                    : undefined
+                  const noteDetail = note.content.trim() || (linkedDocument ? linkedDocument.title : t('home.notesWorkspace'))
                   return (
                     <DashboardLinkRow
                       key={`recent-note-${note.id}`}
@@ -894,7 +925,9 @@ export default function HomePage() {
                           ) : null}
                         </>
                       )}
-                      detail={note.content.trim() || (linkedDocument ? linkedDocument.title : t('home.notesWorkspace'))}
+                      detail={updatedBy
+                        ? `${noteDetail} · ${t('home.activityBy', { name: updatedBy })}`
+                        : noteDetail}
                       timeLabel={formatRelativeTime(new Date(note.updatedAt), t)}
                     />
                   )
@@ -920,6 +953,8 @@ export default function HomePage() {
               <div className="space-y-2 pb-3">
                 {recentComments.map((document) => {
                   const library = librariesById.get(document.libraryId)
+                  const preview = htmlToPlainText(document.commentaryText) || t('commentsPage.noCommentPreview')
+                  const updatedBy = isSharedVaultActive ? document.commentaryUpdatedBy?.trim() : undefined
                   return (
                     <DashboardLinkRow
                       key={`recent-comment-${document.id}`}
@@ -927,7 +962,7 @@ export default function HomePage() {
                       icon={MessageSquareText}
                       title={document.title}
                       meta={library ? <LibraryPill name={library.name} color={library.color} /> : null}
-                      detail={htmlToPlainText(document.commentaryText) || t('commentsPage.noCommentPreview')}
+                      detail={updatedBy ? `${preview} · ${t('home.activityBy', { name: updatedBy })}` : preview}
                       timeLabel={document.commentaryUpdatedAt ? formatRelativeTime(document.commentaryUpdatedAt, t) : ''}
                     />
                   )

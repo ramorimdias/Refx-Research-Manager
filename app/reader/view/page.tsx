@@ -2567,7 +2567,7 @@ function RealReaderViewPage() {
             hasOcrText={document.hasOcrText}
           />
         </div>
-        <div ref={readerViewportRef} className="min-h-0 flex-1 overflow-auto overscroll-contain bg-muted/30 p-4">
+        <div ref={readerViewportRef} className="h-0 min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-auto bg-muted/30 p-4">
           {highlightMutation !== 'idle' || highlightError ? (
             <div
               className={cn(

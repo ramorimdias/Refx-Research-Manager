@@ -100,7 +100,9 @@ pub struct Document {
     pub last_read_page: Option<i64>,
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
+    pub commentary_updated_by: Option<String>,
     pub cover_image_path: Option<String>,
+    pub created_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -117,6 +119,8 @@ pub struct Note {
     pub position_y: Option<f64>,
     pub title: String,
     pub content: String,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -129,6 +133,7 @@ pub struct Annotation {
     pub page_number: i64,
     pub kind: String,
     pub content: Option<String>,
+    pub created_by: Option<String>,
     pub created_at: String,
 }
 
@@ -327,7 +332,9 @@ pub struct CreateDocumentInput {
     pub last_processed_at: Option<String>,
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
+    pub commentary_updated_by: Option<String>,
     pub cover_image_path: Option<String>,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -382,6 +389,7 @@ pub struct UpdateDocumentInput {
     pub last_read_page: Option<i64>,
     pub commentary_text: Option<String>,
     pub commentary_updated_at: Option<String>,
+    pub commentary_updated_by: Option<String>,
     pub cover_image_path: Option<String>,
 }
 
@@ -533,6 +541,7 @@ pub struct CreateNoteInput {
     pub position_y: Option<f64>,
     pub title: String,
     pub content: String,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -542,6 +551,7 @@ pub struct CreateAnnotationInput {
     pub page_number: i64,
     pub kind: String,
     pub content: Option<String>,
+    pub created_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -554,6 +564,7 @@ pub struct UpdateNoteInput {
     pub position_y: Option<f64>,
     pub title: Option<String>,
     pub content: Option<String>,
+    pub updated_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1847,7 +1858,9 @@ CREATE TABLE IF NOT EXISTS documents (
   last_read_page INTEGER,
   commentary_text TEXT,
   commentary_updated_at TEXT,
+  commentary_updated_by TEXT,
   cover_image_path TEXT,
+  created_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (library_id) REFERENCES libraries(id) ON DELETE CASCADE
@@ -1871,6 +1884,7 @@ CREATE TABLE IF NOT EXISTS annotations (
   page_number INTEGER NOT NULL,
   kind TEXT NOT NULL,
   content TEXT,
+  created_by TEXT,
   created_at TEXT NOT NULL,
   FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
 );
@@ -1884,6 +1898,8 @@ CREATE TABLE IF NOT EXISTS notes (
   position_y REAL,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
+  created_by TEXT,
+  updated_by TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL
@@ -2068,6 +2084,11 @@ CREATE INDEX IF NOT EXISTS idx_graph_view_node_layouts_graph_view_id ON graph_vi
     ensure_column(&conn, "references", "is_manual", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_column(&conn, "documents", "commentary_text", "TEXT")?;
     ensure_column(&conn, "documents", "commentary_updated_at", "TEXT")?;
+    ensure_column(&conn, "documents", "commentary_updated_by", "TEXT")?;
+    ensure_column(&conn, "documents", "created_by", "TEXT")?;
+    ensure_column(&conn, "notes", "created_by", "TEXT")?;
+    ensure_column(&conn, "notes", "updated_by", "TEXT")?;
+    ensure_column(&conn, "annotations", "created_by", "TEXT")?;
     ensure_column(&conn, "documents", "cover_image_path", "TEXT")?;
     ensure_column(&conn, "document_keywords", "score", "REAL")?;
     ensure_column(&conn, "document_keywords", "api_mode", "TEXT NOT NULL DEFAULT 'local'")?;
@@ -2674,7 +2695,7 @@ pub fn list_documents_by_library(
     library_id: String,
 ) -> Result<Vec<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at FROM documents WHERE library_id = ?1 ORDER BY updated_at DESC"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at, created_by, commentary_updated_by FROM documents WHERE library_id = ?1 ORDER BY updated_at DESC"#)?;
     let rows = stmt.query_map(params![library_id], map_document_row)?;
     let mut documents = Vec::new();
     for row in rows {
@@ -2688,7 +2709,7 @@ pub fn list_documents_by_library(
 #[tauri::command]
 pub fn list_all_documents(app: AppHandle) -> Result<Vec<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at FROM documents ORDER BY updated_at DESC"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at, created_by, commentary_updated_by FROM documents ORDER BY updated_at DESC"#)?;
     let rows = stmt.query_map([], map_document_row)?;
     let mut documents = Vec::new();
     for row in rows {
@@ -2702,7 +2723,7 @@ pub fn list_all_documents(app: AppHandle) -> Result<Vec<Document>, AppError> {
 #[tauri::command]
 pub fn get_document_by_id(app: AppHandle, id: String) -> Result<Option<Document>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at FROM documents WHERE id = ?1"#)?;
+    let mut stmt = conn.prepare(r#"SELECT id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at, created_by, commentary_updated_by FROM documents WHERE id = ?1"#)?;
     let doc = stmt.query_row(params![id], map_document_row).optional()?;
     match doc {
         Some(mut document) => {
@@ -2765,6 +2786,8 @@ fn map_document_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Document> {
         cover_image_path: row.get(46)?,
         created_at: row.get(47)?,
         updated_at: row.get(48)?,
+        created_by: row.get(49)?,
+        commentary_updated_by: row.get(50)?,
     })
 }
 
@@ -3410,8 +3433,8 @@ pub fn create_document(app: AppHandle, input: CreateDocumentInput) -> Result<Doc
     let tag_suggestion_status = input.tag_suggestion_status.unwrap_or("pending".into());
     let classification_status = input.classification_status.unwrap_or("pending".into());
     conn.execute(
-        r#"INSERT INTO documents (id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, commentary_text, commentary_updated_at, cover_image_path, created_at, updated_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, 'unread', 0, 0, ?40, ?41, ?42, ?43, ?43)"#,
+        r#"INSERT INTO documents (id, library_id, document_type, title, authors, year, abstract, doi, isbn, publisher, citation_key, source_path, imported_file_path, file_size, file_hash, extracted_text_path, search_text, text_hash, text_extracted_at, text_extraction_status, page_count, has_extracted_text, has_ocr, has_ocr_text, ocr_status, metadata_status, metadata_provenance, metadata_user_edited_fields, indexing_status, tag_suggestions, rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result, classification_text_hash, classification_status, processing_error, processing_updated_at, last_processed_at, reading_stage, rating, favorite, commentary_text, commentary_updated_at, cover_image_path, created_by, commentary_updated_by, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, 'unread', 0, 0, ?40, ?41, ?42, ?43, ?44, ?45, ?45)"#,
         params![
             id,
             input.library_id,
@@ -3455,6 +3478,8 @@ pub fn create_document(app: AppHandle, input: CreateDocumentInput) -> Result<Doc
             input.commentary_text,
             input.commentary_updated_at,
             input.cover_image_path,
+            input.created_by,
+            input.commentary_updated_by,
             now
         ],
     )?;
@@ -3514,8 +3539,9 @@ pub fn update_document_metadata(
           commentary_text = COALESCE(?41, commentary_text),
           commentary_updated_at = COALESCE(?42, commentary_updated_at),
           cover_image_path = COALESCE(?43, cover_image_path),
-          updated_at = ?44
-          WHERE id = ?45"#,
+          commentary_updated_by = COALESCE(?44, commentary_updated_by),
+          updated_at = ?45
+          WHERE id = ?46"#,
         params![
             input.title,
             input.document_type,
@@ -3560,6 +3586,7 @@ pub fn update_document_metadata(
             input.commentary_text,
             input.commentary_updated_at,
             input.cover_image_path,
+            input.commentary_updated_by,
             now,
             id
         ],
@@ -6022,7 +6049,7 @@ pub fn list_annotations_for_document(
     document_id: String,
 ) -> Result<Vec<Annotation>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare("SELECT id, document_id, page_number, kind, content, created_at FROM annotations WHERE document_id = ?1 ORDER BY created_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, document_id, page_number, kind, content, created_at, created_by FROM annotations WHERE document_id = ?1 ORDER BY created_at DESC")?;
     let rows = stmt.query_map(params![document_id], |r| {
         Ok(Annotation {
             id: r.get(0)?,
@@ -6031,6 +6058,7 @@ pub fn list_annotations_for_document(
             kind: r.get(3)?,
             content: r.get(4)?,
             created_at: r.get(5)?,
+            created_by: r.get(6)?,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -6040,7 +6068,7 @@ pub fn list_annotations_for_document(
 pub fn list_all_annotations(app: AppHandle) -> Result<Vec<Annotation>, AppError> {
     let conn = open_db(&app)?;
     let mut stmt = conn.prepare(
-        "SELECT id, document_id, page_number, kind, content, created_at FROM annotations ORDER BY created_at DESC",
+        "SELECT id, document_id, page_number, kind, content, created_at, created_by FROM annotations ORDER BY created_at DESC",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(Annotation {
@@ -6050,6 +6078,7 @@ pub fn list_all_annotations(app: AppHandle) -> Result<Vec<Annotation>, AppError>
             kind: r.get(3)?,
             content: r.get(4)?,
             created_at: r.get(5)?,
+            created_by: r.get(6)?,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -6062,7 +6091,7 @@ pub fn create_annotation(app: AppHandle, input: CreateAnnotationInput) -> Result
     let now = now_iso();
 
     conn.execute(
-        "INSERT INTO annotations (id, document_id, page_number, kind, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO annotations (id, document_id, page_number, kind, content, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             id,
             input.document_id,
@@ -6070,6 +6099,7 @@ pub fn create_annotation(app: AppHandle, input: CreateAnnotationInput) -> Result
             input.kind,
             input.content,
             now,
+            input.created_by,
         ],
     )?;
 
@@ -6079,6 +6109,7 @@ pub fn create_annotation(app: AppHandle, input: CreateAnnotationInput) -> Result
         page_number: input.page_number,
         kind: input.kind,
         content: input.content,
+        created_by: input.created_by,
         created_at: now,
     })
 }
@@ -6102,13 +6133,14 @@ pub fn create_note(app: AppHandle, input: CreateNoteInput) -> Result<Note, AppEr
     let position_y = input.position_y;
     let title = input.title;
     let content = input.content;
+    let created_by = input.created_by;
     let comment_number = match (&document_id, input.comment_number) {
         (_, Some(value)) => Some(value),
         (Some(document_id), None) => Some(next_document_comment_number(&conn, document_id)?),
         (None, None) => None,
     };
     conn.execute(
-        "INSERT INTO notes (id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO notes (id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_by, updated_by, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?11, ?11)",
         params![
             id,
             document_id,
@@ -6119,8 +6151,8 @@ pub fn create_note(app: AppHandle, input: CreateNoteInput) -> Result<Note, AppEr
             position_y,
             title,
             content,
+            created_by,
             now,
-            now
         ],
     )?;
     Ok(Note {
@@ -6133,6 +6165,8 @@ pub fn create_note(app: AppHandle, input: CreateNoteInput) -> Result<Note, AppEr
         position_y,
         title,
         content,
+        created_by: created_by.clone(),
+        updated_by: created_by,
         created_at: now.clone(),
         updated_at: now,
     })
@@ -6155,8 +6189,9 @@ pub fn update_note(
           position_y = COALESCE(?5, position_y),
           title = COALESCE(?6, title),
           content = COALESCE(?7, content),
-          updated_at = ?8
-          WHERE id = ?9"#,
+          updated_by = COALESCE(?8, updated_by),
+          updated_at = ?9
+          WHERE id = ?10"#,
         params![
             input.page_number,
             input.location_hint,
@@ -6165,6 +6200,7 @@ pub fn update_note(
             input.position_y,
             input.title,
             input.content,
+            input.updated_by,
             now,
             id
         ],
@@ -6172,7 +6208,7 @@ pub fn update_note(
 
     let note = conn
         .query_row(
-            "SELECT id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_at, updated_at FROM notes WHERE id = ?1",
+            "SELECT id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_at, updated_at, created_by, updated_by FROM notes WHERE id = ?1",
             params![id],
             |r| {
                 Ok(Note {
@@ -6187,6 +6223,8 @@ pub fn update_note(
                     content: r.get(8)?,
                     created_at: r.get(9)?,
                     updated_at: r.get(10)?,
+                    created_by: r.get(11)?,
+                    updated_by: r.get(12)?,
                 })
             },
         )
@@ -6198,7 +6236,7 @@ pub fn update_note(
 #[tauri::command]
 pub fn list_notes(app: AppHandle) -> Result<Vec<Note>, AppError> {
     let conn = open_db(&app)?;
-    let mut stmt = conn.prepare("SELECT id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_at, updated_at, created_by, updated_by FROM notes ORDER BY updated_at DESC")?;
     let rows = stmt.query_map([], |r| {
         Ok(Note {
             id: r.get(0)?,
@@ -6212,6 +6250,8 @@ pub fn list_notes(app: AppHandle) -> Result<Vec<Note>, AppError> {
             content: r.get(8)?,
             created_at: r.get(9)?,
             updated_at: r.get(10)?,
+            created_by: r.get(11)?,
+            updated_by: r.get(12)?,
         })
     })?;
     Ok(rows.filter_map(Result::ok).collect())

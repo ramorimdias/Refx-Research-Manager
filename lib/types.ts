@@ -178,11 +178,13 @@ export interface Document {
   notesCount: number
   commentaryText?: string
   commentaryUpdatedAt?: Date
+  commentaryUpdatedBy?: string
   coverImagePath?: string
   addedAt: Date
   lastOpenedAt?: Date
   lastReadPage?: number
   createdAt: Date
+  createdBy?: string
   updatedAt: Date
 }
 

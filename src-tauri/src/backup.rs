@@ -459,7 +459,7 @@ fn insert_document(conn: &Connection, document: &Document) -> Result<(), AppErro
           rejected_tag_suggestions, tag_suggestion_text_hash, tag_suggestion_status, classification_result,
           classification_text_hash, classification_status, processing_error, processing_updated_at,
           last_processed_at, reading_stage, rating, favorite, last_opened_at, last_read_page, commentary_text,
-          commentary_updated_at, cover_image_path, created_at, updated_at
+          commentary_updated_at, cover_image_path, created_by, commentary_updated_by, created_at, updated_at
         ) VALUES (
           ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
           ?12, ?13, ?14, ?15, ?16, ?17,
@@ -468,7 +468,7 @@ fn insert_document(conn: &Connection, document: &Document) -> Result<(), AppErro
           ?29, ?30, ?31, ?32,
           ?33, ?34, ?35, ?36,
           ?37, ?38, ?39, ?40, ?41, ?42, ?43,
-          ?44, ?45, ?46, ?47
+          ?44, ?45, ?46, ?47, ?48, ?49
         )"#,
         params![
             document.id,
@@ -516,6 +516,8 @@ fn insert_document(conn: &Connection, document: &Document) -> Result<(), AppErro
             document.commentary_text,
             document.commentary_updated_at,
             document.cover_image_path,
+            document.created_by,
+            document.commentary_updated_by,
             document.created_at,
             document.updated_at,
         ],
@@ -553,7 +555,7 @@ fn insert_tags_for_document(
 
 fn insert_note(conn: &Connection, note: &Note) -> Result<(), AppError> {
     conn.execute(
-        "INSERT INTO notes (id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO notes (id, document_id, page_number, location_hint, comment_number, position_x, position_y, title, content, created_by, updated_by, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             note.id,
             note.document_id,
@@ -564,6 +566,8 @@ fn insert_note(conn: &Connection, note: &Note) -> Result<(), AppError> {
             note.position_y,
             note.title,
             note.content,
+            note.created_by,
+            note.updated_by,
             note.created_at,
             note.updated_at,
         ],
@@ -573,7 +577,7 @@ fn insert_note(conn: &Connection, note: &Note) -> Result<(), AppError> {
 
 fn insert_annotation(conn: &Connection, annotation: &Annotation) -> Result<(), AppError> {
     conn.execute(
-        "INSERT INTO annotations (id, document_id, page_number, kind, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO annotations (id, document_id, page_number, kind, content, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             annotation.id,
             annotation.document_id,
@@ -581,6 +585,7 @@ fn insert_annotation(conn: &Connection, annotation: &Annotation) -> Result<(), A
             annotation.kind,
             annotation.content,
             annotation.created_at,
+            annotation.created_by,
         ],
     )?;
     Ok(())

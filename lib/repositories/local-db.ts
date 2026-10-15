@@ -1,6 +1,7 @@
 'use client'
 
 import { invoke } from '@/lib/tauri/client'
+import { getCurrentActorName } from '@/lib/actor-context'
 import {
   assertRemoteWriteAllowed,
   flushRemoteVaultSync,
@@ -78,7 +79,9 @@ export type DbDocument = {
   lastReadPage?: number
   commentaryText?: string
   commentaryUpdatedAt?: string
+  commentaryUpdatedBy?: string
   coverImagePath?: string
+  createdBy?: string
   createdAt: string
   updatedAt: string
 }
@@ -125,7 +128,9 @@ export type DbCreateDocumentInput = {
   lastProcessedAt?: string
   commentaryText?: string
   commentaryUpdatedAt?: string
+  commentaryUpdatedBy?: string
   coverImagePath?: string
+  createdBy?: string
 }
 
 export type DbMergeDocumentsInput = {
@@ -176,6 +181,7 @@ export type DbUpdateDocumentMetadataInput = {
   lastReadPage?: number
   commentaryText?: string
   commentaryUpdatedAt?: string
+  commentaryUpdatedBy?: string
   coverImagePath?: string
 }
 
@@ -238,6 +244,8 @@ export type DbNote = {
   positionY?: number
   title: string
   content: string
+  createdBy?: string
+  updatedBy?: string
   createdAt: string
   updatedAt: string
 }
@@ -248,6 +256,7 @@ export type DbAnnotation = {
   pageNumber: number
   kind: string
   content?: string
+  createdBy?: string
   createdAt: string
 }
 
@@ -519,6 +528,10 @@ type InvokeWriteOptions = {
   }
 }
 
+function getActivityActorName() {
+  return getCurrentActorName() ?? ''
+}
+
 function applyWriteSyncIntent(options?: InvokeWriteOptions) {
   const priority = options?.priority ?? 'high'
   const domains = options?.domains ?? { snapshotTablesDirty: true }
@@ -575,7 +588,9 @@ export async function getDocumentById(id: string) {
 }
 
 export async function createDocument(input: DbCreateDocumentInput) {
-  return invokeWrite<DbDocument>('create_document', { input }, {
+  return invokeWrite<DbDocument>('create_document', {
+    input: { ...input, createdBy: getActivityActorName() },
+  }, {
     priority: 'high',
     domains: {
       snapshotTablesDirty: true,
@@ -587,7 +602,10 @@ export async function createDocument(input: DbCreateDocumentInput) {
 }
 
 export async function updateDocumentMetadata(id: string, input: DbUpdateDocumentMetadataInput) {
-  const changedKeys = Object.entries(input)
+  const updateInput = input.commentaryText !== undefined
+    ? { ...input, commentaryUpdatedBy: getActivityActorName() }
+    : input
+  const changedKeys = Object.entries(updateInput)
     .filter(([, value]) => value !== undefined)
     .map(([key]) => key)
   const isReadProgressOnly = (
@@ -598,7 +616,7 @@ export async function updateDocumentMetadata(id: string, input: DbUpdateDocument
   const remoteStatus = getRemoteVaultStatusSnapshot()
   if (isReadProgressOnly && remoteStatus.enabled && !remoteStatus.isWritable) {
     if (getRemoteVaultSyncPhaseSnapshot() !== 'idle') return null
-    return invoke<DbDocument | null>('update_document_metadata', { id, input })
+    return invoke<DbDocument | null>('update_document_metadata', { id, input: updateInput })
   }
 
   const isMediumPriority = changedKeys.some((key) => [
@@ -633,7 +651,7 @@ export async function updateDocumentMetadata(id: string, input: DbUpdateDocument
 
   return invokeWrite<DbDocument | null>(
     'update_document_metadata',
-    { id, input },
+    { id, input: updateInput },
     isLocalMaterializationOnly
       ? { priority: 'low', domains: {} }
       : {
@@ -706,7 +724,9 @@ export async function listAllAnnotations() {
 }
 
 export async function createAnnotation(input: DbCreateAnnotationInput) {
-  return invokeWrite<DbAnnotation>('create_annotation', { input })
+  return invokeWrite<DbAnnotation>('create_annotation', {
+    input: { ...input, createdBy: getActivityActorName() },
+  })
 }
 
 export async function deleteAnnotation(id: string) {
@@ -850,7 +870,9 @@ export async function createNote(input: {
   title: string
   content: string
 }) {
-  return invokeWrite<DbNote>('create_note', { input })
+  return invokeWrite<DbNote>('create_note', {
+    input: { ...input, createdBy: getActivityActorName() },
+  })
 }
 
 export async function updateNote(id: string, input: {
@@ -862,7 +884,10 @@ export async function updateNote(id: string, input: {
   title?: string
   content?: string
 }) {
-  return invokeWrite<DbNote | null>('update_note', { id, input })
+  return invokeWrite<DbNote | null>('update_note', {
+    id,
+    input: { ...input, updatedBy: getActivityActorName() },
+  })
 }
 
 export async function listNotes() {
